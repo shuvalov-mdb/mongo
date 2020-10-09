@@ -48,6 +48,8 @@
 #include "mongo/s/grid.h"
 #include "mongo/util/str.h"
 
+#include "mongo/util/stacktrace.h"
+
 namespace mongo {
 
 namespace {
@@ -88,7 +90,10 @@ ShardRegistry::ShardRegistry(std::unique_ptr<ShardFactory> shardFactory,
 }
 
 ShardRegistry::~ShardRegistry() {
+    std::cout << "!!!!!!! Delete ShardRegistry " << std::endl;
+    printStackTrace();
     shutdown();
+    std::cout << "!!!!!!! Delete ShardRegistry complete" << std::endl;
 }
 
 void ShardRegistry::init(ServiceContext* service) {

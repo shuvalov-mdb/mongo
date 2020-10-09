@@ -38,6 +38,8 @@
 #include "mongo/client/remote_command_targeter_factory.h"
 #include "mongo/s/client/shard.h"
 
+#include "mongo/util/stacktrace.h"
+
 namespace mongo {
 
 /**
@@ -53,7 +55,10 @@ public:
     using BuildersMap = std::map<ConnectionString::ConnectionType, BuilderCallable>;
 
     ShardFactory(BuildersMap&&, std::unique_ptr<RemoteCommandTargeterFactory>);
-    ~ShardFactory() = default;
+    ~ShardFactory() {
+        std::cout << "!!!!!!! Delete ShardFactory " << std::endl;
+        printStackTrace();
+    }
 
     /**
      * Deprecated. Creates a unique_ptr with a new instance of a Shard with the provided shardId

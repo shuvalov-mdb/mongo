@@ -12,6 +12,11 @@ TestData.skipCheckingUUIDsConsistentAcrossCluster = true;
 load('jstests/sharding/migration_coordinator_failover_include.js');
 load('jstests/replsets/rslib.js');
 
+function sleepFor( sleepDuration ){
+    var now = new Date().getTime();
+    while(new Date().getTime() < now + sleepDuration){ /* do nothing */ } 
+}
+
 const dbName = "test";
 
 var st = new ShardingTest({shards: 2, rs: {nodes: 2}});
@@ -101,5 +106,8 @@ runMoveChunkMakeDonorStepDownAfterFailpoint(st,
                                             true /* shouldMakeMigrationFailToCommitOnConfig */,
                                             ErrorCodes.StaleEpoch);
 
+sleepFor(3000);
 st.stop();
+sleepFor(10000);
+
 })();

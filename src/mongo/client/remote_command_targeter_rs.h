@@ -35,6 +35,8 @@
 
 #include "mongo/client/remote_command_targeter.h"
 
+#include "mongo/util/stacktrace.h"
+
 namespace mongo {
 
 class ReplicaSetMonitor;
@@ -50,6 +52,11 @@ public:
      * and the seed hosts must match.
      */
     RemoteCommandTargeterRS(const std::string& rsName, const std::vector<HostAndPort>& seedHosts);
+
+    ~RemoteCommandTargeterRS() override {
+        std::cout << "!!!!!!! RemoteCommandTargeterRS deleted for " << _rsName << std::endl;
+        printStackTrace();
+    }
 
     ConnectionString connectionString() override;
 

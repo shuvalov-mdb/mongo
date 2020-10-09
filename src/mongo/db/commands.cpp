@@ -65,6 +65,8 @@
 #include "mongo/util/invariant.h"
 #include "mongo/util/str.h"
 
+#include "mongo/util/stacktrace.h"
+
 namespace mongo {
 
 using logv2::LogComponent;
@@ -836,7 +838,10 @@ private:
     const std::string _dbName;
 };
 
-Command::~Command() = default;
+Command::~Command() {
+    std::cout << "!!!!!!! Delete Command " << std::endl;
+    printStackTrace();
+}
 
 void Command::snipForLogging(mutablebson::Document* cmdObj) const {
     StringData sensitiveField = sensitiveFieldName();

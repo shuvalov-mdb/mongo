@@ -44,6 +44,9 @@
 #include "mongo/util/net/hostandport.h"
 #include "mongo/util/time_support.h"
 
+#include "mongo/util/stacktrace.h"
+
+
 namespace mongo {
 
 class ScanningReplicaSetMonitor : public ReplicaSetMonitor {

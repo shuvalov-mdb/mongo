@@ -50,6 +50,9 @@
 #include "mongo/util/net/hostandport.h"
 #include "mongo/util/time_support.h"
 
+#include "mongo/util/stacktrace.h"
+
+
 namespace mongo {
 
 class BSONObj;
@@ -70,11 +73,17 @@ class StreamableReplicaSetMonitor
 
     StreamableReplicaSetMonitor(const ReplicaSetMonitor&) = delete;
     StreamableReplicaSetMonitor& operator=(const ReplicaSetMonitor&) = delete;
+
+public:
     StreamableReplicaSetMonitor(const MongoURI& uri,
                                 std::shared_ptr<executor::TaskExecutor> executor,
                                 std::shared_ptr<executor::EgressTagCloser> connectionManager);
 
-public:
+    ~StreamableReplicaSetMonitor() override {
+        std::cout << "!!!!! Delete StreamableReplicaSetMonitor " << std::endl;
+        printStackTrace();
+    }
+
     class Refresher;
 
     static constexpr auto kExpeditedRefreshPeriod = Milliseconds(500);

@@ -201,6 +201,8 @@ void ScanningReplicaSetMonitor::drop() {
 }
 
 ScanningReplicaSetMonitor::~ScanningReplicaSetMonitor() {
+    std::cout << "!!!!!!! Delete ScanningReplicaSetMonitor " << std::endl;
+    printStackTrace();
     drop();
 }
 
