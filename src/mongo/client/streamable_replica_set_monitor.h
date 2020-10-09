@@ -70,16 +70,15 @@ class StreamableReplicaSetMonitor
 
     StreamableReplicaSetMonitor(const ReplicaSetMonitor&) = delete;
     StreamableReplicaSetMonitor& operator=(const ReplicaSetMonitor&) = delete;
+    StreamableReplicaSetMonitor(const MongoURI& uri,
+                                std::shared_ptr<executor::TaskExecutor> executor,
+                                std::shared_ptr<executor::EgressTagCloser> connectionManager);
 
 public:
     class Refresher;
 
     static constexpr auto kExpeditedRefreshPeriod = Milliseconds(500);
     static constexpr auto kCheckTimeout = Seconds(5);
-
-    StreamableReplicaSetMonitor(const MongoURI& uri,
-                                std::shared_ptr<executor::TaskExecutor> executor,
-                                std::shared_ptr<executor::EgressTagCloser> connectionManager);
 
     void init();
 

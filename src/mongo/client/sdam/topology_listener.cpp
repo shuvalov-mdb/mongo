@@ -32,17 +32,21 @@ namespace mongo::sdam {
 
 void TopologyEventsPublisher::registerListener(TopologyListenerPtr listener) {
     stdx::lock_guard lock(_mutex);
-    _listeners.push_back(listener);
+    if (std::find_if(_listeners.begin(), _listeners.end(), [](const TopologyListenerPtr& ptr) {
+            return ptr.lock() == listener.lock();
+        }) == std::end(_listeners)) {
+        _listeners.push_back(listener);
+    }
 }
 
 void TopologyEventsPublisher::removeListener(TopologyListenerPtr listener) {
     stdx::lock_guard lock(_mutex);
-    for (auto it = _listeners.begin(); it != _listeners.end(); ++it) {
-        if (it->lock() == listener.lock()) {
-            _listeners.erase(it);
-            break;
-        }
-    }
+    _listeners.erase(std::remove_if(_listeners.begin(),
+                                    _listeners.end(),
+                                    [](const TopologyListenerPtr& ptr) {
+                                        return ptr.lock() == listener.lock();
+                                    }),
+                     _listeners.end());
 }
 
 void TopologyEventsPublisher::close() {
@@ -175,10 +179,24 @@ void TopologyEventsPublisher::_nextDelivery() {
         if (_isClosed) {
             return;
         }
+        bool has_empty_elements = false;
         std::transform(_listeners.begin(),
                        _listeners.end(),
                        std::back_inserter(listeners),
-                       [](const TopologyListenerPtr& src) { return src.lock(); });
+                       [&has_empty_elements](const TopologyListenerPtr& src) {
+                           auto shared = src.lock();
+                           if (!shared) {
+                               has_empty_elements = true;
+                           }
+                           return shared;
+                       });
+        if (has_empty_elements) {
+            // Purge empty elements.
+            _listeners.erase(std::remove_if(_listeners.begin(),
+                                            _listeners.end(),
+                                            [](const TopologyListenerPtr& ptr) { return !ptr; }),
+                             _listeners.end());
+        }
     }
 
     // send to the listeners outside of the lock.
