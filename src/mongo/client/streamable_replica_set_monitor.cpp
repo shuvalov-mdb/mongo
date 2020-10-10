@@ -192,7 +192,7 @@ void StreamableReplicaSetMonitor::init() {
     _topologyManager = std::make_unique<TopologyManager>(
         _sdamConfig, getGlobalServiceContext()->getPreciseClockSource(), _eventsPublisher);
 
-    _eventsPublisher->registerListener(shared_from_this());
+    _eventsPublisher->registerListener(weak_from_this());
 
     _pingMonitor = std::make_unique<ServerPingMonitor>(
         _uri, _eventsPublisher.get(), _sdamConfig.getHeartBeatFrequency(), _executor);
