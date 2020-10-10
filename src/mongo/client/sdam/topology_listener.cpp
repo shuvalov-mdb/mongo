@@ -32,9 +32,10 @@ namespace mongo::sdam {
 
 void TopologyEventsPublisher::registerListener(TopologyListenerPtr listener) {
     stdx::lock_guard lock(_mutex);
-    if (std::find_if(_listeners.begin(), _listeners.end(), [&listener](const TopologyListenerPtr& ptr) {
-            return ptr.lock() == listener.lock();
-        }) == std::end(_listeners)) {
+    if (std::find_if(
+            _listeners.begin(), _listeners.end(), [&listener](const TopologyListenerPtr& ptr) {
+                return ptr.lock() == listener.lock();
+            }) == std::end(_listeners)) {
         _listeners.push_back(listener);
     }
 }
@@ -192,10 +193,11 @@ void TopologyEventsPublisher::_nextDelivery() {
                        });
         if (has_empty_elements) {
             // Purge empty elements.
-            _listeners.erase(std::remove_if(_listeners.begin(),
-                                            _listeners.end(),
-                                            [](const TopologyListenerPtr& ptr) { return !ptr.lock(); }),
-                             _listeners.end());
+            _listeners.erase(
+                std::remove_if(_listeners.begin(),
+                               _listeners.end(),
+                               [](const TopologyListenerPtr& ptr) { return !ptr.lock(); }),
+                _listeners.end());
         }
     }
 
