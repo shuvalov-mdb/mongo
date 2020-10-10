@@ -188,6 +188,9 @@ void StreamableReplicaSetMonitor::init() {
                 "uri"_attr = _uri,
                 "config"_attr = _sdamConfig.toBson());
 
+    invariant(shared_from_this().use_count() > 1,
+              "StreamableReplicaSetMonitor::init() is invoked when there is no owner");
+
     _eventsPublisher = std::make_shared<sdam::TopologyEventsPublisher>(_executor);
     _topologyManager = std::make_unique<TopologyManager>(
         _sdamConfig, getGlobalServiceContext()->getPreciseClockSource(), _eventsPublisher);

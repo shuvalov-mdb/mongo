@@ -26,26 +26,41 @@
  *    exception statement from all source files in the program, then also delete
  *    it in the license file.
  */
+#define MONGO_LOGV2_DEFAULT_COMPONENT ::mongo::logv2::LogComponent::kDefault
+
 #include "mongo/client/sdam/topology_listener.h"
+#include "mongo/logv2/log.h"
 
 namespace mongo::sdam {
 
 void TopologyEventsPublisher::registerListener(TopologyListenerPtr listener) {
+    auto locked_listener = listener.lock();
+    if (!locked_listener) {
+        LOGV2_WARNING(5148001, "Trying to register an empty listener with TopologyEventsPublisher");
+        return;
+    }
     stdx::lock_guard lock(_mutex);
-    if (std::find_if(
-            _listeners.begin(), _listeners.end(), [&listener](const TopologyListenerPtr& ptr) {
-                return ptr.lock() == listener.lock();
-            }) == std::end(_listeners)) {
+    if (std::find_if(_listeners.begin(),
+                     _listeners.end(),
+                     [&locked_listener](const TopologyListenerPtr& ptr) {
+                         return ptr.lock() == locked_listener;
+                     }) == std::end(_listeners)) {
         _listeners.push_back(listener);
     }
 }
 
 void TopologyEventsPublisher::removeListener(TopologyListenerPtr listener) {
+    auto locked_listener = listener.lock();
+    if (!locked_listener) {
+        LOGV2_WARNING(5148002,
+                      "Trying to unregister an empty listener from TopologyEventsPublisher");
+        return;
+    }
     stdx::lock_guard lock(_mutex);
     _listeners.erase(std::remove_if(_listeners.begin(),
                                     _listeners.end(),
-                                    [&listener](const TopologyListenerPtr& ptr) {
-                                        return ptr.lock() == listener.lock();
+                                    [&locked_listener](const TopologyListenerPtr& ptr) {
+                                        return ptr.lock() == locked_listener;
                                     }),
                      _listeners.end());
 }
