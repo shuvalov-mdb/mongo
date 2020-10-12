@@ -77,6 +77,7 @@ void reportStatus(OperationContext* opCtx,
         getHostFQDNs(hostName, HostnameCanonicalizationMode::kForwardAndReverse));
 
     try {
+        std::cout << "reportStatus" << std::endl;
         uassertStatusOK(Grid::get(opCtx)->catalogClient()->updateConfigDocument(
             opCtx,
             MongosType::ConfigNS,
