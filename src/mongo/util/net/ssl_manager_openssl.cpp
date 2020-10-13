@@ -1118,7 +1118,7 @@ class SSLManagerOpenSSL : public SSLManagerInterface,
                           public std::enable_shared_from_this<SSLManagerOpenSSL> {
 public:
     explicit SSLManagerOpenSSL(const SSLParams& params, bool isServer);
-    ~SSLManagerOpenSSL() {
+    ~SSLManagerOpenSSL() override {
         stopJobs();
     }
 
@@ -1128,43 +1128,43 @@ public:
      */
     Status initSSLContext(SSL_CTX* context,
                           const SSLParams& params,
-                          ConnectionDirection direction) final;
+                          ConnectionDirection direction) override final;
 
-    SSLConnectionInterface* connect(Socket* socket) final;
+    SSLConnectionInterface* connect(Socket* socket) override final;
 
-    SSLConnectionInterface* accept(Socket* socket, const char* initialBytes, int len) final;
+    SSLConnectionInterface* accept(Socket* socket, const char* initialBytes, int len) override final;
 
     SSLPeerInfo parseAndValidatePeerCertificateDeprecated(const SSLConnectionInterface* conn,
                                                           const std::string& remoteHost,
-                                                          const HostAndPort& hostForLogging) final;
+                                                          const HostAndPort& hostForLogging) override final;
 
     Future<SSLPeerInfo> parseAndValidatePeerCertificate(SSL* conn,
                                                         boost::optional<std::string> sni,
                                                         const std::string& remoteHost,
                                                         const HostAndPort& hostForLogging,
-                                                        const ExecutorPtr& reactor) final;
+                                                        const ExecutorPtr& reactor) override final;
 
     /**
      * Sets the OCSP Response to be stapled to the TLS Connection. Sets the _ocspStaplingAnchor
      * object in the class.
      */
-    Status stapleOCSPResponse(SSL_CTX* context, bool asyncOCSPStaple) final;
+    Status stapleOCSPResponse(SSL_CTX* context, bool asyncOCSPStaple) override final;
 
-    void stopJobs() final;
+    void stopJobs() override final;
 
-    const SSLConfiguration& getSSLConfiguration() const final {
+    const SSLConfiguration& getSSLConfiguration() override const final {
         return _sslConfiguration;
     }
 
-    int SSL_read(SSLConnectionInterface* conn, void* buf, int num) final;
+    int SSL_read(SSLConnectionInterface* conn, void* buf, int num) override final;
 
-    int SSL_write(SSLConnectionInterface* conn, const void* buf, int num) final;
+    int SSL_write(SSLConnectionInterface* conn, const void* buf, int num) override final;
 
-    int SSL_shutdown(SSLConnectionInterface* conn) final;
+    int SSL_shutdown(SSLConnectionInterface* conn) override final;
 
     Future<void> ocspClientVerification(SSL* ssl, const ExecutorPtr& reactor);
 
-    SSLInformationToLog getSSLInformationToLog() const final;
+    SSLInformationToLog getSSLInformationToLog() override const final;
 
     const std::shared_ptr<OCSPStaplingContext> getOcspStaplingContext() {
         stdx::lock_guard<mongo::Mutex> guard(_sharedResponseMutex);
@@ -1305,6 +1305,8 @@ private:
 
     /** @return true if was successful, otherwise false */
     bool _setupPEM(SSL_CTX* context, const std::string& keyFile, PasswordFetcher* password);
+
+    bool _setupPEMFromMemory(SSL_CTX* context, const std::string& keyFile, PasswordFetcher* password);
 
     /*
      * Set up an SSL context for certificate validation by loading a CA
@@ -2271,6 +2273,7 @@ bool SSLManagerOpenSSL::_parseAndValidateCertificate(const std::string& keyFile,
 bool SSLManagerOpenSSL::_setupPEM(SSL_CTX* context,
                                   const std::string& keyFile,
                                   PasswordFetcher* password) {
+    std::cout << "!!!!! _setupPEM " << keyFile << std::endl;
     if (SSL_CTX_use_certificate_chain_file(context, keyFile.c_str()) != 1) {
         LOGV2_ERROR(23248,
                     "cannot read certificate file: {keyFile} {error}",

@@ -32,6 +32,7 @@
 #include "mongo/platform/basic.h"
 
 #include "mongo/util/net/ssl_manager.h"
+#include "mongo/util/net/ssl_options.h"
 
 #include "mongo/config.h"
 #include "mongo/logv2/log.h"
@@ -413,6 +414,20 @@ TEST(SSLManager, BadDNParsing) {
         auto swDN = parseDN(test);
         ASSERT_NOT_OK(swDN.getStatus());
     }
+}
+
+TEST(SSLManager, InitContextFromFile) {
+    SSLParams params;
+    params.sslMode = "requireSSL";
+    sslPEMKeyFile: dbPath + "/server-test.pem",
+    sslCAFile: dbPath + "/ca-test.pem",
+    sslClusterFile: dbPath + "/client-test.pem",
+    sslAllowInvalidHostnames: "",
+    sslDisabledProtocols: 'none',
+
+    std::shared_ptr<SSLManagerInterface> manager =
+        SSLManagerInterface::create(params, isSSLServer);
+
 }
 
 }  // namespace
