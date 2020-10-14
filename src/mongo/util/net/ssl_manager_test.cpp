@@ -29,8 +29,12 @@
 
 #define MONGO_LOGV2_DEFAULT_COMPONENT ::mongo::logv2::LogComponent::kTest
 
+#include <fstream>
+
 #include "mongo/platform/basic.h"
 
+#include "mongo/transport/service_entry_point.h"
+#include "mongo/transport/transport_layer_asio.h"
 #include "mongo/util/net/ssl_manager.h"
 #include "mongo/util/net/ssl_options.h"
 
@@ -45,6 +49,69 @@
 
 namespace mongo {
 namespace {
+
+// Test implementation needed by ASIO transport.
+class ServiceEntryPointUtil : public ServiceEntryPoint {
+public:
+    void startSession(transport::SessionHandle session) override {
+        stdx::unique_lock<Latch> lk(_mutex);
+        _sessions.push_back(std::move(session));
+        LOGV2(23032, "started session");
+        _cv.notify_one();
+    }
+
+    void endAllSessions(transport::Session::TagMask tags) override {
+        LOGV2(23033, "end all sessions");
+        std::vector<transport::SessionHandle> old_sessions;
+        {
+            stdx::unique_lock<Latch> lock(_mutex);
+            old_sessions.swap(_sessions);
+        }
+        old_sessions.clear();
+    }
+
+    Status start() override {
+        return Status::OK();
+    }
+
+    bool shutdown(Milliseconds timeout) override {
+        return true;
+    }
+
+    void appendStats(BSONObjBuilder*) const override {}
+
+    size_t numOpenSessions() const override {
+        stdx::unique_lock<Latch> lock(_mutex);
+        return _sessions.size();
+    }
+
+    Future<DbResponse> handleRequest(OperationContext* opCtx,
+                                     const Message& request) noexcept override {
+        MONGO_UNREACHABLE;
+    }
+
+    void setTransportLayer(transport::TransportLayer* tl) {
+        _transport = tl;
+    }
+
+    void waitForConnect() {
+        stdx::unique_lock<Latch> lock(_mutex);
+        _cv.wait(lock, [&] { return !_sessions.empty(); });
+    }
+
+private:
+    mutable Mutex _mutex = MONGO_MAKE_LATCH("::_mutex");
+    stdx::condition_variable _cv;
+    std::vector<transport::SessionHandle> _sessions;
+    transport::TransportLayer* _transport = nullptr;
+};
+
+std::string LoadFile(const std::string& name) {
+    std::ifstream input(name);
+    std::string str((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
+    return str;
+}
+
 TEST(SSLManager, matchHostname) {
     enum Expected : bool { match = true, mismatch = false };
     const struct {
@@ -416,19 +483,88 @@ TEST(SSLManager, BadDNParsing) {
     }
 }
 
-TEST(SSLManager, InitContextFromFile) {
+TEST(SSLManager, InitContextFromFileServer) {
     SSLParams params;
-    params.sslMode = "requireSSL";
-    sslPEMKeyFile: dbPath + "/server-test.pem",
-    sslCAFile: dbPath + "/ca-test.pem",
-    sslClusterFile: dbPath + "/client-test.pem",
-    sslAllowInvalidHostnames: "",
-    sslDisabledProtocols: 'none',
+    params.sslMode.store(::mongo::sslGlobalParams.SSLMode_requireSSL);
+    // Server is required to have the sslPEMKeyFile.
+    params.sslPEMKeyFile = "jstests/libs/server.pem";
+    params.sslCAFile = "jstests/libs/ca.pem";
+    params.sslClusterFile = "jstests/libs/client.pem";
 
     std::shared_ptr<SSLManagerInterface> manager =
-        SSLManagerInterface::create(params, isSSLServer);
+        SSLManagerInterface::create(params, true /* isSSLServer */);
 
+    ServiceEntryPointUtil sepu;
+
+    auto options = [] {
+        ServerGlobalParams params;
+        params.noUnixSocket = true;
+        transport::TransportLayerASIO::Options opts(&params);
+        return opts;
+    }();
+    transport::TransportLayerASIO tla(options, &sepu);
+    uassertStatusOK(tla.rotateCertificates(manager, false /* asyncOCSPStaple */));
 }
+
+TEST(SSLManager, InitContextFromFileServerShouldFail) {
+    SSLParams params;
+    params.sslMode.store(::mongo::sslGlobalParams.SSLMode_requireSSL);
+    // Server is required to have the sslPEMKeyFile.
+    // We force the initialization to fail by omitting this param.
+    params.sslCAFile = "jstests/libs/ca.pem";
+    params.sslClusterFile = "jstests/libs/client.pem";
+
+    try {
+        std::shared_ptr<SSLManagerInterface> manager =
+            SSLManagerInterface::create(params, true /* isSSLServer */);
+    } catch (...) {
+        ASSERT_EQ(16942, exceptionToStatus().code());
+    }
+}
+
+TEST(SSLManager, InitContextFromFileClient) {
+    SSLParams params;
+    params.sslMode.store(::mongo::sslGlobalParams.SSLMode_requireSSL);
+    // Client doesn't need params.sslPEMKeyFile.
+    params.sslCAFile = "jstests/libs/ca.pem";
+    params.sslClusterFile = "jstests/libs/client.pem";
+
+    std::shared_ptr<SSLManagerInterface> manager =
+        SSLManagerInterface::create(params, false /* isSSLServer */);
+
+    ServiceEntryPointUtil sepu;
+
+    auto options = [] {
+        ServerGlobalParams params;
+        params.noUnixSocket = true;
+        transport::TransportLayerASIO::Options opts(&params);
+        return opts;
+    }();
+    transport::TransportLayerASIO tla(options, &sepu);
+    uassertStatusOK(tla.rotateCertificates(manager, false /* asyncOCSPStaple */));
+}
+
+// TEST(SSLManager, InitContextFromMemory) {
+//     SSLParams params;
+//     params.sslMode.store(::mongo::sslGlobalParams.SSLMode_requireSSL);
+//     params.sslPEMKeyFile = "jstests/libs/server.pem";
+//     params.sslCAFile = "jstests/libs/ca.pem";
+//     params.sslClusterPEMKeyPayload = LoadFile("jstests/libs/client.pem");
+
+//     std::shared_ptr<SSLManagerInterface> manager =
+//         SSLManagerInterface::create(params, true /* isSSLServer */);
+
+//     ServiceEntryPointUtil sepu;
+
+//     auto options = [] {
+//         ServerGlobalParams params;
+//         params.noUnixSocket = true;
+//         transport::TransportLayerASIO::Options opts(&params);
+//         return opts;
+//     }();
+//     transport::TransportLayerASIO tla(options, &sepu);
+//     uassertStatusOK(tla.rotateCertificates(manager, false /* asyncOCSPStaple */));
+// }
 
 }  // namespace
 }  // namespace mongo

@@ -1132,11 +1132,14 @@ public:
 
     SSLConnectionInterface* connect(Socket* socket) override final;
 
-    SSLConnectionInterface* accept(Socket* socket, const char* initialBytes, int len) override final;
+    SSLConnectionInterface* accept(Socket* socket,
+                                   const char* initialBytes,
+                                   int len) override final;
 
-    SSLPeerInfo parseAndValidatePeerCertificateDeprecated(const SSLConnectionInterface* conn,
-                                                          const std::string& remoteHost,
-                                                          const HostAndPort& hostForLogging) override final;
+    SSLPeerInfo parseAndValidatePeerCertificateDeprecated(
+        const SSLConnectionInterface* conn,
+        const std::string& remoteHost,
+        const HostAndPort& hostForLogging) override final;
 
     Future<SSLPeerInfo> parseAndValidatePeerCertificate(SSL* conn,
                                                         boost::optional<std::string> sni,
@@ -1152,7 +1155,7 @@ public:
 
     void stopJobs() override final;
 
-    const SSLConfiguration& getSSLConfiguration() override const final {
+    const SSLConfiguration& getSSLConfiguration() const override final {
         return _sslConfiguration;
     }
 
@@ -1164,7 +1167,7 @@ public:
 
     Future<void> ocspClientVerification(SSL* ssl, const ExecutorPtr& reactor);
 
-    SSLInformationToLog getSSLInformationToLog() override const final;
+    SSLInformationToLog getSSLInformationToLog() const override final;
 
     const std::shared_ptr<OCSPStaplingContext> getOcspStaplingContext() {
         stdx::lock_guard<mongo::Mutex> guard(_sharedResponseMutex);
@@ -1306,7 +1309,17 @@ private:
     /** @return true if was successful, otherwise false */
     bool _setupPEM(SSL_CTX* context, const std::string& keyFile, PasswordFetcher* password);
 
-    bool _setupPEMFromMemory(SSL_CTX* context, const std::string& keyFile, PasswordFetcher* password);
+    /**
+     * Setup PEM from BIO, which could be file or memory input abstraction.
+     * @param inBio input BIO, where smart pointer is created with a custom deleter to call
+     * 'BIO_free()'.
+     * @param log_msg additional log message to print in case of error.
+     * @return true if was successful, otherwise false
+     */
+    bool _setupPEMFromBIO(SSL_CTX* context,
+                          std::unique_ptr<BIO, std::function<void(BIO*)>> inBio,
+                          PasswordFetcher* password,
+                          std::string log_msg);
 
     /*
      * Set up an SSL context for certificate validation by loading a CA
@@ -2273,7 +2286,6 @@ bool SSLManagerOpenSSL::_parseAndValidateCertificate(const std::string& keyFile,
 bool SSLManagerOpenSSL::_setupPEM(SSL_CTX* context,
                                   const std::string& keyFile,
                                   PasswordFetcher* password) {
-    std::cout << "!!!!! _setupPEM " << keyFile << std::endl;
     if (SSL_CTX_use_certificate_chain_file(context, keyFile.c_str()) != 1) {
         LOGV2_ERROR(23248,
                     "cannot read certificate file: {keyFile} {error}",
@@ -2283,7 +2295,9 @@ bool SSLManagerOpenSSL::_setupPEM(SSL_CTX* context,
         return false;
     }
 
-    BIO* inBio = BIO_new(BIO_s_file());
+    std::unique_ptr<BIO, std::function<void(BIO*)>> inBio(BIO_new(BIO_s_file()), [](BIO* bio) {
+        BIO_free(bio);  // Custom deleter is required for BIO.
+    });
     if (!inBio) {
         LOGV2_ERROR(23249,
                     "failed to allocate BIO object: {error}",
@@ -2291,9 +2305,8 @@ bool SSLManagerOpenSSL::_setupPEM(SSL_CTX* context,
                     "error"_attr = getSSLErrorMessage(ERR_get_error()));
         return false;
     }
-    const auto bioGuard = makeGuard([&inBio]() { BIO_free(inBio); });
 
-    if (BIO_read_filename(inBio, keyFile.c_str()) <= 0) {
+    if (BIO_read_filename(inBio.get(), keyFile.c_str()) <= 0) {
         LOGV2_ERROR(23250,
                     "cannot read PEM key file: {keyFile} {error}",
                     "Cannot read PEM key file",
@@ -2301,16 +2314,24 @@ bool SSLManagerOpenSSL::_setupPEM(SSL_CTX* context,
                     "error"_attr = getSSLErrorMessage(ERR_get_error()));
         return false;
     }
+    return _setupPEMFromBIO(
+        context, std::move(inBio), password, std::move(std::string("keyFile ").append(keyFile)));
+}
 
+bool SSLManagerOpenSSL::_setupPEMFromBIO(SSL_CTX* context,
+                                         std::unique_ptr<BIO, std::function<void(BIO*)>> inBio,
+                                         PasswordFetcher* password,
+                                         std::string log_msg) {
+    std::cout << "!!!!! _setupPEM from bio  " << log_msg << std::endl;
     // Obtain the private key, using our callback to acquire a decryption password if necessary.
     decltype(&SSLManagerOpenSSL::password_cb) password_cb = &SSLManagerOpenSSL::password_cb;
     void* userdata = static_cast<void*>(password);
-    EVP_PKEY* privateKey = PEM_read_bio_PrivateKey(inBio, nullptr, password_cb, userdata);
+    EVP_PKEY* privateKey = PEM_read_bio_PrivateKey(inBio.get(), nullptr, password_cb, userdata);
     if (!privateKey) {
         LOGV2_ERROR(23251,
                     "cannot read PEM key file: {keyFile} {error}",
                     "Cannot read PEM key file",
-                    "keyFile"_attr = keyFile,
+                    "msg"_attr = log_msg,
                     "error"_attr = getSSLErrorMessage(ERR_get_error()));
         return false;
     }
@@ -2320,7 +2341,7 @@ bool SSLManagerOpenSSL::_setupPEM(SSL_CTX* context,
         LOGV2_ERROR(23252,
                     "cannot use PEM key file: {keyFile} {error}",
                     "Cannot use PEM key file",
-                    "keyFile"_attr = keyFile,
+                    "msg"_attr = log_msg,
                     "error"_attr = getSSLErrorMessage(ERR_get_error()));
         return false;
     }
