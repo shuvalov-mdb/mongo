@@ -459,7 +459,7 @@ Status ReplicationCoordinatorEmbedded::processHeartbeatV1(const ReplSetHeartbeat
 }
 
 long long ReplicationCoordinatorEmbedded::getTerm() const {
-    UASSERT_NOT_IMPLEMENTED;
+    return 3;  // arbitrary constant number
 }
 
 Status ReplicationCoordinatorEmbedded::updateTerm(OperationContext*, long long) {
@@ -560,7 +560,7 @@ BSONObj ReplicationCoordinatorEmbedded::runCmdOnPrimaryAndAwaitResponse(
     MONGO_UNREACHABLE;
 }
 
-void ReplicationCoordinatorEmbedded::restartScheduledHeartbeats_forTest() {
+void ReplicationCoordinatorEmbedded::restartHeartbeats_forTest() {
     MONGO_UNREACHABLE;
 }
 

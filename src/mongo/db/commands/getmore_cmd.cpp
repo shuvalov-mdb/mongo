@@ -352,6 +352,8 @@ public:
             if (state == PlanExecutor::IS_EOF) {
                 // The latest oplog timestamp may advance even when there are no results. Ensure
                 // that we have the latest postBatchResumeToken produced by the plan executor.
+                // The getMore command does not accept a batchSize of 0, so empty batches are
+                // always caused by hitting EOF and do not need to be handled separately.
                 nextBatch->setPostBatchResumeToken(exec->getPostBatchResumeToken());
             }
 
@@ -516,7 +518,7 @@ public:
                 opCtx->recoveryUnit()->setReadOnce(true);
             }
             exec->reattachToOperationContext(opCtx);
-            exec->restoreState(nullptr);
+            exec->restoreState(readLock ? &readLock->getCollection() : nullptr);
 
             auto planSummary = exec->getPlanExplainer().getPlanSummary();
             {
@@ -584,10 +586,10 @@ public:
             // of this operation's CurOp to signal that we've hit this point and then spin until the
             // failpoint is released.
             std::function<void()> saveAndRestoreStateWithReadLockReacquisition =
-                [exec, dropAndReacquireReadLock]() {
+                [exec, dropAndReacquireReadLock, &readLock]() {
                     exec->saveState();
                     dropAndReacquireReadLock();
-                    exec->restoreState(nullptr);
+                    exec->restoreState(&readLock->getCollection());
                 };
 
             waitWithPinnedCursorDuringGetMoreBatch.execute([&](const BSONObj& data) {

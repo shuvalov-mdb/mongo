@@ -157,14 +157,10 @@ const OperationContext::Decoration<UncommittedWritableCollections>
 
 struct installCatalogLookupFn {
     installCatalogLookupFn() {
-        CollectionPtr::installCatalogLookupImpl(
-            [](OperationContext* opCtx, CollectionUUID uuid, uint64_t catalogEpoch) {
-                const auto& catalog = CollectionCatalog::get(opCtx);
-                if (catalog.getEpoch() != catalogEpoch)
-                    return CollectionPtr();
-
-                return catalog.lookupCollectionByUUID(opCtx, uuid);
-            });
+        CollectionPtr::installCatalogLookupImpl([](OperationContext* opCtx, CollectionUUID uuid) {
+            const auto& catalog = CollectionCatalog::get(opCtx);
+            return catalog.lookupCollectionByUUID(opCtx, uuid);
+        });
     }
 } inst;
 
@@ -213,8 +209,10 @@ CollectionCatalog::iterator::iterator(OperationContext* opCtx,
 
 CollectionCatalog::iterator::iterator(OperationContext* opCtx,
                                       std::map<std::pair<std::string, CollectionUUID>,
-                                               std::shared_ptr<Collection>>::const_iterator mapIter)
-    : _opCtx(opCtx), _mapIter(mapIter) {}
+                                               std::shared_ptr<Collection>>::const_iterator mapIter,
+                                      uint64_t genNum,
+                                      const CollectionCatalog& catalog)
+    : _opCtx(opCtx), _genNum(genNum), _mapIter(mapIter), _catalog(&catalog) {}
 
 CollectionCatalog::iterator::value_type CollectionCatalog::iterator::operator*() {
     stdx::lock_guard<Latch> lock(_catalog->_catalogLock);
@@ -223,7 +221,7 @@ CollectionCatalog::iterator::value_type CollectionCatalog::iterator::operator*()
         return CollectionPtr();
     }
 
-    return {_opCtx, _mapIter->second.get(), _catalog->getEpoch()};
+    return {_opCtx, _mapIter->second.get()};
 }
 
 Collection* CollectionCatalog::iterator::getWritableCollection(OperationContext* opCtx,
@@ -471,14 +469,12 @@ CollectionPtr CollectionCatalog::lookupCollectionByUUID(OperationContext* opCtx,
     }
 
     if (auto coll = UncommittedCollections::getForTxn(opCtx, uuid)) {
-        return {opCtx, coll.get(), getEpoch()};
+        return {opCtx, coll.get()};
     }
 
     stdx::lock_guard<Latch> lock(_catalogLock);
     auto coll = _lookupCollectionByUUID(lock, uuid);
-
-    return (coll && coll->isCommitted()) ? CollectionPtr(opCtx, coll.get(), getEpoch())
-                                         : CollectionPtr();
+    return (coll && coll->isCommitted()) ? CollectionPtr(opCtx, coll.get()) : CollectionPtr();
 }
 
 void CollectionCatalog::makeCollectionVisible(CollectionUUID uuid) {
@@ -569,13 +565,13 @@ CollectionPtr CollectionCatalog::lookupCollectionByNamespace(OperationContext* o
     }
 
     if (auto coll = UncommittedCollections::getForTxn(opCtx, nss)) {
-        return {opCtx, coll.get(), getEpoch()};
+        return {opCtx, coll.get()};
     }
 
     stdx::lock_guard<Latch> lock(_catalogLock);
     auto it = _collections.find(nss);
     auto coll = (it == _collections.end() ? nullptr : it->second);
-    return (coll && coll->isCommitted()) ? CollectionPtr(opCtx, coll.get(), getEpoch()) : nullptr;
+    return (coll && coll->isCommitted()) ? CollectionPtr(opCtx, coll.get()) : nullptr;
 }
 
 boost::optional<NamespaceString> CollectionCatalog::lookupNSSByUUID(OperationContext* opCtx,
@@ -852,7 +848,7 @@ CollectionCatalog::iterator CollectionCatalog::begin(OperationContext* opCtx, St
 }
 
 CollectionCatalog::iterator CollectionCatalog::end(OperationContext* opCtx) const {
-    return iterator(opCtx, _orderedCollections.end());
+    return iterator(opCtx, _orderedCollections.end(), _generationNumber, *this);
 }
 
 boost::optional<std::string> CollectionCatalog::lookupResourceName(const ResourceId& rid) {

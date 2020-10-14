@@ -46,13 +46,13 @@ void PlanStage::saveState() {
     doSaveState();
 }
 
-void PlanStage::restoreState() {
+void PlanStage::restoreState(const RestoreContext& context) {
     ++_commonStats.unyields;
     for (auto&& child : _children) {
-        child->restoreState();
+        child->restoreState(context);
     }
 
-    doRestoreState();
+    doRestoreState(context);
 }
 
 void PlanStage::detachFromOperationContext() {

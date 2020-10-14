@@ -846,6 +846,9 @@ Status TopologyCoordinator::prepareHeartbeatResponseV1(Date_t now,
         return Status::OK();
     }
 
+    response->setElectable(
+        !_getMyUnelectableReason(now, StartElectionReasonEnum::kElectionTimeout));
+
     const long long v = _rsConfig.getConfigVersion();
     const long long t = _rsConfig.getConfigTerm();
     response->setConfigVersion(v);
@@ -1283,6 +1286,11 @@ std::pair<MemberId, Date_t> TopologyCoordinator::getStalestLiveMember() const {
                 "earliestMemberId"_attr = earliestMemberId,
                 "earliestDate"_attr = earliestDate);
     return std::make_pair(earliestMemberId, earliestDate);
+}
+
+void TopologyCoordinator::resetAllMemberTimeouts(Date_t now) {
+    for (auto&& memberData : _memberData)
+        memberData.updateLiveness(now);
 }
 
 void TopologyCoordinator::resetMemberTimeouts(Date_t now,
@@ -2326,6 +2334,9 @@ TopologyCoordinator::UnelectableReasonMask TopologyCoordinator::_getUnelectableR
     if (hbData.getState() != MemberState::RS_SECONDARY) {
         result |= NotSecondary;
     }
+    if (hbData.up() && hbData.isUnelectable()) {
+        result |= StepDownPeriodActive;
+    }
     invariant(result || memberConfig.isElectable());
     return result;
 }
@@ -3293,13 +3304,9 @@ void TopologyCoordinator::setStorageEngineSupportsReadCommitted(bool supported) 
         supported ? ReadCommittedSupport::kYes : ReadCommittedSupport::kNo;
 }
 
-void TopologyCoordinator::restartHeartbeat(const Date_t now, const HostAndPort& target) {
-    for (auto&& member : _memberData) {
-        if (member.getHostAndPort() == target) {
-            member.restart();
-            member.updateLiveness(now);
-            return;
-        }
+void TopologyCoordinator::restartHeartbeats() {
+    for (auto& hb : _memberData) {
+        hb.restart();
     }
 }
 
