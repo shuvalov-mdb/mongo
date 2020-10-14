@@ -195,19 +195,20 @@ void TopologyEventsPublisher::_nextDelivery() {
         if (_isClosed) {
             return;
         }
-        bool has_empty_elements = false;
+        // Helps to purge empty elements when a weak_ptr points to an element removed elsewhere.
+        // We take advantage of the fact that we are scanning the container anyway.
+        bool hasEmptyElements = false;
         std::transform(_listeners.begin(),
                        _listeners.end(),
                        std::back_inserter(listeners),
-                       [&has_empty_elements](const TopologyListenerPtr& src) {
+                       [&hasEmptyElements](const TopologyListenerPtr& src) {
                            auto shared = src.lock();
                            if (!shared) {
-                               has_empty_elements = true;
+                               hasEmptyElements = true;
                            }
                            return shared;
                        });
-        if (has_empty_elements) {
-            // Purge empty elements.
+        if (hasEmptyElements) {
             _listeners.erase(
                 std::remove_if(_listeners.begin(),
                                _listeners.end(),
@@ -218,6 +219,7 @@ void TopologyEventsPublisher::_nextDelivery() {
 
     // send to the listeners outside of the lock.
     for (auto listener : listeners) {
+        // While we purged empty elements from the collection the copy may still have them.
         if (listener) {
             _sendEvent(listener.get(), *nextEvent);
         }
