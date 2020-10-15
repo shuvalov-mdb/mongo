@@ -77,6 +77,7 @@ Status validateDisableNonTLSConnectionLogging(const bool&);
 #ifdef MONGO_CONFIG_SSL
 namespace mongo {
 struct SSLParams;
+struct TransientSSLParams;
 
 #if MONGO_CONFIG_SSL_PROVIDER == MONGO_CONFIG_SSL_PROVIDER_OPENSSL
 typedef SSL_CTX* SSLContextType;
@@ -180,6 +181,10 @@ struct SSLInformationToLog {
 
 class SSLManagerInterface : public Decorable<SSLManagerInterface> {
 public:
+    /**
+     * Creates an instance of SSLManagerInterface.
+     * Note: as we normally have one instance of the manager, it cannot take TransientSSLParams.
+     */
     static std::shared_ptr<SSLManagerInterface> create(const SSLParams& params, bool isServer);
 
     virtual ~SSLManagerInterface();
@@ -252,6 +257,7 @@ public:
      */
     virtual Status initSSLContext(SSLContextType context,
                                   const SSLParams& params,
+                                  const TransientSSLParams& transientParams,
                                   ConnectionDirection direction) = 0;
 
     /**

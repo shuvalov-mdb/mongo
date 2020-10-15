@@ -35,6 +35,8 @@
 
 #include "mongo/transport/service_entry_point.h"
 #include "mongo/transport/transport_layer_asio.h"
+#include "mongo/util/net/ssl/context_base.hpp"
+#include "mongo/util/net/ssl/context_openssl.hpp"
 #include "mongo/util/net/ssl_manager.h"
 #include "mongo/util/net/ssl_options.h"
 
@@ -483,7 +485,7 @@ TEST(SSLManager, BadDNParsing) {
     }
 }
 
-TEST(SSLManager, InitContextFromFileServer) {
+TEST(SSLManager, RotateCertificatesFromFileServer) {
     SSLParams params;
     params.sslMode.store(::mongo::sslGlobalParams.SSLMode_requireSSL);
     // Server is required to have the sslPEMKeyFile.
@@ -522,7 +524,7 @@ TEST(SSLManager, InitContextFromFileServerShouldFail) {
     }
 }
 
-TEST(SSLManager, InitContextFromFileClient) {
+TEST(SSLManager, RotateCertificatesFromFileClient) {
     SSLParams params;
     params.sslMode.store(::mongo::sslGlobalParams.SSLMode_requireSSL);
     // Client doesn't need params.sslPEMKeyFile.
@@ -544,27 +546,60 @@ TEST(SSLManager, InitContextFromFileClient) {
     uassertStatusOK(tla.rotateCertificates(manager, false /* asyncOCSPStaple */));
 }
 
-// TEST(SSLManager, InitContextFromMemory) {
-//     SSLParams params;
-//     params.sslMode.store(::mongo::sslGlobalParams.SSLMode_requireSSL);
-//     params.sslPEMKeyFile = "jstests/libs/server.pem";
-//     params.sslCAFile = "jstests/libs/ca.pem";
-//     params.sslClusterPEMKeyPayload = LoadFile("jstests/libs/client.pem");
+TEST(SSLManager, InitContextFromFileClient) {
+    SSLParams params;
+    params.sslMode.store(::mongo::sslGlobalParams.SSLMode_requireSSL);
+    // Client doesn't need params.sslPEMKeyFile.
+    params.sslCAFile = "jstests/libs/ca.pem";
+    params.sslClusterFile = "jstests/libs/client.pem";
 
-//     std::shared_ptr<SSLManagerInterface> manager =
-//         SSLManagerInterface::create(params, true /* isSSLServer */);
+    std::shared_ptr<SSLManagerInterface> manager =
+        SSLManagerInterface::create(params, false /* isSSLServer */);
 
-//     ServiceEntryPointUtil sepu;
+    auto egress = std::make_unique<asio::ssl::context>(asio::ssl::context::sslv23);
+    uassertStatusOK(manager->initSSLContext(egress->native_handle(),
+                                            params,
+                                            TransientSSLParams(),
+                                            SSLManagerInterface::ConnectionDirection::kOutgoing));
+}
 
-//     auto options = [] {
-//         ServerGlobalParams params;
-//         params.noUnixSocket = true;
-//         transport::TransportLayerASIO::Options opts(&params);
-//         return opts;
-//     }();
-//     transport::TransportLayerASIO tla(options, &sepu);
-//     uassertStatusOK(tla.rotateCertificates(manager, false /* asyncOCSPStaple */));
-// }
+TEST(SSLManager, InitContextFromMemoryClient) {
+    SSLParams params;
+    params.sslMode.store(::mongo::sslGlobalParams.SSLMode_requireSSL);
+    params.sslCAFile = "jstests/libs/ca.pem";
+    params.sslClusterFile = "jstests/libs/client.pem";
+
+    TransientSSLParams transientParams;
+    transientParams.sslClusterPEMPayload = LoadFile("jstests/libs/client.pem");
+
+    std::shared_ptr<SSLManagerInterface> manager =
+        SSLManagerInterface::create(params, false /* isSSLServer */);
+
+    auto egress = std::make_unique<asio::ssl::context>(asio::ssl::context::sslv23);
+    uassertStatusOK(manager->initSSLContext(egress->native_handle(),
+                                            params,
+                                            transientParams,
+                                            SSLManagerInterface::ConnectionDirection::kOutgoing));
+}
+
+TEST(SSLManager, InitContextFromMemoryServer) {
+    SSLParams params;
+    params.sslMode.store(::mongo::sslGlobalParams.SSLMode_requireSSL);
+    params.sslPEMKeyFile = "jstests/libs/server.pem";
+    params.sslCAFile = "jstests/libs/ca.pem";
+
+    TransientSSLParams transientParams;
+    transientParams.sslClusterPEMPayload = LoadFile("jstests/libs/client.pem");
+
+    std::shared_ptr<SSLManagerInterface> manager =
+        SSLManagerInterface::create(params, false /* isSSLServer */);
+
+    auto egress = std::make_unique<asio::ssl::context>(asio::ssl::context::sslv23);
+    uassertStatusOK(manager->initSSLContext(egress->native_handle(),
+                                            params,
+                                            transientParams,
+                                            SSLManagerInterface::ConnectionDirection::kOutgoing));
+}
 
 }  // namespace
 }  // namespace mongo

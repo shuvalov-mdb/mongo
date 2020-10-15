@@ -88,6 +88,8 @@
 #include <openssl/ec.h>
 #endif
 
+#include "mongo/util/stacktrace.h"  //tmp
+
 #if OPENSSL_VERSION_NUMBER < 0x1010100FL
 int SSL_CTX_set_ciphersuites(SSL_CTX*, const char*) {
     uasserted(
@@ -1128,6 +1130,7 @@ public:
      */
     Status initSSLContext(SSL_CTX* context,
                           const SSLParams& params,
+                          const TransientSSLParams& transientParams,
                           ConnectionDirection direction) override final;
 
     SSLConnectionInterface* connect(Socket* socket) override final;
@@ -1308,6 +1311,14 @@ private:
 
     /** @return true if was successful, otherwise false */
     bool _setupPEM(SSL_CTX* context, const std::string& keyFile, PasswordFetcher* password);
+
+    /**
+     * @param payload in-memory payload of a PEM file
+     * @return true if was successful, otherwise false
+     */
+    bool _setupPEMFromMemoryPayload(SSL_CTX* context,
+                                    const std::string& payload,
+                                    PasswordFetcher* password);
 
     /**
      * Setup PEM from BIO, which could be file or memory input abstraction.
@@ -2056,6 +2067,7 @@ Milliseconds SSLManagerOpenSSL::updateOcspStaplingContextWithResponse(
 
 Status SSLManagerOpenSSL::initSSLContext(SSL_CTX* context,
                                          const SSLParams& params,
+                                         const TransientSSLParams& transientParams,
                                          ConnectionDirection direction) {
     // SSL_OP_ALL - Activate all bug workaround options, to support buggy client SSL's.
     // SSL_OP_NO_SSLv2 - Disable SSL v2 support
@@ -2119,6 +2131,14 @@ Status SSLManagerOpenSSL::initSSLContext(SSL_CTX* context,
 
     if (direction == ConnectionDirection::kOutgoing && params.tlsWithholdClientCertificate) {
         // Do not send a client certificate if they have been suppressed.
+
+    } else if (direction == ConnectionDirection::kOutgoing &&
+               !transientParams.sslClusterPEMPayload.empty()) {
+        // Transient params for outgoing connection have priority over global params.
+        if (!_setupPEMFromMemoryPayload(context, transientParams.sslClusterPEMPayload, &_clusterPEMPassword)) {
+            return Status(ErrorCodes::InvalidSSLConfiguration,
+                          "Can not set up transient ssl cluster certificate.");
+        }
 
     } else if (direction == ConnectionDirection::kOutgoing && !params.sslClusterFile.empty()) {
         // Use the configured clusterFile as our client certificate.
@@ -2215,7 +2235,7 @@ bool SSLManagerOpenSSL::_initSynchronousSSLContext(UniqueSSLContext* contextPtr,
                                                    ConnectionDirection direction) {
     *contextPtr = UniqueSSLContext(SSL_CTX_new(SSLv23_method()));
 
-    uassertStatusOK(initSSLContext(contextPtr->get(), params, direction));
+    uassertStatusOK(initSSLContext(contextPtr->get(), params, TransientSSLParams(), direction));
 
     // If renegotiation is needed, don't return from recv() or send() until it's successful.
     // Note: this is for blocking sockets only.
@@ -2239,6 +2259,7 @@ bool SSLManagerOpenSSL::_parseAndValidateCertificate(const std::string& keyFile,
 
     ON_BLOCK_EXIT([&] { BIO_free(inBIO); });
     if (BIO_read_filename(inBIO, keyFile.c_str()) <= 0) {
+        printStackTrace();  // tmp
         LOGV2_ERROR(23244,
                     "cannot read key file when setting subject name: {keyFile} {error}",
                     "Cannot read key file when setting subject name",
@@ -2318,6 +2339,22 @@ bool SSLManagerOpenSSL::_setupPEM(SSL_CTX* context,
         context, std::move(inBio), password, std::move(std::string("keyFile ").append(keyFile)));
 }
 
+bool SSLManagerOpenSSL::_setupPEMFromMemoryPayload(SSL_CTX* context,
+                                                   const std::string& payload,
+                                                   PasswordFetcher* password) {
+    std::unique_ptr<BIO, std::function<void(BIO*)>> inBio(BIO_new_mem_buf(payload.c_str(), payload.length()), [](BIO* bio) {
+        BIO_free(bio);  // Custom deleter is required for BIO.
+    });
+    if (!inBio) {
+        LOGV2_ERROR(51599,
+                    "Failed to allocate BIO object from in-memory payload",
+                    "error"_attr = getSSLErrorMessage(ERR_get_error()));
+        return false;
+    }
+    return _setupPEMFromBIO(
+        context, std::move(inBio), password, "BIO from in-memory payload");
+}
+
 bool SSLManagerOpenSSL::_setupPEMFromBIO(SSL_CTX* context,
                                          std::unique_ptr<BIO, std::function<void(BIO*)>> inBio,
                                          PasswordFetcher* password,
@@ -2329,7 +2366,6 @@ bool SSLManagerOpenSSL::_setupPEMFromBIO(SSL_CTX* context,
     EVP_PKEY* privateKey = PEM_read_bio_PrivateKey(inBio.get(), nullptr, password_cb, userdata);
     if (!privateKey) {
         LOGV2_ERROR(23251,
-                    "cannot read PEM key file: {keyFile} {error}",
                     "Cannot read PEM key file",
                     "msg"_attr = log_msg,
                     "error"_attr = getSSLErrorMessage(ERR_get_error()));
@@ -2339,7 +2375,6 @@ bool SSLManagerOpenSSL::_setupPEMFromBIO(SSL_CTX* context,
 
     if (SSL_CTX_use_PrivateKey(context, privateKey) != 1) {
         LOGV2_ERROR(23252,
-                    "cannot use PEM key file: {keyFile} {error}",
                     "Cannot use PEM key file",
                     "msg"_attr = log_msg,
                     "error"_attr = getSSLErrorMessage(ERR_get_error()));
@@ -2349,8 +2384,8 @@ bool SSLManagerOpenSSL::_setupPEMFromBIO(SSL_CTX* context,
     // Verify that the certificate and the key go together.
     if (SSL_CTX_check_private_key(context) != 1) {
         LOGV2_ERROR(23253,
-                    "SSL certificate validation failed: {error}",
                     "SSL certificate validation failed",
+                    "msg"_attr = log_msg,
                     "error"_attr = getSSLErrorMessage(ERR_get_error()));
         return false;
     }

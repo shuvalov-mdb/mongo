@@ -133,6 +133,15 @@ struct SSLParams {
 
 extern SSLParams sslGlobalParams;
 
+// Additional SSL Params that could be used to augment a particular connection
+// or have limited lifetime. In all cases, the fields stored here are not appropriate
+// to be part of sslGlobalParams.
+struct TransientSSLParams {
+    std::string targetedCluster;
+    std::string sslClusterPEMPayload;
+    std::string sslClusterPassword;
+};
+
 /**
  * Older versions of mongod/mongos accepted --sslDisabledProtocols values
  * in the form 'noTLS1_0,noTLS1_1'.  kAcceptNegativePrefix allows us to
