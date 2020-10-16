@@ -2345,6 +2345,11 @@ bool SSLManagerOpenSSL::_readCertificateChainFromMemory(SSL_CTX* context,
         return false;
     }
 
+    // This BIO is for debugging only.
+    std::unique_ptr<BIO, decltype(&::BIO_free)> debugBIO(BIO_new(BIO_s_mem()), ::BIO_free);
+    X509_NAME_print(debugBIO.get(), X509_get_subject_name(x509cert.get()), 0);
+    BIO_puts(debugBIO.get(), "\n");
+
     if (1 != SSL_CTX_use_certificate(context, x509cert.get()) || ERR_peek_error() != 0) {
         // Key/certificate mismatch doesn't imply returning 0.
         LOGV2_ERROR(5159907,
@@ -2369,6 +2374,8 @@ bool SSLManagerOpenSSL::_readCertificateChainFromMemory(SSL_CTX* context,
         /* Note that we must not free 'ca' if it was successfully added to the chain
          * (while we must free the main certificate, since its reference count is
          * increased by SSL_CTX_use_certificate). */
+        X509_NAME_print(debugBIO.get(), X509_get_subject_name(ca), 0);
+        BIO_puts(debugBIO.get(), "\n");
     }
     /* When the while loop ends, it's usually just EOF. */
     err = ERR_peek_last_error();
@@ -2379,6 +2386,16 @@ bool SSLManagerOpenSSL::_readCertificateChainFromMemory(SSL_CTX* context,
                     "Error remained after scanning all X509 certificates from memory",
                     "error"_attr = getSSLErrorMessage(ERR_get_error()));
         return false; /* some real error */
+    }
+
+    BUF_MEM* bptr = nullptr;
+    BIO_get_mem_ptr(debugBIO.get(), &bptr);
+    if (bptr) {
+        LOGV2(5159904,
+              "Parsed X509 certificates from memory buffer",
+              "cert"_attr = std::string(bptr->data, bptr->length));
+    } else {
+        LOGV2(5159904, "Failed to parse X509 certificates from memory buffer, no records found");
     }
 
     return true;
@@ -2436,84 +2453,6 @@ bool SSLManagerOpenSSL::_setupPEMFromMemoryPayload(SSL_CTX* context,
         return false;
     }
 
-    // Gets the internal poiter to x509 store inside the context.
-    X509_STORE* x509Store = SSL_CTX_get_cert_store(context);
-    if (!x509Store) {
-        LOGV2_ERROR(5159902,
-                    "Failed to access the internal context x509 store",
-                    "error"_attr = getSSLErrorMessage(ERR_get_error()));
-        return false;
-    }
-
-    // This BIO is for debugging only.
-    std::unique_ptr<BIO, decltype(&::BIO_free)> debugBIO(BIO_new(BIO_s_mem()), ::BIO_free);
-
-    STACK_OF(X509_INFO)* x509Stack = PEM_X509_INFO_read_bio(inBio.get(), NULL, NULL, NULL);
-    if (!x509Stack) {
-        LOGV2_ERROR(5159903,
-                    "Failed to get the stack of x509 pointers",
-                    "error"_attr = getSSLErrorMessage(ERR_get_error()));
-        return false;
-    }
-
-    for (int i = 0; i < sk_X509_INFO_num(x509Stack); i++) {
-        X509_INFO* itemInfo = sk_X509_INFO_value(x509Stack, i);
-        if (itemInfo->x509) {
-            X509_STORE_add_cert(x509Store, itemInfo->x509);
-        }
-        if (itemInfo->crl) {
-            X509_STORE_add_crl(x509Store, itemInfo->crl);
-            BIO_printf(debugBIO.get(), "Got Certificate Revocation List\n");
-        }
-
-        // Debugging
-        if (itemInfo->x509) {
-            X509_NAME* certsubject = X509_get_subject_name(itemInfo->x509);
-            char subjectBuffer[256] = "** n/a **";
-            X509_NAME_get_text_by_NID(certsubject, NID_commonName, subjectBuffer, 256);
-            long certVersion = (X509_get_version(itemInfo->x509) + 1);
-
-            X509_NAME_print(debugBIO.get(), certsubject, 0);
-            BIO_printf(
-                debugBIO.get(), "Cert #%.2d v%ld CN: %.70s\n", i, certVersion, subjectBuffer);
-        }
-    }
-    sk_X509_INFO_pop_free(x509Stack, X509_INFO_free);
-
-    // First pass is to load all certificates into
-    // while (true) {
-    //     X509* cert;
-    //     if ((cert = PEM_read_bio_X509(inBio.get(), NULL, NULL, NULL)) == nullptr) {
-    //         break;
-    //     }
-    //     X509_NAME_print(debugBIO.get(), X509_get_subject_name(cert), 0);
-    //     BIO_puts(debugBIO.get(), "\n");
-    //     if (1 != SSL_CTX_add_extra_chain_cert(context, cert)) {  // Context takes ownership of
-    //     cert.
-    //         LOGV2_ERROR(5159902,
-    //                     "Failed to add certificate to the context",
-    //                     "error"_attr = getSSLErrorMessage(ERR_get_error()));
-    //         return false;
-    //     }
-    // }
-    BUF_MEM* bptr = nullptr;
-    BIO_get_mem_ptr(debugBIO.get(), &bptr);
-    if (bptr) {
-        LOGV2(5159904,
-              "Parsed X509 certificates from memory buffer",
-              "cert"_attr = std::string(bptr->data, bptr->length));
-    } else {
-        LOGV2(5159904, "Failed to parse X509 certificates from memory buffer, no records found");
-    }
-
-    // Second pass is to start from the beginning of the buffer and to continue with private key
-    // parse.
-    if (1 != BIO_reset(inBio.get())) {
-        LOGV2_ERROR(
-            5159905, "Failed to reset BIO", "error"_attr = getSSLErrorMessage(ERR_get_error()));
-        return false;
-    }
-
     return _setupPEMFromBIO(context, std::move(inBio), password, "BIO from in-memory payload");
 }
 
@@ -2521,7 +2460,6 @@ bool SSLManagerOpenSSL::_setupPEMFromBIO(SSL_CTX* context,
                                          std::unique_ptr<BIO, decltype(&::BIO_free)> inBio,
                                          PasswordFetcher* password,
                                          std::string log_msg) {
-    std::cout << "!!!!! _setupPEM from bio  " << log_msg << std::endl;
     // Obtain the private key, using our callback to acquire a decryption password if necessary.
     decltype(&SSLManagerOpenSSL::password_cb) password_cb = &SSLManagerOpenSSL::password_cb;
     void* userdata = static_cast<void*>(password);
