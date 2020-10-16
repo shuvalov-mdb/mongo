@@ -550,7 +550,6 @@ TEST(SSLManager, InitContextFromFileClient) {
     SSLParams params;
     params.sslMode.store(::mongo::sslGlobalParams.SSLMode_requireSSL);
     // Client doesn't need params.sslPEMKeyFile.
-    params.sslCAFile = "jstests/libs/ca.pem";
     params.sslClusterFile = "jstests/libs/client.pem";
 
     std::shared_ptr<SSLManagerInterface> manager =
@@ -567,7 +566,7 @@ TEST(SSLManager, InitContextFromMemoryClient) {
     SSLParams params;
     params.sslMode.store(::mongo::sslGlobalParams.SSLMode_requireSSL);
     params.sslCAFile = "jstests/libs/ca.pem";
-    params.sslClusterFile = "jstests/libs/client.pem";
+    // params.sslClusterFile = "jstests/libs/client.pem";
 
     TransientSSLParams transientParams;
     transientParams.sslClusterPEMPayload = LoadFile("jstests/libs/client.pem");
