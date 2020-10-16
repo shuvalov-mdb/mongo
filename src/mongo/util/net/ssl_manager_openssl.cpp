@@ -88,8 +88,6 @@
 #include <openssl/ec.h>
 #endif
 
-#include "mongo/util/stacktrace.h"  //tmp
-
 #if OPENSSL_VERSION_NUMBER < 0x1010100FL
 int SSL_CTX_set_ciphersuites(SSL_CTX*, const char*) {
     uasserted(
@@ -2148,7 +2146,8 @@ Status SSLManagerOpenSSL::initSSLContext(SSL_CTX* context,
         if (!_setupPEMFromMemoryPayload(
                 context, transientParams.sslClusterPEMPayload, &_clusterPEMPassword)) {
             return Status(ErrorCodes::InvalidSSLConfiguration,
-                          "Can not set up transient ssl cluster certificate.");
+                          str::stream() << "Can not set up transient ssl cluster certificate for "
+                                        << transientParams.targetedCluster);
         }
 
     } else if (direction == ConnectionDirection::kOutgoing && !params.sslClusterFile.empty()) {
@@ -2270,7 +2269,6 @@ bool SSLManagerOpenSSL::_parseAndValidateCertificate(const std::string& keyFile,
 
     ON_BLOCK_EXIT([&] { BIO_free(inBIO); });
     if (BIO_read_filename(inBIO, keyFile.c_str()) <= 0) {
-        printStackTrace();  // tmp
         LOGV2_ERROR(23244,
                     "cannot read key file when setting subject name: {keyFile} {error}",
                     "Cannot read key file when setting subject name",

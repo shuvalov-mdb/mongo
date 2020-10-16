@@ -139,7 +139,6 @@ extern SSLParams sslGlobalParams;
 struct TransientSSLParams {
     std::string targetedCluster;
     std::string sslClusterPEMPayload;
-    std::string sslClusterPassword;
 };
 
 /**
