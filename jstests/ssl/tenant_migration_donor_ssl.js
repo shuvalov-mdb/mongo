@@ -137,7 +137,6 @@ configDonorsColl.createIndex({expireAt: 1}, {expireAfterSeconds: 0});
     testDonorForgetMigrationAfterMigrationCompletes(donorRst, recipientRst, migrationId, kTenantId);
 })();
 
-
 donorRst.stopSet();
 recipientRst.stopSet();
 })();

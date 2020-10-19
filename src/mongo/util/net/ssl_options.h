@@ -37,6 +37,7 @@
 
 #include "mongo/base/status.h"
 #include "mongo/base/status_with.h"
+#include "mongo/client/connection_string.h"
 #include "mongo/config.h"
 #include "mongo/crypto/sha256_block.h"
 #include "mongo/db/auth/role_name.h"
@@ -137,7 +138,7 @@ extern SSLParams sslGlobalParams;
 // or have limited lifetime. In all cases, the fields stored here are not appropriate
 // to be part of sslGlobalParams.
 struct TransientSSLParams {
-    std::string targetedCluster;
+    ConnectionString targetedClusterConnectionString;
     std::string sslClusterPEMPayload;
 };
 

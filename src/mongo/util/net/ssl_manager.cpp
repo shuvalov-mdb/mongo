@@ -353,7 +353,7 @@ void logCRL(const CRLInformationToLog& crl, const int logNum) {
           "notValidAfter"_attr = crl.validityNotAfter.toString());
 }
 
-void logSSLInfo(const SSLInformationToLog& info, 
+void logSSLInfo(const SSLInformationToLog& info,
                 const int logNumPEM,
                 const int logNumCluster,
                 const int logNumCrl) {

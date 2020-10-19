@@ -1133,14 +1133,11 @@ public:
 
     SSLConnectionInterface* connect(Socket* socket) final;
 
-    SSLConnectionInterface* accept(Socket* socket,
-                                   const char* initialBytes,
-                                   int len) final;
+    SSLConnectionInterface* accept(Socket* socket, const char* initialBytes, int len) final;
 
-    SSLPeerInfo parseAndValidatePeerCertificateDeprecated(
-        const SSLConnectionInterface* conn,
-        const std::string& remoteHost,
-        const HostAndPort& hostForLogging) final;
+    SSLPeerInfo parseAndValidatePeerCertificateDeprecated(const SSLConnectionInterface* conn,
+                                                          const std::string& remoteHost,
+                                                          const HostAndPort& hostForLogging) final;
 
     Future<SSLPeerInfo> parseAndValidatePeerCertificate(SSL* conn,
                                                         boost::optional<std::string> sni,
@@ -2145,12 +2142,15 @@ Status SSLManagerOpenSSL::initSSLContext(SSL_CTX* context,
     } else if (direction == ConnectionDirection::kOutgoing &&
                !transientParams.sslClusterPEMPayload.empty()) {
         // Transient params for outgoing connection have priority over global params.
-        if (!_setupPEMFromMemoryPayload(
-                context, transientParams.sslClusterPEMPayload, &_clusterPEMPassword,
-                str::stream() << "Transient cluster certificate for " << transientParams.targetedCluster)) {
+        if (!_setupPEMFromMemoryPayload(context,
+                                        transientParams.sslClusterPEMPayload,
+                                        &_clusterPEMPassword,
+                                        str::stream()
+                                            << "Transient cluster certificate for "
+                                            << transientParams.targetedClusterConnectionString)) {
             return Status(ErrorCodes::InvalidSSLConfiguration,
                           str::stream() << "Can not set up transient ssl cluster certificate for "
-                                        << transientParams.targetedCluster);
+                                        << transientParams.targetedClusterConnectionString);
         }
 
     } else if (direction == ConnectionDirection::kOutgoing && !params.sslClusterFile.empty()) {

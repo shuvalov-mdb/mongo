@@ -399,7 +399,7 @@ void tlsEmitWarningExpiringClientCertificate(const SSLX509Name& peer, Days days)
 /**
  * Logs the SSL information by dispatching to either logCert() or logCRL().
  */
-void logSSLInfo(const SSLInformationToLog& info, 
+void logSSLInfo(const SSLInformationToLog& info,
                 const int logNumPEM = 4913010,
                 const int logNumCluster = 4913011,
                 const int logNumCrl = 4913012);
