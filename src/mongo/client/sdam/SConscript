@@ -120,8 +120,13 @@ env.CppUnitTest(
         '$BUILD_DIR/mongo/client/clientdriver_network',
         '$BUILD_DIR/mongo/client/replica_set_monitor_protocol_test_util',
         '$BUILD_DIR/mongo/executor/thread_pool_task_executor_test_fixture',
+<<<<<<< HEAD
         'sdam',
         'sdam_test',
+=======
+        'sdam', 
+        'sdam_test'
+>>>>>>> f416ea66b1cb18bbf1f847ddf2b5c7580404907f
     ],
 )
 
