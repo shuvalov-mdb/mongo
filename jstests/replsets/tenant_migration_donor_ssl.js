@@ -1,11 +1,7 @@
 /**
- * Tests the TenantMigrationAccessBlocker and donor state document are updated correctly at each
- * stage of the migration, and are eventually removed after the donorForgetMigration has returned.
- *
- * Tenant migrations are not expected to be run on servers with ephemeralForTest, and in particular
- * this test fails on ephemeralForTest because the donor has to wait for the write to set the
- * migration state to "committed" and "aborted" to be majority committed but it cannot do that on
- * ephemeralForTest.
+ * Shows that a tenant migration donor and recipient
+ * are able to use their cluster certificates (normally used to talk to their own
+ * replica set nodes) to talk to each other.
  *
  * @tags: [requires_fcv_47, requires_majority_read_concern, incompatible_with_eft]
  */

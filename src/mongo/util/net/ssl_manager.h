@@ -396,5 +396,19 @@ void recordTLSVersion(TLSVersion version, const HostAndPort& hostForLogging);
 void tlsEmitWarningExpiringClientCertificate(const SSLX509Name& peer);
 void tlsEmitWarningExpiringClientCertificate(const SSLX509Name& peer, Days days);
 
+/**
+ * Logs the SSL information by dispatching to either logCert() or logCRL().
+ */
+void logSSLInfo(const SSLInformationToLog& info, 
+                const int logNumPEM = 4913010,
+                const int logNumCluster = 4913011,
+                const int logNumCrl = 4913012);
+
+/**
+ * Logs the certificate.
+ */
+void logCert(const CertInformationToLog& cert, StringData certType, const int logNum);
+void logCRL(const CRLInformationToLog& crl, const int logNum);
+
 }  // namespace mongo
 #endif  // #ifdef MONGO_CONFIG_SSL

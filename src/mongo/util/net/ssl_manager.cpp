@@ -353,15 +353,18 @@ void logCRL(const CRLInformationToLog& crl, const int logNum) {
           "notValidAfter"_attr = crl.validityNotAfter.toString());
 }
 
-void logSSLInfo(const SSLInformationToLog& info) {
+void logSSLInfo(const SSLInformationToLog& info, 
+                const int logNumPEM,
+                const int logNumCluster,
+                const int logNumCrl) {
     if (!(sslGlobalParams.sslPEMKeyFile.empty())) {
-        logCert(info.server, "Server", 4913010);
+        logCert(info.server, "Server", logNumPEM);
     }
     if (info.cluster.has_value()) {
-        logCert(info.cluster.get(), "Cluster", 4913011);
+        logCert(info.cluster.get(), "Cluster", logNumCluster);
     }
     if (info.crl.has_value()) {
-        logCRL(info.crl.get(), 4913012);
+        logCRL(info.crl.get(), logNumCrl);
     }
 }
 
