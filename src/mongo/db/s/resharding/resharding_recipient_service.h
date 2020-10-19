@@ -31,10 +31,10 @@
 
 #include "mongo/db/repl/primary_only_service.h"
 #include "mongo/db/s/resharding/recipient_document_gen.h"
+#include "mongo/db/s/resharding/resharding_oplog_fetcher.h"
 #include "mongo/s/resharding/type_collection_fields_gen.h"
 
 namespace mongo {
-constexpr StringData kReshardingRecipientServiceName = "ReshardingRecipientService"_sd;
 
 namespace resharding {
 
@@ -51,6 +51,8 @@ void createTemporaryReshardingCollectionLocally(OperationContext* opCtx,
 
 class ReshardingRecipientService final : public repl::PrimaryOnlyService {
 public:
+    static constexpr StringData kServiceName = "ReshardingRecipientService"_sd;
+
     explicit ReshardingRecipientService(ServiceContext* serviceContext)
         : PrimaryOnlyService(serviceContext) {}
     ~ReshardingRecipientService() = default;
@@ -58,7 +60,7 @@ public:
     class RecipientStateMachine;
 
     StringData getServiceName() const override {
-        return kReshardingRecipientServiceName;
+        return kServiceName;
     }
 
     NamespaceString getStateDocumentsNS() const override {

@@ -53,6 +53,8 @@
 #include "mongo/db/repl/replication_coordinator.h"
 #include "mongo/db/repl/tenant_migration_committed_info.h"
 #include "mongo/db/repl/tenant_migration_conflict_info.h"
+#include "mongo/db/storage/execution_context.h"
+#include "mongo/db/storage/index_entry_comparison.h"
 #include "mongo/db/storage/storage_options.h"
 #include "mongo/db/storage/write_unit_of_work.h"
 #include "mongo/logv2/log.h"
@@ -169,8 +171,6 @@ StatusWith<std::vector<BSONObj>> MultiIndexBlock::init(
 
     _buildIsCleanedUp = false;
 
-    WriteUnitOfWork wunit(opCtx);
-
     invariant(_indexes.empty());
 
     if (resumeInfo) {
@@ -180,6 +180,8 @@ StatusWith<std::vector<BSONObj>> MultiIndexBlock::init(
     // Guarantees that exceptions cannot be returned from index builder initialization except for
     // WriteConflictExceptions, which should be dealt with by the caller.
     try {
+        WriteUnitOfWork wunit(opCtx);
+
         // On rollback in init(), cleans up _indexes so that ~MultiIndexBlock doesn't try to clean
         // up _indexes manually (since the changes were already rolled back). Due to this, it is
         // thus legal to call init() again after it fails.
@@ -192,13 +194,9 @@ StatusWith<std::vector<BSONObj>> MultiIndexBlock::init(
             _buildIsCleanedUp = true;
         });
 
-        const auto& ns = collection->ns().ns();
-
         for (const auto& info : indexSpecs) {
             if (info["background"].isBoolean() && !info["background"].Bool()) {
                 LOGV2(20383,
-                      "Ignoring obsolete {{ background: false }} index build option because all "
-                      "indexes are built in the background with the hybrid method",
                       "Ignoring obsolete { background: false } index build option because all "
                       "indexes are built in the background with the hybrid method");
             }
@@ -212,6 +210,7 @@ StatusWith<std::vector<BSONObj>> MultiIndexBlock::init(
                 static_cast<std::size_t>(maxIndexBuildMemoryUsageMegabytes.load()) * 1024 * 1024 /
                 indexSpecs.size();
         }
+        _eachIndexBuildMaxMemoryUsageBytes = eachIndexBuildMaxMemoryUsageBytes;
 
         // Initializing individual index build blocks below performs un-timestamped writes to the
         // durable catalog. It's possible for the onInit function to set multiple timestamps
@@ -236,8 +235,9 @@ StatusWith<std::vector<BSONObj>> MultiIndexBlock::init(
                 // start the build while holding a lock throughout.
                 if (status == ErrorCodes::IndexBuildAlreadyInProgress) {
                     invariant(indexSpecs.size() > 1,
-                              str::stream() << "Collection: " << ns << " (" << _collectionUUID
-                                            << "), Index spec: " << indexSpecs.front());
+                              str::stream()
+                                  << "Collection: " << collection->ns() << " (" << _collectionUUID
+                                  << "), Index spec: " << indexSpecs.front());
                     return {
                         ErrorCodes::OperationFailed,
                         "Cannot build two identical indexes. Try again without duplicate indexes."};
@@ -248,7 +248,7 @@ StatusWith<std::vector<BSONObj>> MultiIndexBlock::init(
             indexInfoObjs.push_back(info);
 
             boost::optional<IndexStateInfo> stateInfo;
-            IndexToBuild index;
+            auto& index = _indexes.emplace_back();
             index.block =
                 std::make_unique<IndexBuildBlock>(collection->ns(), info, _method, _buildUUID);
             if (resumeInfo) {
@@ -262,7 +262,7 @@ StatusWith<std::vector<BSONObj>> MultiIndexBlock::init(
                 uassert(ErrorCodes::NoSuchKey,
                         str::stream() << "Unable to locate resume information for " << info
                                       << " due to inconsistent resume information for index build "
-                                      << _buildUUID << " in collection " << ns << "("
+                                      << _buildUUID << " on namespace " << collection->ns() << "("
                                       << _collectionUUID << ")",
                         stateInfoIt != resumeInfoIndexes.end());
 
@@ -274,11 +274,6 @@ StatusWith<std::vector<BSONObj>> MultiIndexBlock::init(
             }
             if (!status.isOK())
                 return status;
-
-            auto indexCleanupGuard = makeGuard([opCtx, &index] {
-                index.block->finalizeTemporaryTables(
-                    opCtx, TemporaryRecordStore::FinalizationAction::kDelete);
-            });
 
             auto indexCatalogEntry =
                 index.block->getEntry(opCtx, collection.getWritableCollection());
@@ -300,10 +295,8 @@ StatusWith<std::vector<BSONObj>> MultiIndexBlock::init(
             index.options.fromIndexBuilder = true;
 
             LOGV2(20384,
-                  "Index build: starting on {namespace} properties: {properties} using method: "
-                  "{method}",
                   "Index build: starting",
-                  "namespace"_attr = ns,
+                  logAttrs(collection->ns()),
                   "buildUUID"_attr = _buildUUID,
                   "properties"_attr = *descriptor,
                   "method"_attr = _method,
@@ -314,24 +307,20 @@ StatusWith<std::vector<BSONObj>> MultiIndexBlock::init(
 
             if (!resumeInfo) {
                 // TODO SERVER-14888 Suppress this in cases we don't want to audit.
-                audit::logCreateIndex(opCtx->getClient(), &info, descriptor->indexName(), ns);
+                audit::logCreateIndex(
+                    opCtx->getClient(), &info, descriptor->indexName(), collection->ns().ns());
             }
-
-            indexCleanupGuard.dismiss();
-            _indexes.push_back(std::move(index));
         }
 
-        opCtx->recoveryUnit()->onCommit([ns, this](auto commitTs) {
+        opCtx->recoveryUnit()->onCommit([ns = collection->ns(), this](auto commitTs) {
             if (!_buildUUID) {
                 return;
             }
 
             LOGV2(20346,
-                  "Index build initialized: {buildUUID}: {nss} ({collection_uuid}): indexes: "
-                  "{indexes_size}",
                   "Index build: initialized",
                   "buildUUID"_attr = _buildUUID,
-                  "namespace"_attr = ns,
+                  logAttrs(ns),
                   "collectionUUID"_attr = _collectionUUID,
                   "initializationTimestamp"_attr = commitTs);
         });
@@ -348,13 +337,12 @@ StatusWith<std::vector<BSONObj>> MultiIndexBlock::init(
         // Avoid converting TenantMigrationCommittedException to Status.
         throw;
     } catch (...) {
-        auto status = exceptionToStatus();
-        return {status.code(),
-                str::stream() << "Caught exception during index builder initialization "
-                              << collection->ns() << " (" << collection->uuid()
-                              << "): " << status.reason() << ". " << indexSpecs.size()
-                              << " provided. First index spec: "
-                              << (indexSpecs.empty() ? BSONObj() : indexSpecs[0])};
+        return exceptionToStatus().withContext(
+            str::stream() << "Caught exception during index builder (" << _buildUUID
+                          << ") initialization on namespace" << collection->ns() << " ("
+                          << _collectionUUID << "). " << indexSpecs.size()
+                          << " index specs provided. First index spec: "
+                          << (indexSpecs.empty() ? BSONObj() : indexSpecs[0]));
     }
 }
 
@@ -379,6 +367,18 @@ Status MultiIndexBlock::insertAllDocumentsInCollection(
         stopTracker.dismiss();
     }
     MultikeyPathTracker::get(opCtx).startTrackingMultikeyPathInfo();
+
+    const IndexCatalogEntry* refIdx = nullptr;
+    if (gUseReferenceIndexForIndexBuild && _indexes.size() == 1 &&
+        (refIdx = _findSmallestReferenceIdx(opCtx, collection))) {
+        LOGV2(3620203,
+              "Index Build: using existing index instead of scanning collection",
+              "refIdx"_attr = refIdx->descriptor()->indexName(),
+              "childIdx"_attr =
+                  _indexes[0].block->getEntry(opCtx, collection)->descriptor()->indexName());
+        uassertStatusOK(_scanReferenceIdxInsertAndCommit(opCtx, collection, refIdx));
+        return Status::OK();
+    }
 
     const char* curopMessage = "Index Build: scanning collection";
     const auto numRecords = collection->numRecords(opCtx);
@@ -985,4 +985,208 @@ Status MultiIndexBlock::_failPointHangDuringBuild(OperationContext* opCtx,
 
     return Status::OK();
 }
+
+const IndexCatalogEntry* MultiIndexBlock::_findSmallestReferenceIdx(
+    OperationContext* opCtx, const CollectionPtr& collection) const {
+    // Find a suitable reference index for the first index we are trying to build. First make
+    // sure we're not trying to build a partial, sparse or unique index; the logic to handle these
+    // cases is complicated (we'll have to make sure whether a partial reference index covers the
+    // partial index we're trying to build, and a unique reference index will not necessarily
+    // yield a unique child index, etc.). We do not support multi-key indexes either.
+    for (size_t i = 0; i < _indexes.size(); i++) {
+        auto entry = _indexes[i].block->getEntry(opCtx, collection);
+        auto descriptor = entry->descriptor();
+        if (descriptor->isPartial() || descriptor->isSparse() || descriptor->unique())
+            return nullptr;
+    }
+
+    const IndexCatalogEntry* smallestRefIdx = nullptr;
+
+    int smallestSize = -1;
+    auto it = collection->getIndexCatalog()->getIndexIterator(opCtx,
+                                                              false /* includeUnfinishedIndexes */);
+    while (it->more()) {
+        const auto candidateEntry = it->next();
+        const auto candidateDescriptor = candidateEntry->descriptor();
+        // A partial / sparse reference index may or may not cover the index we're trying to build.
+        // More complex logic is required to check if the reference index covers the one we're
+        // building, and so as a simplification, we're avoiding using partial / sparse ref indexes.
+        // A candidate reference index being unique, however, is not a problem.
+        if (candidateEntry->isMultikey() || candidateDescriptor->isPartial() ||
+            candidateDescriptor->isSparse())
+            continue;
+
+        // Make sure the candidate we are looking at is compatible with all the indexes we are
+        // attempting to build:
+        bool compatible = true;
+        for (size_t i = 0; i < _indexes.size(); i++) {
+            auto descriptor = _indexes[i].block->getEntry(opCtx, collection)->descriptor();
+            compatible = compatible &&
+                descriptor->keyPattern().isPrefixOf(candidateDescriptor->keyPattern(),
+                                                    SimpleBSONElementComparator::kInstance);
+            if (!compatible)
+                break;
+        }
+
+        if (compatible) {
+            int candidateSize = candidateDescriptor->keyPattern().nFields();
+            if (smallestRefIdx && smallestSize <= candidateSize)
+                continue;
+
+            smallestSize = candidateSize;
+            smallestRefIdx = candidateEntry;
+        }
+    }
+
+    return smallestRefIdx;
+}
+
+Status MultiIndexBlock::_scanReferenceIdxInsertAndCommit(OperationContext* opCtx,
+                                                         const CollectionPtr& collection,
+                                                         const IndexCatalogEntry* refIdx) {
+    auto cursor = refIdx->accessMethod()->newCursor(opCtx);
+    KeyString::Value startKeyString = IndexEntryComparison::makeKeyStringFromBSONKeyForSeek(
+        kMinBSONKey,
+        refIdx->accessMethod()->getSortedDataInterface()->getKeyStringVersion(),
+        refIdx->accessMethod()->getSortedDataInterface()->getOrdering(),
+        true /* forward */,
+        false /* inclusive */);
+
+    auto childIdx = _indexes[0].block->getEntry(opCtx, collection);
+    auto childDescriptor = childIdx->descriptor();
+    invariant(!childDescriptor->isPartial() && !childDescriptor->isSparse() &&
+              !childDescriptor->unique() && _indexes[0].options.dupsAllowed);
+
+    auto bulkLoader = _indexes[0].real->makeBulkBuilder(opCtx, _indexes[0].options.dupsAllowed);
+
+    // We are returning by value. "keys" within the lambda clears itself on destruction, and
+    // returning by reference would return a reference pointing to a deleted object.
+    auto produceKey = [&](const BSONObj& key, const RecordId& loc) -> KeyString::Value {
+        auto& executionCtx = StorageExecutionContext::get(opCtx);
+        auto keys = executionCtx.keys();
+        auto multikeyMetadataKeys = executionCtx.multikeyMetadataKeys();
+        auto multikeyPaths = executionCtx.multikeyPaths();
+        auto obj = IndexKeyEntry::rehydrateKey(refIdx->descriptor()->keyPattern(), key);
+        childIdx->accessMethod()->getKeys(executionCtx.pooledBufferBuilder(),
+                                          obj,
+                                          _indexes[0].options.getKeysMode,
+                                          IndexAccessMethod::GetKeysContext::kAddingKeys,
+                                          keys.get(),
+                                          multikeyMetadataKeys.get(),
+                                          multikeyPaths.get(),
+                                          loc,
+                                          IndexAccessMethod::kNoopOnSuppressedErrorFn);
+
+        // Should produce only one key:
+        invariant(keys->size() == 1, "Expected one key, got " + std::to_string(keys->size()));
+        return *(keys->begin());
+    };
+
+    auto dumpSorter = [&]() {
+        std::unique_ptr<IndexAccessMethod::BulkBuilder::Sorter::Iterator> it(
+            _indexes[0].bulk->done());
+
+        WriteUnitOfWork wuow(opCtx);
+        while (it->more()) {
+            auto key = it->next().first;
+            auto stat = bulkLoader->addKey(key);
+            if (!stat.isOK())
+                return stat;
+        }
+        wuow.commit();
+
+        return Status::OK();
+    };
+
+    // We "refresh" the sorter (create a new one) to empty it out. We require an empty sorter for
+    // every key class we encounter. A key class is a contiguous group of keys that are in order in
+    // the reference index, but may be out of order in the child index due to the record ID.
+    // For example, consider a reference index { a: 1, b: 1 } with their corresponding keyStrings:
+    //
+    // RecordID 2: { a: "a", b: "blue" }  -> "a,blue,2"
+    // RecordID 1: { a: "a", b: "red" }   -> "a,red,1"
+    //
+    // Note that in the reference index, the above are in order (sorted by { a: 1, b: 1 }), but the
+    // document with a greater record ID appears first.
+    //
+    // When trying to build a child index { a: 1 }, we produce these corresponding keyStrings:
+    // "a,2"
+    // "a,1"
+    // Though the keyStrings were in order in the reference index, they are not in order when it
+    // comes to the child index. As a result, we need to sort each set of keys that differ only in
+    // their record IDs. We're calling this set of keys a key class.
+    auto refreshSorter = [&]() {
+        _indexes[0].bulk =
+            _indexes[0].real->initiateBulk(_eachIndexBuildMaxMemoryUsageBytes, boost::none);
+    };
+
+    auto addToSorter = [&](const KeyString::Value& keyString) {
+        _indexes[0].bulk->addToSorter(keyString);
+    };
+
+    auto insertBulkBypassingSorter = [&](const KeyString::Value& keyString) {
+        uassertStatusOK(bulkLoader->addKey(keyString));
+    };
+
+    auto refIdxEntry = cursor->seek(startKeyString);
+
+    if (!refIdxEntry) {
+        LOGV2(3620204,
+              "Reference index is empty.",
+              "refIdx"_attr = refIdx->descriptor()->indexName());
+        _phase = IndexBuildPhaseEnum::kBulkLoad;
+        WriteUnitOfWork wuow(opCtx);
+        // Allow the commit operation to be interruptable:
+        bulkLoader->commit(true);
+        wuow.commit();
+        return Status::OK();
+    }
+
+    KeyString::Value currKS = produceKey(refIdxEntry->key, refIdxEntry->loc);
+    KeyString::Value nextKS;
+    bool processingKeyClass = false;
+
+    while ((refIdxEntry = cursor->next())) {
+        nextKS = produceKey(refIdxEntry->key, refIdxEntry->loc);
+        if (currKS.compareWithoutRecordId(nextKS) == 0) {
+            addToSorter(currKS);
+            processingKeyClass = true;
+            currKS = nextKS;
+            continue;
+        }
+
+        if (processingKeyClass) {
+            addToSorter(currKS);
+            auto stat = dumpSorter();
+            if (!stat.isOK())
+                return stat;
+            refreshSorter();
+            currKS = nextKS;
+            processingKeyClass = false;
+            continue;
+        }
+
+        insertBulkBypassingSorter(currKS);
+        currKS = nextKS;
+    }
+
+    if (processingKeyClass) {
+        addToSorter(currKS);
+        auto stat = dumpSorter();
+        if (!stat.isOK())
+            return stat;
+    } else {
+        insertBulkBypassingSorter(currKS);
+    }
+
+    _phase = IndexBuildPhaseEnum::kBulkLoad;
+
+    WriteUnitOfWork wuow(opCtx);
+    // Allow the commit operation to be interruptable:
+    bulkLoader->commit(true);
+    wuow.commit();
+
+    return Status::OK();
+}
+
 }  // namespace mongo

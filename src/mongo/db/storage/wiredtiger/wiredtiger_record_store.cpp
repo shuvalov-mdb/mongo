@@ -53,6 +53,7 @@
 #include "mongo/db/repl/replication_coordinator.h"
 #include "mongo/db/server_recovery.h"
 #include "mongo/db/service_context.h"
+#include "mongo/db/stats/resource_consumption_metrics.h"
 #include "mongo/db/storage/oplog_hack.h"
 #include "mongo/db/storage/wiredtiger/oplog_stone_parameters_gen.h"
 #include "mongo/db/storage/wiredtiger/wiredtiger_cursor_helpers.h"
@@ -669,6 +670,9 @@ public:
         WT_ITEM value;
         invariantWTOK(_cursor->get_value(_cursor, &value));
 
+        auto& metricsCollector = ResourceConsumption::MetricsCollector::get(_opCtx);
+        metricsCollector.incrementDocBytesRead(_opCtx, value.size);
+
         return {{id, {static_cast<const char*>(value.data), static_cast<int>(value.size)}}};
     }
 
@@ -1009,7 +1013,6 @@ int64_t WiredTigerRecordStore::freeStorageSize(OperationContext* opCtx) const {
 RecordData WiredTigerRecordStore::_getData(const WiredTigerCursor& cursor) const {
     WT_ITEM value;
     invariantWTOK(cursor->get_value(cursor.get(), &value));
-
     return RecordData(static_cast<const char*>(value.data), value.size).getOwned();
 }
 
@@ -1028,6 +1031,10 @@ bool WiredTigerRecordStore::findRecord(OperationContext* opCtx,
     }
     invariantWTOK(ret);
     *out = _getData(curwrap);
+
+    auto& metricsCollector = ResourceConsumption::MetricsCollector::get(opCtx);
+    metricsCollector.incrementDocBytesRead(opCtx, out->size());
+
     return true;
 }
 
@@ -1057,6 +1064,9 @@ void WiredTigerRecordStore::deleteRecord(OperationContext* opCtx, const RecordId
 
     ret = WT_OP_CHECK(wiredTigerCursorRemove(opCtx, c));
     invariantWTOK(ret);
+
+    auto& metricsCollector = ResourceConsumption::MetricsCollector::get(opCtx);
+    metricsCollector.incrementDocBytesWritten(old_length);
 
     _changeNumRecords(opCtx, -1);
     _increaseDataSize(opCtx, -old_length);
@@ -1504,6 +1514,9 @@ Status WiredTigerRecordStore::_insertRecords(OperationContext* opCtx,
     _changeNumRecords(opCtx, nRecords);
     _increaseDataSize(opCtx, totalLength);
 
+    auto& metricsCollector = ResourceConsumption::MetricsCollector::get(opCtx);
+    metricsCollector.incrementDocBytesWritten(totalLength);
+
     if (_oplogStones) {
         _oplogStones->updateCurrentStoneAfterInsertOnCommit(
             opCtx, totalLength, highestIdRecord, nRecords);
@@ -1620,6 +1633,7 @@ Status WiredTigerRecordStore::updateRecord(OperationContext* opCtx,
     const int kMaxEntries = 16;
     const int kMaxDiffBytes = len / 10;
 
+    auto& metricsCollector = ResourceConsumption::MetricsCollector::get(opCtx);
     bool skip_update = false;
     if (!_isLogged && len > kMinLengthForDiff && len <= old_length + kMaxDiffBytes) {
         int nentries = kMaxEntries;
@@ -1631,6 +1645,17 @@ Status WiredTigerRecordStore::updateRecord(OperationContext* opCtx,
             invariantWTOK(WT_OP_CHECK(
                 nentries == 0 ? c->reserve(c)
                               : wiredTigerCursorModify(opCtx, c, entries.data(), nentries)));
+
+            size_t modifiedDataSize = 0;
+            // Don't perform a range-based for loop because there may be fewer calculated entries
+            // than the reserved maximum.
+            for (auto i = 0; i < nentries; i++) {
+                // Account for both the amount of old data we are overwriting (size) and new data we
+                // are inserting (data.size).
+                modifiedDataSize += entries[i].size + entries[i].data.size;
+            };
+            metricsCollector.incrementDocBytesWritten(modifiedDataSize);
+
             WT_ITEM new_value;
             dassert(nentries == 0 ||
                     (c->get_value(c, &new_value) == 0 && new_value.size == value.size &&
@@ -1644,6 +1669,7 @@ Status WiredTigerRecordStore::updateRecord(OperationContext* opCtx,
     if (!skip_update) {
         c->set_value(c, value.Get());
         ret = WT_OP_CHECK(wiredTigerCursorInsert(opCtx, c));
+        metricsCollector.incrementDocBytesWritten(value.size);
     }
     invariantWTOK(ret);
 
@@ -1670,11 +1696,16 @@ StatusWith<RecordData> WiredTigerRecordStore::updateWithDamages(
     mutablebson::DamageVector::const_iterator where = damages.begin();
     const mutablebson::DamageVector::const_iterator end = damages.cend();
     std::vector<WT_MODIFY> entries(nentries);
+    size_t modifiedDataSize = 0;
     for (u_int i = 0; where != end; ++i, ++where) {
         entries[i].data.data = damageSource + where->sourceOffset;
         entries[i].data.size = where->size;
         entries[i].offset = where->targetOffset;
         entries[i].size = where->size;
+        // Account for both the amount of old data we are overwriting (size) and new data we are
+        // inserting (data.size).
+        modifiedDataSize += entries[i].size;
+        modifiedDataSize += entries[i].data.size;
     }
 
     WiredTigerCursor curwrap(_uri, _tableId, true, opCtx);
@@ -1688,6 +1719,9 @@ StatusWith<RecordData> WiredTigerRecordStore::updateWithDamages(
         invariantWTOK(WT_OP_CHECK(c->search(c)));
     else
         invariantWTOK(WT_OP_CHECK(wiredTigerCursorModify(opCtx, c, entries.data(), nentries)));
+
+    auto& metricsCollector = ResourceConsumption::MetricsCollector::get(opCtx);
+    metricsCollector.incrementDocBytesWritten(modifiedDataSize);
 
     WT_ITEM value;
     invariantWTOK(c->get_value(c, &value));
@@ -2196,6 +2230,9 @@ boost::optional<Record> WiredTigerRecordStoreCursorBase::next() {
     WT_ITEM value;
     invariantWTOK(c->get_value(c, &value));
 
+    auto& metricsCollector = ResourceConsumption::MetricsCollector::get(_opCtx);
+    metricsCollector.incrementDocBytesRead(_opCtx, value.size);
+
     _lastReturnedId = id;
     return {{id, {static_cast<const char*>(value.data), static_cast<int>(value.size)}}};
 }
@@ -2226,6 +2263,9 @@ boost::optional<Record> WiredTigerRecordStoreCursorBase::seekExact(const RecordI
 
     WT_ITEM value;
     invariantWTOK(c->get_value(c, &value));
+
+    auto& metricsCollector = ResourceConsumption::MetricsCollector::get(_opCtx);
+    metricsCollector.incrementDocBytesRead(_opCtx, value.size);
 
     _lastReturnedId = id;
     _eof = false;

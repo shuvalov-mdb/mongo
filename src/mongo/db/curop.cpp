@@ -50,10 +50,8 @@
 #include "mongo/db/profile_filter.h"
 #include "mongo/db/query/getmore_request.h"
 #include "mongo/db/query/plan_summary_stats.h"
-#include "mongo/db/stats/resource_consumption_metrics.h"
 #include "mongo/logv2/log.h"
 #include "mongo/rpc/metadata/client_metadata.h"
-#include "mongo/rpc/metadata/client_metadata_ismaster.h"
 #include "mongo/rpc/metadata/impersonated_user_metadata.h"
 #include "mongo/util/hex.h"
 #include "mongo/util/log_with_sampling.h"
@@ -262,15 +260,13 @@ void CurOp::reportCurrentOpForClient(OperationContext* opCtx,
     infoBuilder->append("host", hostName);
 
     client->reportState(*infoBuilder);
-    const auto& clientMetadata = ClientMetadataIsMasterState::get(client).getClientMetadata();
-
-    if (clientMetadata) {
-        auto appName = clientMetadata.get().getApplicationName();
+    if (auto clientMetadata = ClientMetadata::get(client)) {
+        auto appName = clientMetadata->getApplicationName();
         if (!appName.empty()) {
             infoBuilder->append("appName", appName);
         }
 
-        auto clientMetadataDocument = clientMetadata.get().getDocument();
+        auto clientMetadataDocument = clientMetadata->getDocument();
         infoBuilder->append("clientMetadata", clientMetadataDocument);
     }
 
@@ -560,14 +556,18 @@ bool CurOp::completeAndLogOperation(OperationContext* opCtx,
         _debug.prepareConflictDurationMillis =
             duration_cast<Milliseconds>(prepareConflictDurationMicros);
 
-        logv2::DynamicAttributes attr;
-        _debug.report(opCtx, (lockerInfo ? &lockerInfo->stats : nullptr), &attr);
+        auto operationMetricsPtr = [&]() -> ResourceConsumption::Metrics* {
+            auto& metricsCollector = ResourceConsumption::MetricsCollector::get(opCtx);
+            if (metricsCollector.hasCollectedMetrics()) {
+                return &metricsCollector.getMetrics();
+            }
+            return nullptr;
+        }();
 
-        auto& metricsCollector = ResourceConsumption::MetricsCollector::get(opCtx);
-        if (ResourceConsumption::get(opCtx).isMetricsCollectionEnabled() &&
-            !metricsCollector.getDbName().empty()) {
-            metricsCollector.getMetrics().report(&attr);
-        }
+        logv2::DynamicAttributes attr;
+        _debug.report(
+            opCtx, (lockerInfo ? &lockerInfo->stats : nullptr), operationMetricsPtr, &attr);
+
         LOGV2_OPTIONS(51803, {component}, "Slow query", attr);
     }
 
@@ -781,9 +781,8 @@ string OpDebug::report(OperationContext* opCtx, const SingleThreadedLockStats* l
 
     s << curop.getNS();
 
-    const auto& clientMetadata = ClientMetadataIsMasterState::get(client).getClientMetadata();
-    if (clientMetadata) {
-        auto appName = clientMetadata.get().getApplicationName();
+    if (auto clientMetadata = ClientMetadata::get(client)) {
+        auto appName = clientMetadata->getApplicationName();
         if (!appName.empty()) {
             s << " appName: \"" << str::escape(appName) << '\"';
         }
@@ -939,6 +938,7 @@ string OpDebug::report(OperationContext* opCtx, const SingleThreadedLockStats* l
 
 void OpDebug::report(OperationContext* opCtx,
                      const SingleThreadedLockStats* lockStats,
+                     const ResourceConsumption::Metrics* operationMetrics,
                      logv2::DynamicAttributes* pAttrs) const {
     Client* client = opCtx->getClient();
     auto& curop = *CurOp::get(opCtx);
@@ -952,9 +952,8 @@ void OpDebug::report(OperationContext* opCtx,
 
     pAttrs->addDeepCopy("ns", curop.getNS());
 
-    const auto& clientMetadata = ClientMetadataIsMasterState::get(client).getClientMetadata();
-    if (clientMetadata) {
-        StringData appName = clientMetadata.get().getApplicationName();
+    if (auto clientMetadata = ClientMetadata::get(client)) {
+        StringData appName = clientMetadata->getApplicationName();
         if (!appName.empty()) {
             pAttrs->add("appName", appName);
         }
@@ -1078,6 +1077,12 @@ void OpDebug::report(OperationContext* opCtx,
 
     if (storageStats) {
         pAttrs->add("storage", storageStats->toBSON());
+    }
+
+    if (operationMetrics) {
+        BSONObjBuilder builder;
+        operationMetrics->toFlatBsonNonZeroFields(&builder);
+        pAttrs->add("operationMetrics", builder.obj());
     }
 
     if (iscommand) {
@@ -1289,10 +1294,8 @@ std::function<BSONObj(ProfileFilter::Args)> OpDebug::appendStaged(StringSet requ
         b.append(field, args.opCtx->getClient()->clientAddress());
     });
     addIfNeeded("appName", [](auto field, auto args, auto& b) {
-        const auto& clientMetadata =
-            ClientMetadataIsMasterState::get(args.opCtx->getClient()).getClientMetadata();
-        if (clientMetadata) {
-            auto appName = clientMetadata.get().getApplicationName();
+        if (auto clientMetadata = ClientMetadata::get(args.opCtx->getClient())) {
+            auto appName = clientMetadata->getApplicationName();
             if (!appName.empty()) {
                 b.append(field, appName);
             }
@@ -1511,10 +1514,9 @@ std::function<BSONObj(ProfileFilter::Args)> OpDebug::appendStaged(StringSet requ
 
     addIfNeeded("operationMetrics", [](auto field, auto args, auto& b) {
         auto& metricsCollector = ResourceConsumption::MetricsCollector::get(args.opCtx);
-        if (ResourceConsumption::isMetricsCollectionEnabled() &&
-            !metricsCollector.getDbName().empty()) {
-            BSONObjBuilder metricsBuilder(b.subobjStart("operationMetrics"));
-            metricsCollector.getMetrics().toBson(&metricsBuilder);
+        if (metricsCollector.hasCollectedMetrics()) {
+            BSONObjBuilder metricsBuilder(b.subobjStart(field));
+            metricsCollector.getMetrics().toFlatBsonAllFields(&metricsBuilder);
         }
     });
 

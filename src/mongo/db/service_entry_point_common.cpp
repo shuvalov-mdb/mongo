@@ -91,6 +91,7 @@
 #include "mongo/rpc/get_status_from_command_result.h"
 #include "mongo/rpc/message.h"
 #include "mongo/rpc/metadata.h"
+#include "mongo/rpc/metadata/client_metadata.h"
 #include "mongo/rpc/metadata/oplog_query_metadata.h"
 #include "mongo/rpc/metadata/repl_set_metadata.h"
 #include "mongo/rpc/metadata/tracking_metadata.h"
@@ -990,6 +991,8 @@ void execCommandDatabase(OperationContext* opCtx,
     const auto isInternalClient = opCtx->getClient()->session() &&
         (opCtx->getClient()->session()->getTags() & transport::Session::kInternalClient);
 
+    const auto isHello = command->getName() == "hello"_sd || command->getName() == "isMaster"_sd;
+
     try {
         const auto apiParamsFromClient = initializeAPIParameters(opCtx, request.body, command);
         Client* client = opCtx->getClient();
@@ -1000,11 +1003,17 @@ void execCommandDatabase(OperationContext* opCtx,
             APIParameters::get(opCtx) = APIParameters::fromClient(apiParamsFromClient);
         }
 
+        if (isHello) {
+            // Preload generic ClientMetadata ahead of our first hello request. After the first
+            // request, metaElement should always be empty.
+            auto metaElem = request.body[kMetadataDocumentName];
+            ClientMetadata::setFromMetadata(opCtx->getClient(), metaElem);
+        }
+
         auto& apiParams = APIParameters::get(opCtx);
         auto& apiVersionMetrics = APIVersionMetrics::get(opCtx->getServiceContext());
-        const auto& clientMetadata = ClientMetadataIsMasterState::get(client).getClientMetadata();
-        if (clientMetadata) {
-            auto appName = clientMetadata.get().getApplicationName().toString();
+        if (auto clientMetadata = ClientMetadata::get(client)) {
+            auto appName = clientMetadata->getApplicationName().toString();
             apiVersionMetrics.update(appName, apiParams);
         }
 
@@ -1038,11 +1047,7 @@ void execCommandDatabase(OperationContext* opCtx,
             NamespaceString::validDBName(dbname, NamespaceString::DollarInDbNameBehavior::Allow));
 
         ResourceConsumption::ScopedMetricsCollector scopedMetrics(
-            opCtx, command->collectsResourceConsumptionMetrics());
-        if (ResourceConsumption::shouldCollectMetricsForDatabase(dbname)) {
-            auto& opMetrics = ResourceConsumption::MetricsCollector::get(opCtx);
-            opMetrics.setDbName(dbname);
-        }
+            opCtx, dbname, command->collectsResourceConsumptionMetrics());
 
         const auto allowTransactionsOnConfigDatabase =
             (serverGlobalParams.clusterRole == ClusterRole::ConfigServer ||
@@ -1170,8 +1175,7 @@ void execCommandDatabase(OperationContext* opCtx,
         // The "hello" or "isMaster" commands should not inherit the deadline from the user op it is
         // operating as a part of as that can interfere with replica set monitoring and host
         // selection.
-        bool ignoreMaxTimeMSOpOnly =
-            command->getName() == "hello"_sd || command->getName() == "isMaster"_sd;
+        const bool ignoreMaxTimeMSOpOnly = isHello;
 
         if ((maxTimeMS > 0 || maxTimeMSOpOnly > 0) &&
             command->getLogicalOp() != LogicalOp::opGetMore) {
@@ -1606,6 +1610,7 @@ void receivedInsert(OperationContext* opCtx, const NamespaceString& nsString, co
         audit::logInsertAuthzCheck(opCtx->getClient(), nsString, obj, status.code());
         uassertStatusOK(status);
     }
+    ResourceConsumption::ScopedMetricsCollector scopedMetrics(opCtx, nsString.db().toString());
     write_ops_exec::performInserts(opCtx, insertOp);
 }
 
@@ -1629,6 +1634,7 @@ void receivedUpdate(OperationContext* opCtx, const NamespaceString& nsString, co
                                status.code());
     uassertStatusOK(status);
 
+    ResourceConsumption::ScopedMetricsCollector scopedMetrics(opCtx, nsString.db().toString());
     write_ops_exec::performUpdates(opCtx, updateOp);
 }
 
@@ -1642,6 +1648,7 @@ void receivedDelete(OperationContext* opCtx, const NamespaceString& nsString, co
     audit::logDeleteAuthzCheck(opCtx->getClient(), nsString, singleDelete.getQ(), status.code());
     uassertStatusOK(status);
 
+    ResourceConsumption::ScopedMetricsCollector scopedMetrics(opCtx, nsString.db().toString());
     write_ops_exec::performDeletes(opCtx, deleteOp);
 }
 

@@ -848,7 +848,6 @@ functions:
   "upload debugsymbols": &upload_debugsymbols
     command: s3.put
     params:
-      optional: true
       aws_key: ${aws_key}
       aws_secret: ${aws_secret}
       local_file: src/mongo-debugsymbols.${ext|tgz}
@@ -1228,7 +1227,6 @@ functions:
           # Windows path separator
           toolchain_txt="$pip_dir/toolchain-requirements.txt"
           ${activate_virtualenv}
-          python -m pip install --upgrade pip
           python -m pip install -r "$toolchain_txt" -q
           python -m pip freeze > pip-requirements.txt
 
@@ -1367,10 +1365,6 @@ functions:
       working_dir: src
       shell: bash
       script: |
-        # export these before verbose is set to avoid sharing sensitive info
-        export CEDAR_USERNAME=${cedar_user}
-        export CEDAR_API_KEY=${cedar_api_key}
-
         set -o errexit
         set -o verbose
 
@@ -1471,8 +1465,6 @@ functions:
         # this list of expansions.
         set +o errexit
         PATH="$path_value"                                \
-            CEDAR_USERNAME=${cedar_user}                  \
-            CEDAR_PASSWORD
             AWS_PROFILE=${aws_profile_remote}             \
             ${gcov_environment}                           \
             ${lang_environment}                           \
@@ -7501,6 +7493,7 @@ tasks:
   - func: "run idl tests"
 
 - name: blackduck_scanner
+  patchable: false
   commands:
   - func: "do non-compile setup"
   - command: shell.exec
@@ -7530,7 +7523,7 @@ tasks:
         # activate the virtualenv if it has been set up
         ${activate_virtualenv}
 
-        python buildscripts/blackduck_hub.py -v scan
+        python buildscripts/blackduck_hub.py -v scan_and_report --build_logger=mci.buildlogger --build_logger_task_id=${task_id} --report_file=report.json
 
 - name: tla_plus
   commands:

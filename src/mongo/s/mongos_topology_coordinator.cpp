@@ -54,12 +54,12 @@ MONGO_INITIALIZER(GenerateMongosInstanceId)(InitializerContext*) {
     return Status::OK();
 }
 
-// Signals that an isMaster request has started waiting.
-MONGO_FAIL_POINT_DEFINE(waitForIsMasterResponse);
-// Awaitable isMaster requests with the proper topologyVersions are expected to wait for
+// Signals that a hello request has started waiting.
+MONGO_FAIL_POINT_DEFINE(waitForHelloResponse);
+// Awaitable hello requests with the proper topologyVersions are expected to wait for
 // maxAwaitTimeMS on mongos. When set, this failpoint will hang right before waiting on a
 // topology change.
-MONGO_FAIL_POINT_DEFINE(hangWhileWaitingForIsMasterResponse);
+MONGO_FAIL_POINT_DEFINE(hangWhileWaitingForHelloResponse);
 // Failpoint for hanging during quiesce mode on mongos.
 MONGO_FAIL_POINT_DEFINE(hangDuringQuiesceMode);
 
@@ -153,15 +153,15 @@ std::shared_ptr<const MongosIsMasterResponse> MongosTopologyCoordinator::awaitIs
     HelloMetrics::get(opCtx)->incrementNumAwaitingTopologyChanges();
     lk.unlock();
 
-    if (MONGO_unlikely(waitForIsMasterResponse.shouldFail())) {
+    if (MONGO_unlikely(waitForHelloResponse.shouldFail())) {
         // Used in tests that wait for this failpoint to be entered before shutting down mongos,
         // which is the only action that triggers a topology change.
-        LOGV2(4695704, "waitForIsMasterResponse failpoint enabled");
+        LOGV2(4695704, "waitForHelloResponse failpoint enabled");
     }
 
-    if (MONGO_unlikely(hangWhileWaitingForIsMasterResponse.shouldFail())) {
-        LOGV2(4695501, "hangWhileWaitingForIsMasterResponse failpoint enabled");
-        hangWhileWaitingForIsMasterResponse.pauseWhileSet(opCtx);
+    if (MONGO_unlikely(hangWhileWaitingForHelloResponse.shouldFail())) {
+        LOGV2(4695501, "hangWhileWaitingForHelloResponse failpoint enabled");
+        hangWhileWaitingForHelloResponse.pauseWhileSet(opCtx);
     }
 
     // Wait for a mongos topology change with timeout set to deadline.

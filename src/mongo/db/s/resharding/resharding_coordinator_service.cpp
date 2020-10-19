@@ -58,7 +58,13 @@ void withAlternateSession(OperationContext* opCtx, Callable&& callable) {
     TxnNumber txnNumber = 0;
 
     auto guard = makeGuard([opCtx = asr.opCtx(), txnNumber] {
-        ShardingCatalogManager::get(opCtx)->abortTxnForConfigDocument(opCtx, txnNumber);
+        try {
+            ShardingCatalogManager::get(opCtx)->abortTxnForConfigDocument(opCtx, txnNumber);
+        } catch (const DBException& ex) {
+            LOGV2(5165900,
+                  "Failed to abort transaction to resharding metadata",
+                  "error"_attr = redact(ex));
+        }
     });
 
     callable(asr.opCtx(), txnNumber);
@@ -391,9 +397,7 @@ CollectionType createTempReshardingCollectionType(
 
     TypeCollectionRecipientFields recipient(
         std::move(donorShardIds), coordinatorDoc.getExistingUUID(), coordinatorDoc.getNss());
-    if (coordinatorDoc.getFetchTimestampStruct().getFetchTimestamp()) {
-        recipient.setFetchTimestampStruct(coordinatorDoc.getFetchTimestampStruct());
-    }
+    emplaceFetchTimestampIfExists(recipient, coordinatorDoc.getFetchTimestamp());
     tempEntryReshardingFields.setRecipientFields(recipient);
     collType.setReshardingFields(std::move(tempEntryReshardingFields));
 
@@ -424,7 +428,8 @@ void persistInitialStateAndCatalogUpdates(OperationContext* opCtx,
             opCtx, coordinatorDoc, chunkVersion, collation, txnNumber);
 
         // Insert new initial chunk and tag documents
-        insertChunkAndTagDocsForTempNss(opCtx, initialChunks, newZones, txnNumber);
+        insertChunkAndTagDocsForTempNss(
+            opCtx, std::move(initialChunks), std::move(newZones), txnNumber);
 
         // Commit the transaction
         ShardingCatalogManager::get(opCtx)->commitTxnForConfigDocument(opCtx, txnNumber);
@@ -625,9 +630,9 @@ ExecutorFuture<void> ReshardingCoordinatorService::ReshardingCoordinator::_init(
 
     return _initialChunksAndZonesPromise.getFuture()
         .thenRunOn(**executor)
-        .then([this](const ChunksAndZones& initialChunksAndZones) {
-            auto initialChunks = initialChunksAndZones.initialChunks;
-            auto newZones = initialChunksAndZones.newZones;
+        .then([this](ChunksAndZones initialChunksAndZones) {
+            auto initialChunks = std::move(initialChunksAndZones.initialChunks);
+            auto newZones = std::move(initialChunksAndZones.newZones);
 
             // Create state document that will be written to disk and afterward set to the in-memory
             // _coordinatorDoc
@@ -636,7 +641,7 @@ ExecutorFuture<void> ReshardingCoordinatorService::ReshardingCoordinator::_init(
 
             auto opCtx = cc().makeOperationContext();
             resharding::persistInitialStateAndCatalogUpdates(
-                opCtx.get(), updatedCoordinatorDoc, initialChunks, newZones);
+                opCtx.get(), updatedCoordinatorDoc, std::move(initialChunks), std::move(newZones));
 
             invariant(_coordinatorDoc.getState() == CoordinatorStateEnum::kInitializing);
             _coordinatorDoc = updatedCoordinatorDoc;
@@ -650,7 +655,7 @@ ReshardingCoordinatorService::ReshardingCoordinator::_awaitAllDonorsReadyToDonat
         return ExecutorFuture<void>(**executor, Status::OK());
     }
 
-    // TODO SERVER-51212 Remove this call.
+    // TODO SERVER-51398 Remove this call.
     interrupt({ErrorCodes::InternalError, "Early exit to support jsTesting"});
 
     return _reshardingCoordinatorObserver->awaitAllDonorsReadyToDonate()
@@ -764,15 +769,7 @@ void ReshardingCoordinatorService::ReshardingCoordinator::_runUpdates(
     // Build new state doc for coordinator state update
     ReshardingCoordinatorDocument updatedCoordinatorDoc = updatedStateDoc;
     updatedCoordinatorDoc.setState(nextState);
-    if (fetchTimestamp) {
-        auto& fetchTimestampStruct = updatedCoordinatorDoc.getFetchTimestampStruct();
-        if (fetchTimestampStruct.getFetchTimestamp())
-            invariant(fetchTimestampStruct.getFetchTimestamp().get() == fetchTimestamp.get());
-
-        invariant(!fetchTimestamp->isNull());
-
-        fetchTimestampStruct.setFetchTimestamp(std::move(fetchTimestamp));
-    }
+    emplaceFetchTimestampIfExists(updatedCoordinatorDoc, std::move(fetchTimestamp));
 
     auto opCtx = cc().makeOperationContext();
     resharding::persistStateTransition(opCtx.get(), updatedCoordinatorDoc);
