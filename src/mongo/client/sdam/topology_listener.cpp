@@ -195,34 +195,28 @@ void TopologyEventsPublisher::_nextDelivery() {
         if (_isClosed) {
             return;
         }
+        listeners.reserve(_listeners.size());
         // Helps to purge empty elements when a weak_ptr points to an element removed elsewhere.
         // We take advantage of the fact that we are scanning the container anyway.
-        bool hasEmptyElements = false;
-        std::transform(_listeners.begin(),
-                       _listeners.end(),
-                       std::back_inserter(listeners),
-                       [&hasEmptyElements](const TopologyListenerPtr& src) {
-                           auto shared = src.lock();
-                           if (!shared) {
-                               hasEmptyElements = true;
-                           }
-                           return shared;
-                       });
-        if (hasEmptyElements) {
-            _listeners.erase(
-                std::remove_if(_listeners.begin(),
-                               _listeners.end(),
-                               [](const TopologyListenerPtr& ptr) { return !ptr.lock(); }),
-                _listeners.end());
-        }
+        _listeners.erase(std::remove_if(_listeners.begin(),
+                                        _listeners.end(),
+                                        [this, &listeners](const TopologyListenerPtr& ptr) {
+                                            auto p = ptr.lock();
+                                            if (p) {
+                                                // Makes a copy of non-empty elements in
+                                                // 'listeners'.
+                                                listeners.push_back(p);
+                                                return false;
+                                            }
+                                            return true;
+                                        }),
+                         _listeners.end());
     }
 
     // send to the listeners outside of the lock.
     for (auto listener : listeners) {
-        // While we purged empty elements from the collection the copy may still have them.
-        if (listener) {
-            _sendEvent(listener.get(), *nextEvent);
-        }
+        // The copy logic above guaranteed that only non-empty elements are in the vector.
+        _sendEvent(listener.get(), *nextEvent);
     }
 }
 
