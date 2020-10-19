@@ -86,25 +86,16 @@ TEST_F(TopologyListenerTestFixture, TestListeners) {
 
     getEventsPublisher()->onServerPingSucceededEvent(Microseconds(1), HostAndPort("abc.def:3421"));
 
-<<<<<<< HEAD
     while (!l1->hasPingResponse(HostAndPort("abc.def:3421")) ||
            !l2->hasPingResponse(HostAndPort("abc.def:3421"))) {
-=======
-    while (!l1->hasPingResponse(HostAndPort("abc.def:3421")) || !l2->hasPingResponse(HostAndPort("abc.def:3421"))) {
->>>>>>> f416ea66b1cb18bbf1f847ddf2b5c7580404907f
         sleepFor(Milliseconds(1));
     }
     ASSERT_TRUE(l1->hasPingResponse(HostAndPort("abc.def:3421")));
     ASSERT_TRUE(l2->hasPingResponse(HostAndPort("abc.def:3421")));
 }
 
-<<<<<<< HEAD
 // Tests that event publisher handles listener weak pointers properly.
 TEST_F(TopologyListenerTestFixture, TestListenersRefCounts) {
-=======
-// Tests that event publisher handles lestener weak pointers properly.
-TEST_F(TopologyListenerTestFixture, TestListenersRefcounts) {
->>>>>>> f416ea66b1cb18bbf1f847ddf2b5c7580404907f
     std::shared_ptr<sdam::TopologyListenerMock> l1 = std::make_shared<sdam::TopologyListenerMock>();
     std::shared_ptr<sdam::TopologyListenerMock> l2 = std::make_shared<sdam::TopologyListenerMock>();
 
@@ -115,13 +106,8 @@ TEST_F(TopologyListenerTestFixture, TestListenersRefcounts) {
 
     getEventsPublisher()->onServerPingSucceededEvent(Microseconds(1), HostAndPort("abc.def:1"));
 
-<<<<<<< HEAD
     ASSERT_EQ(1, l1.use_count());
     // Deletes the l1 listener, as it has only one owner.
-=======
-    // Deletes the l1 listener, as it has only one owner.
-    ASSERT_EQ(1, l1.use_count());
->>>>>>> f416ea66b1cb18bbf1f847ddf2b5c7580404907f
     l1.reset();
 
     getEventsPublisher()->onServerPingSucceededEvent(Microseconds(1), HostAndPort("abc.def:2"));
