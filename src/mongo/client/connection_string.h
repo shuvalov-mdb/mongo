@@ -66,6 +66,8 @@ public:
 
     ConnectionString() = default;
 
+    ConnectionString(const ConnectionString&) = default;
+
     /**
      * Constructs a connection string representing a replica set.
      */

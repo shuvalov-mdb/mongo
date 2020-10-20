@@ -61,14 +61,16 @@ RemoteCommandRequestBase::RemoteCommandRequestBase(RequestId requestId,
                                                    OperationContext* opCtx,
                                                    Milliseconds timeoutMillis,
                                                    boost::optional<HedgeOptions> hedgeOptions,
-                                                   FireAndForgetMode fireAndForgetMode)
+                                                   FireAndForgetMode fireAndForgetMode,
+                                                   boost::optional<TransientSSLParams> transientSSLParams)
     : id(requestId),
       dbname(theDbName),
       metadata(metadataObj),
       opCtx(opCtx),
       hedgeOptions(hedgeOptions),
       fireAndForgetMode(fireAndForgetMode),
-      timeout(timeoutMillis) {
+      timeout(timeoutMillis),
+      transientSSLParams(transientSSLParams) {
     // If there is a comment associated with the current operation, append it to the command that we
     // are about to dispatch to the shards.
     cmdObj = opCtx && opCtx->getComment() && !theCmdObj["comment"]
@@ -131,7 +133,8 @@ RemoteCommandRequestImpl<T>::RemoteCommandRequestImpl(RequestId requestId,
                                                       OperationContext* opCtx,
                                                       Milliseconds timeoutMillis,
                                                       boost::optional<HedgeOptions> hedgeOptions,
-                                                      FireAndForgetMode fireAndForgetMode)
+                                                      FireAndForgetMode fireAndForgetMode,
+                                                      boost::optional<TransientSSLParams> transientSSLParams)
     : RemoteCommandRequestBase(requestId,
                                theDbName,
                                theCmdObj,
@@ -139,7 +142,8 @@ RemoteCommandRequestImpl<T>::RemoteCommandRequestImpl(RequestId requestId,
                                opCtx,
                                timeoutMillis,
                                hedgeOptions,
-                               fireAndForgetMode),
+                               fireAndForgetMode,
+                               transientSSLParams),
       target(theTarget) {
     if constexpr (std::is_same_v<T, std::vector<HostAndPort>>) {
         invariant(!theTarget.empty());
@@ -154,7 +158,8 @@ RemoteCommandRequestImpl<T>::RemoteCommandRequestImpl(const T& theTarget,
                                                       OperationContext* opCtx,
                                                       Milliseconds timeoutMillis,
                                                       boost::optional<HedgeOptions> hedgeOptions,
-                                                      FireAndForgetMode fireAndForgetMode)
+                                                      FireAndForgetMode fireAndForgetMode,
+                                                      boost::optional<TransientSSLParams> transientSSLParams)
     : RemoteCommandRequestImpl(requestIdCounter.addAndFetch(1),
                                theTarget,
                                theDbName,
@@ -163,7 +168,8 @@ RemoteCommandRequestImpl<T>::RemoteCommandRequestImpl(const T& theTarget,
                                opCtx,
                                timeoutMillis,
                                hedgeOptions,
-                               fireAndForgetMode) {}
+                               fireAndForgetMode,
+                               transientSSLParams) {}
 
 template <typename T>
 std::string RemoteCommandRequestImpl<T>::toString() const {

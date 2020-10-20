@@ -38,6 +38,7 @@
 #include "mongo/transport/transport_layer.h"
 #include "mongo/util/concepts.h"
 #include "mongo/util/net/hostandport.h"
+#include "mongo/util/net/ssl_options.h"
 #include "mongo/util/time_support.h"
 
 namespace mongo {
@@ -65,7 +66,8 @@ struct RemoteCommandRequestBase {
                              OperationContext* opCtx,
                              Milliseconds timeoutMillis,
                              boost::optional<HedgeOptions> hedgeOptions,
-                             FireAndForgetMode fireAndForgetMode);
+                             FireAndForgetMode fireAndForgetMode,
+                             boost::optional<TransientSSLParams> transientSSLParams);
 
     // Internal id of this request. Not interpreted and used for tracing purposes only.
     RequestId id;
@@ -100,6 +102,10 @@ struct RemoteCommandRequestBase {
     boost::optional<Date_t> dateScheduled;
 
     transport::ConnectSSLMode sslMode = transport::kGlobalSSLMode;
+
+    // If the remote location requires temporary SSL authentication instead of
+    // the global one this structure will supply the necessary token.
+    boost::optional<TransientSSLParams> transientSSLParams;
 
 protected:
     ~RemoteCommandRequestBase() = default;
@@ -142,7 +148,8 @@ struct RemoteCommandRequestImpl : RemoteCommandRequestBase {
                              OperationContext* opCtx,
                              Milliseconds timeoutMillis = kNoTimeout,
                              boost::optional<HedgeOptions> hedgeOptions = boost::none,
-                             FireAndForgetMode fireAndForgetMode = FireAndForgetMode::kOff);
+                             FireAndForgetMode fireAndForgetMode = FireAndForgetMode::kOff,
+                             boost::optional<TransientSSLParams> transientSSLParams = {});
 
     RemoteCommandRequestImpl(const Target& theTarget,
                              const std::string& theDbName,
@@ -151,7 +158,8 @@ struct RemoteCommandRequestImpl : RemoteCommandRequestBase {
                              OperationContext* opCtx,
                              Milliseconds timeoutMillis = kNoTimeout,
                              boost::optional<HedgeOptions> hedgeOptions = boost::none,
-                             FireAndForgetMode fireAndForgetMode = FireAndForgetMode::kOff);
+                             FireAndForgetMode fireAndForgetMode = FireAndForgetMode::kOff,
+                             boost::optional<TransientSSLParams> transientSSLParams = {});
 
     RemoteCommandRequestImpl(const Target& theTarget,
                              const std::string& theDbName,
@@ -176,7 +184,8 @@ struct RemoteCommandRequestImpl : RemoteCommandRequestBase {
                              OperationContext* opCtx,
                              Milliseconds timeoutMillis = kNoTimeout,
                              boost::optional<HedgeOptions> hedgeOptions = boost::none,
-                             FireAndForgetMode fireAndForgetMode = FireAndForgetMode::kOff)
+                             FireAndForgetMode fireAndForgetMode = FireAndForgetMode::kOff,
+                             boost::optional<TransientSSLParams> transientSSLParams = {})
         : RemoteCommandRequestImpl(theTarget,
                                    theDbName,
                                    theCmdObj,
@@ -184,7 +193,8 @@ struct RemoteCommandRequestImpl : RemoteCommandRequestBase {
                                    opCtx,
                                    timeoutMillis,
                                    hedgeOptions,
-                                   fireAndForgetMode) {}
+                                   fireAndForgetMode,
+                                   transientSSLParams) {}
 
     std::string toString() const;
 
