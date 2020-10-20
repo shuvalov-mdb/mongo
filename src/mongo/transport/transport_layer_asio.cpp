@@ -69,6 +69,8 @@
 
 #include "mongo/transport/session_asio.h"
 
+#include "mongo/util/stacktrace.h"//tmp
+
 namespace mongo {
 namespace transport {
 
@@ -452,6 +454,8 @@ Status makeConnectError(Status status, const HostAndPort& peer, const WrappedEnd
 StatusWith<SessionHandle> TransportLayerASIO::connect(HostAndPort peer,
                                                       ConnectSSLMode sslMode,
                                                       Milliseconds timeout) {
+std::cerr << "!!!! connect " << peer << std::endl;
+printStackTrace();//tmp
     std::error_code ec;
     GenericSocket sock(*_egressReactor);
     WrappedResolver resolver(*_egressReactor);
@@ -511,6 +515,8 @@ StatusWith<SessionHandle> TransportLayerASIO::connect(HostAndPort peer,
 template <typename Endpoint>
 StatusWith<TransportLayerASIO::ASIOSessionHandle> TransportLayerASIO::_doSyncConnect(
     Endpoint endpoint, const HostAndPort& peer, const Milliseconds& timeout) {
+std::cerr << "!!!! doSyncConnect " << peer << std::endl;
+printStackTrace();//tmp
     GenericSocket sock(*_egressReactor);
     std::error_code ec;
 
@@ -568,6 +574,8 @@ Future<SessionHandle> TransportLayerASIO::asyncConnect(HostAndPort peer,
                                                        ConnectSSLMode sslMode,
                                                        const ReactorHandle& reactor,
                                                        Milliseconds timeout) {
+std::cerr << "!!!! asyncConnect " << peer << std::endl;
+printStackTrace();//tmp
 
     struct AsyncConnectState {
         AsyncConnectState(HostAndPort peer,

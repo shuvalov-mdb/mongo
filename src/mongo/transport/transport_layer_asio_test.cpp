@@ -163,6 +163,36 @@ TEST(TransportLayerASIO, PortZeroConnect) {
     tla.shutdown();
 }
 
+TEST(TransportLayerASIO, SSLConnect) {
+    ServiceEntryPointUtil sepu;
+
+    auto options = [] {
+        ServerGlobalParams params;
+        params.noUnixSocket = true;
+        transport::TransportLayerASIO::Options opts(&params);
+
+        // TODO SERVER-30212 should clean this up and assign a port from the supplied port range
+        // provided by resmoke.
+        opts.port = 0;
+        return opts;
+    }();
+
+    transport::TransportLayerASIO tla(options, &sepu);
+    sepu.setTransportLayer(&tla);
+
+    ASSERT_OK(tla.setup());
+    ASSERT_OK(tla.start());
+    int port = tla.listenerPort();
+    ASSERT_GT(port, 0);
+    LOGV2(23038, "TransportLayerASIO.listenerPort() is {port}", "port"_attr = port);
+
+    SimpleConnectionThread connect_thread(port);
+    sepu.waitForConnect();
+    connect_thread.stop();
+    sepu.endAllSessions({});
+    tla.shutdown();
+}
+
 class TimeoutSEP : public ServiceEntryPoint {
 public:
     ~TimeoutSEP() override {
