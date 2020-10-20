@@ -20,39 +20,6 @@ copyCertificateFile("jstests/libs/ca.pem", dbPath + "/ca-test.pem");
 copyCertificateFile("jstests/libs/client.pem", dbPath + "/client-test.pem");
 copyCertificateFile("jstests/libs/server.pem", dbPath + "/server-test.pem");
 
-/**
- * Runs the donorForgetMigration command and asserts that the TenantMigrationAccessBlocker and donor
- * state document are eventually removed from the donor.
- */
-function testDonorForgetMigrationAfterMigrationCompletes(
-    donorRst, recipientRst, migrationId, tenantId) {
-    jsTest.log("Test donorForgetMigration after the migration completes");
-    const donorPrimary = donorRst.getPrimary();
-    const recipientPrimary = recipientRst.getPrimary();
-
-    assert.commandWorked(
-        donorPrimary.adminCommand({donorForgetMigration: 1, migrationId: migrationId}));
-
-    const recipientForgetMigrationMetrics =
-        recipientPrimary.adminCommand({serverStatus: 1}).metrics.commands.recipientForgetMigration;
-    assert.eq(recipientForgetMigrationMetrics.failed, 0);
-
-    donorRst.nodes.forEach((node) => {
-        assert.soon(() =>
-                        null == node.adminCommand({serverStatus: 1}).tenantMigrationAccessBlocker);
-    });
-
-    assert.soon(() =>
-                    0 === donorPrimary.getCollection(kConfigDonorsNS).count({tenantId: tenantId}));
-    assert.soon(() => 0 ===
-                    donorPrimary.adminCommand({serverStatus: 1})
-                        .repl.primaryOnlyServices.TenantMigrationDonorService);
-
-    const donorRecipientMonitorPoolStats =
-        donorPrimary.adminCommand({connPoolStats: 1}).replicaSets;
-    assert.eq(Object.keys(donorRecipientMonitorPoolStats).length, 0);
-}
-
 const donorRst = new ReplSetTest({
     nodes: [{}, {rsConfig: {priority: 0}}, {rsConfig: {priority: 0}}],
     name: "donor",
@@ -126,7 +93,31 @@ assert.soon(() => {
 });
 assert(mtab[kTenantId].commitOrAbortOpTime);
 
-testDonorForgetMigrationAfterMigrationCompletes(donorRst, recipientRst, migrationId, kTenantId);
+// Runs the donorForgetMigration command and asserts that the TenantMigrationAccessBlocker and donor
+// state document are eventually removed from the donor.
+
+jsTest.log("Test donorForgetMigration after the migration completes");
+const donorPrimary = donorRst.getPrimary();
+const recipientPrimary = recipientRst.getPrimary();
+
+assert.commandWorked(
+    donorPrimary.adminCommand({donorForgetMigration: 1, migrationId: migrationId}));
+
+const recipientForgetMigrationMetrics =
+    recipientPrimary.adminCommand({serverStatus: 1}).metrics.commands.recipientForgetMigration;
+assert.eq(recipientForgetMigrationMetrics.failed, 0);
+
+donorRst.nodes.forEach((node) => {
+    assert.soon(() => null == node.adminCommand({serverStatus: 1}).tenantMigrationAccessBlocker);
+});
+
+assert.soon(() => 0 === donorPrimary.getCollection(kConfigDonorsNS).count({tenantId: tenantId}));
+assert.soon(() => 0 ===
+                donorPrimary.adminCommand({serverStatus: 1})
+                    .repl.primaryOnlyServices.TenantMigrationDonorService);
+
+const donorRecipientMonitorPoolStats = donorPrimary.adminCommand({connPoolStats: 1}).replicaSets;
+assert.eq(Object.keys(donorRecipientMonitorPoolStats).length, 0);
 
 donorRst.stopSet();
 recipientRst.stopSet();
