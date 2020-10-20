@@ -2321,7 +2321,7 @@ bool SSLManagerOpenSSL::_readCertificateChainFromMemory(SSL_CTX* context,
                                                         const std::string& payload,
                                                         PasswordFetcher* password,
                                                         StringData description) {
-    ERR_clear_error(); // Clear error stack for SSL_CTX_use_certificate().
+    ERR_clear_error();  // Clear error stack for SSL_CTX_use_certificate().
 
     UniqueBIO inBio(BIO_new_mem_buf(payload.c_str(), payload.length()));
 
@@ -2383,7 +2383,7 @@ bool SSLManagerOpenSSL::_readCertificateChainFromMemory(SSL_CTX* context,
         LOGV2_ERROR(5159909,
                     "Error remained after scanning all X509 certificates from memory",
                     "error"_attr = getSSLErrorMessage(ERR_get_error()));
-        return false; // Some real error.
+        return false;  // Some real error.
     }
 
     return true;
