@@ -9,14 +9,9 @@
 (function() {
 "use strict";
 
-load("jstests/libs/fail_point_util.js");
-load("jstests/libs/parallelTester.js");
 load("jstests/libs/uuid_util.js");
 load("jstests/replsets/libs/tenant_migration_util.js");
 load('jstests/ssl/libs/ssl_helpers.js');
-
-let expectedNumRecipientSyncDataCmdSent = 0;
-let expectedNumRecipientForgetMigrationCmdSent = 0;
 
 const dbPath = MongoRunner.toRealDir("$dataDir/tenant_migration_donor_ssl_test/");
 mkdir(dbPath);
@@ -38,11 +33,9 @@ function testDonorForgetMigrationAfterMigrationCompletes(
     assert.commandWorked(
         donorPrimary.adminCommand({donorForgetMigration: 1, migrationId: migrationId}));
 
-    expectedNumRecipientForgetMigrationCmdSent++;
     const recipientForgetMigrationMetrics =
         recipientPrimary.adminCommand({serverStatus: 1}).metrics.commands.recipientForgetMigration;
     assert.eq(recipientForgetMigrationMetrics.failed, 0);
-    assert.eq(recipientForgetMigrationMetrics.total, expectedNumRecipientForgetMigrationCmdSent);
 
     donorRst.nodes.forEach((node) => {
         assert.soon(() =>
@@ -107,35 +100,33 @@ const kConfigDonorsNS = "config.tenantMigrationDonors";
 let configDonorsColl = donorPrimary.getCollection(kConfigDonorsNS);
 configDonorsColl.createIndex({expireAt: 1}, {expireAfterSeconds: 0});
 
-(() => {
-    jsTest.log("Test the case where the migration commits");
-    const migrationId = UUID();
-    const migrationOpts = {
-        migrationIdString: extractUUIDFromObject(migrationId),
-        recipientConnString: recipientRst.getURL(),
-        tenantId: kTenantId,
-        readPreference: {mode: "primary"},
-    };
+jsTest.log("Test the case where the migration commits");
+const migrationId = UUID();
+const migrationOpts = {
+    migrationIdString: extractUUIDFromObject(migrationId),
+    recipientConnString: recipientRst.getURL(),
+    tenantId: kTenantId,
+    readPreference: {mode: "primary"},
+};
 
-    const res =
-        assert.commandWorked(TenantMigrationUtil.startMigration(donorPrimary.host, migrationOpts));
-    assert.eq(res.state, "committed");
+const res =
+    assert.commandWorked(TenantMigrationUtil.startMigration(donorPrimary.host, migrationOpts));
+assert.eq(res.state, "committed");
 
-    let donorDoc = configDonorsColl.findOne({tenantId: kTenantId});
-    let commitOplogEntry =
-        donorPrimary.getDB("local").oplog.rs.findOne({ns: kConfigDonorsNS, op: "u", o: donorDoc});
-    assert.eq(donorDoc.state, "committed");
-    assert.eq(donorDoc.commitOrAbortOpTime.ts, commitOplogEntry.ts);
+let donorDoc = configDonorsColl.findOne({tenantId: kTenantId});
+let commitOplogEntry =
+    donorPrimary.getDB("local").oplog.rs.findOne({ns: kConfigDonorsNS, op: "u", o: donorDoc});
+assert.eq(donorDoc.state, "committed");
+assert.eq(donorDoc.commitOrAbortOpTime.ts, commitOplogEntry.ts);
 
-    let mtab;
-    assert.soon(() => {
-        mtab = donorPrimary.adminCommand({serverStatus: 1}).tenantMigrationAccessBlocker;
-        return mtab[kTenantId].access === TenantMigrationUtil.accessState.kReject;
-    });
-    assert(mtab[kTenantId].commitOrAbortOpTime);
+let mtab;
+assert.soon(() => {
+    mtab = donorPrimary.adminCommand({serverStatus: 1}).tenantMigrationAccessBlocker;
+    return mtab[kTenantId].access === TenantMigrationUtil.accessState.kReject;
+});
+assert(mtab[kTenantId].commitOrAbortOpTime);
 
-    testDonorForgetMigrationAfterMigrationCompletes(donorRst, recipientRst, migrationId, kTenantId);
-})();
+testDonorForgetMigrationAfterMigrationCompletes(donorRst, recipientRst, migrationId, kTenantId);
 
 donorRst.stopSet();
 recipientRst.stopSet();

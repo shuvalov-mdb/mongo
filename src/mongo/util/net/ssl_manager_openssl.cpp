@@ -2321,7 +2321,7 @@ bool SSLManagerOpenSSL::_readCertificateChainFromMemory(SSL_CTX* context,
                                                         const std::string& payload,
                                                         PasswordFetcher* password,
                                                         StringData description) {
-    ERR_clear_error(); /* clear error stack for SSL_CTX_use_certificate() */
+    ERR_clear_error(); // Clear error stack for SSL_CTX_use_certificate().
 
     UniqueBIO inBio(BIO_new_mem_buf(payload.c_str(), payload.length()));
 
@@ -2356,8 +2356,7 @@ bool SSLManagerOpenSSL::_readCertificateChainFromMemory(SSL_CTX* context,
         return false;
     }
 
-    /* If we could set up our certificate, now proceed to the CA
-     * certificates. */
+    // If we could set up our certificate, now proceed to the CA certificates.
     UniqueX509 ca;
     unsigned long err;
     SSL_CTX_clear_chain_certs(context);
@@ -2371,12 +2370,12 @@ bool SSLManagerOpenSSL::_readCertificateChainFromMemory(SSL_CTX* context,
         _getX509CertInfo(ca, &debugInfo);
         logCert(debugInfo, description, 5159908);
 
-        /* Note that we must not free 'ca' if it was successfully added to the chain
-         * (while we must free the main certificate, since its reference count is
-         * increased by SSL_CTX_use_certificate). */
+        // Note that we must not free 'ca' if it was successfully added to the chain
+        // (while we must free the main certificate, since its reference count is
+        // increased by SSL_CTX_use_certificate).
         ca.release();
     }
-    /* When the while loop ends, it's usually just EOF. */
+    // When the while loop ends, it's usually just EOF.
     err = ERR_peek_last_error();
     if (ERR_GET_LIB(err) == ERR_LIB_PEM && ERR_GET_REASON(err) == PEM_R_NO_START_LINE) {
         ERR_clear_error();
@@ -2384,7 +2383,7 @@ bool SSLManagerOpenSSL::_readCertificateChainFromMemory(SSL_CTX* context,
         LOGV2_ERROR(5159909,
                     "Error remained after scanning all X509 certificates from memory",
                     "error"_attr = getSSLErrorMessage(ERR_get_error()));
-        return false; /* some real error */
+        return false; // Some real error.
     }
 
     return true;
