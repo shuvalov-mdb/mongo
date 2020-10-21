@@ -13,13 +13,6 @@ load("jstests/libs/uuid_util.js");
 load("jstests/replsets/libs/tenant_migration_util.js");
 load('jstests/ssl/libs/ssl_helpers.js');
 
-const dbPath = MongoRunner.toRealDir("$dataDir/tenant_migration_donor_ssl_test/");
-mkdir(dbPath);
-
-copyCertificateFile("jstests/libs/ca.pem", dbPath + "/ca-test.pem");
-copyCertificateFile("jstests/libs/client.pem", dbPath + "/client-test.pem");
-copyCertificateFile("jstests/libs/server.pem", dbPath + "/server-test.pem");
-
 const donorRst = new ReplSetTest({
     nodes: [{}, {rsConfig: {priority: 0}}, {rsConfig: {priority: 0}}],
     name: "donor",
@@ -41,18 +34,18 @@ const recipientRst = new ReplSetTest(
 
 donorRst.startSet({
     sslMode: "requireSSL",
-    sslPEMKeyFile: dbPath + "/server-test.pem",
-    sslCAFile: dbPath + "/ca-test.pem",
-    sslClusterFile: dbPath + "/client-test.pem",
+    sslPEMKeyFile: "jstests/libs/server.pem",
+    sslCAFile: "jstests/libs/ca.pem",
+    sslClusterFile: "jstests/libs/client.pem",
     sslAllowInvalidHostnames: "",
 });
 donorRst.initiate();
 
 recipientRst.startSet({
     sslMode: "requireSSL",
-    sslPEMKeyFile: dbPath + "/server-test.pem",
-    sslCAFile: dbPath + "/ca-test.pem",
-    sslClusterFile: dbPath + "/client-test.pem",
+    sslPEMKeyFile: "jstests/libs/server.pem",
+    sslCAFile: "jstests/libs/ca.pem",
+    sslClusterFile: "jstests/libs/client.pem",
     sslAllowInvalidHostnames: "",
 });
 recipientRst.initiate();
@@ -97,8 +90,6 @@ assert(mtab[kTenantId].commitOrAbortOpTime);
 // state document are eventually removed from the donor.
 
 jsTest.log("Test donorForgetMigration after the migration completes");
-const donorPrimary = donorRst.getPrimary();
-const recipientPrimary = recipientRst.getPrimary();
 
 assert.commandWorked(
     donorPrimary.adminCommand({donorForgetMigration: 1, migrationId: migrationId}));
@@ -111,7 +102,7 @@ donorRst.nodes.forEach((node) => {
     assert.soon(() => null == node.adminCommand({serverStatus: 1}).tenantMigrationAccessBlocker);
 });
 
-assert.soon(() => 0 === donorPrimary.getCollection(kConfigDonorsNS).count({tenantId: tenantId}));
+assert.soon(() => 0 === donorPrimary.getCollection(kConfigDonorsNS).count({tenantId: kTenantId}));
 assert.soon(() => 0 ===
                 donorPrimary.adminCommand({serverStatus: 1})
                     .repl.primaryOnlyServices.TenantMigrationDonorService);

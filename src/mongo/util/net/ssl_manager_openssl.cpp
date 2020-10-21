@@ -1324,7 +1324,7 @@ private:
      * @return true if was successful, otherwise false
      */
     bool _setupPEMFromBIO(SSL_CTX* context,
-                          std::unique_ptr<BIO, decltype(&::BIO_free)> inBio,
+                          UniqueBIO inBio,
                           PasswordFetcher* password,
                           StringData description);
 
@@ -2332,7 +2332,7 @@ bool SSLManagerOpenSSL::_readCertificateChainFromMemory(SSL_CTX* context,
         return false;
     }
 
-    decltype(&SSLManagerOpenSSL::password_cb) password_cb = &SSLManagerOpenSSL::password_cb;
+    auto password_cb = &SSLManagerOpenSSL::password_cb;
     void* userdata = static_cast<void*>(password);
     UniqueX509 x509cert(PEM_read_bio_X509_AUX(inBio.get(), NULL, password_cb, userdata));
 
@@ -2348,8 +2348,7 @@ bool SSLManagerOpenSSL::_readCertificateChainFromMemory(SSL_CTX* context,
     logCert(debugInfo, description, 5159908);
 
     // SSL_CTX_use_certificate increments the refcount on cert.
-    if (1 != SSL_CTX_use_certificate(context, x509cert.get()) || ERR_peek_error() != 0) {
-        // Key/certificate mismatch doesn't imply returning 0.
+    if (1 != SSL_CTX_use_certificate(context, x509cert.get())) {
         LOGV2_ERROR(5159907,
                     "Failed to use the X509 certificate loaded from memory",
                     "error"_attr = SSLManagerInterface::getSSLErrorMessage(ERR_get_error()));
@@ -2358,10 +2357,9 @@ bool SSLManagerOpenSSL::_readCertificateChainFromMemory(SSL_CTX* context,
 
     // If we could set up our certificate, now proceed to the CA certificates.
     UniqueX509 ca;
-    unsigned long err;
     SSL_CTX_clear_chain_certs(context);
     while ((ca = UniqueX509(PEM_read_bio_X509(inBio.get(), NULL, password_cb, userdata)))) {
-        if (1 != SSL_CTX_add0_chain_cert(context, ca.get())) {
+        if (1 != SSL_CTX_add1_chain_cert(context, ca.get())) {
             LOGV2_ERROR(5159908,
                         "Failed to use the CA X509 certificate loaded from memory",
                         "error"_attr = getSSLErrorMessage(ERR_get_error()));
@@ -2369,14 +2367,9 @@ bool SSLManagerOpenSSL::_readCertificateChainFromMemory(SSL_CTX* context,
         }
         _getX509CertInfo(ca, &debugInfo);
         logCert(debugInfo, description, 5159908);
-
-        // Note that we must not free 'ca' if it was successfully added to the chain
-        // (while we must free the main certificate, since its reference count is
-        // increased by SSL_CTX_use_certificate).
-        ca.release();
     }
     // When the while loop ends, it's usually just EOF.
-    err = ERR_peek_last_error();
+    auto err = ERR_peek_last_error();
     if (ERR_GET_LIB(err) == ERR_LIB_PEM && ERR_GET_REASON(err) == PEM_R_NO_START_LINE) {
         ERR_clear_error();
     } else {
@@ -2401,8 +2394,7 @@ bool SSLManagerOpenSSL::_setupPEM(SSL_CTX* context,
         return false;
     }
 
-    std::unique_ptr<BIO, decltype(&::BIO_free)> inBio(
-        BIO_new(BIO_s_file()), ::BIO_free);  // Custom deleter is required for BIO.
+    UniqueBIO inBio(BIO_new(BIO_s_file()));  // Custom deleter is required for BIO.
 
     if (!inBio) {
         LOGV2_ERROR(23249,
@@ -2431,9 +2423,7 @@ bool SSLManagerOpenSSL::_setupPEMFromMemoryPayload(SSL_CTX* context,
     if (!_readCertificateChainFromMemory(context, payload, password, description)) {
         return false;
     }
-    std::unique_ptr<BIO, decltype(&::BIO_free)> inBio(
-        BIO_new_mem_buf(payload.c_str(), payload.length()),
-        ::BIO_free);  // Custom deleter is required for BIO.
+    UniqueBIO inBio(BIO_new_mem_buf(payload.c_str(), payload.length()));
 
     if (!inBio) {
         LOGV2_ERROR(5159901,
@@ -2446,11 +2436,11 @@ bool SSLManagerOpenSSL::_setupPEMFromMemoryPayload(SSL_CTX* context,
 }
 
 bool SSLManagerOpenSSL::_setupPEMFromBIO(SSL_CTX* context,
-                                         std::unique_ptr<BIO, decltype(&::BIO_free)> inBio,
+                                         UniqueBIO inBio,
                                          PasswordFetcher* password,
                                          StringData description) {
     // Obtain the private key, using our callback to acquire a decryption password if necessary.
-    decltype(&SSLManagerOpenSSL::password_cb) password_cb = &SSLManagerOpenSSL::password_cb;
+    auto password_cb = &SSLManagerOpenSSL::password_cb;
     void* userdata = static_cast<void*>(password);
     EVP_PKEY* privateKey = PEM_read_bio_PrivateKey(inBio.get(), nullptr, password_cb, userdata);
     if (!privateKey) {
