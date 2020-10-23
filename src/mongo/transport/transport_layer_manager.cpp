@@ -63,15 +63,17 @@ void TransportLayerManager::_foreach(Callable&& cb) const {
 
 StatusWith<SessionHandle> TransportLayerManager::connect(HostAndPort peer,
                                                          ConnectSSLMode sslMode,
+                                                         const boost::optional<TransientSSLParams>& transientSSLParams,
                                                          Milliseconds timeout) {
-    return _tls.front()->connect(peer, sslMode, timeout);
+    return _tls.front()->connect(peer, sslMode, transientSSLParams, timeout);
 }
 
 Future<SessionHandle> TransportLayerManager::asyncConnect(HostAndPort peer,
                                                           ConnectSSLMode sslMode,
+                                                          const boost::optional<TransientSSLParams>& transientSSLParams,
                                                           const ReactorHandle& reactor,
                                                           Milliseconds timeout) {
-    return _tls.front()->asyncConnect(peer, sslMode, reactor, timeout);
+    return _tls.front()->asyncConnect(peer, sslMode, transientSSLParams, reactor, timeout);
 }
 
 ReactorHandle TransportLayerManager::getReactor(WhichReactor which) {

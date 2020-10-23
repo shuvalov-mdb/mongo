@@ -114,6 +114,14 @@ public:
         size_t maxConns = DEFAULT_MAX_CONN;       // maximum number of active connections
     };
 
+#ifdef MONGO_CONFIG_SSL
+    struct SSLConnectionContext {
+        std::unique_ptr<asio::ssl::context> ingress;
+        std::unique_ptr<asio::ssl::context> egress;
+        std::shared_ptr<SSLManagerInterface> manager;
+    };
+#endif
+
     TransportLayerASIO(const Options& opts,
                        ServiceEntryPoint* sep,
                        const WireSpec& wireSpec = WireSpec::instance());
@@ -122,10 +130,12 @@ public:
 
     StatusWith<SessionHandle> connect(HostAndPort peer,
                                       ConnectSSLMode sslMode,
+                                      const boost::optional<TransientSSLParams>& transientSSLParams,
                                       Milliseconds timeout) final;
 
     Future<SessionHandle> asyncConnect(HostAndPort peer,
                                        ConnectSSLMode sslMode,
+                                       const boost::optional<TransientSSLParams>& transientSSLParams,
                                        const ReactorHandle& reactor,
                                        Milliseconds timeout) final;
 
@@ -152,6 +162,15 @@ public:
     std::shared_ptr<SSLManagerInterface> getSSLManager() {
         return _sslContext.get()->manager;
     }
+
+    /**
+     * Creates a transient SSL context using targeted (non default) SSL params. 
+     * @param transientSSLParams overrides any value in stored SSLConnectionContext.
+     * @param optionalManager provides an optional SSL manager, otherwise the default one will be used.
+     */
+    StatusWith<TransportLayerASIO::SSLConnectionContext> createTransientSSLContext(
+        const TransientSSLParams& transientSSLParams,
+        const SSLManagerInterface* optionalManager) const;
 #endif
 
 private:
@@ -205,11 +224,6 @@ private:
     std::shared_ptr<ASIOReactor> _acceptorReactor;
 
 #ifdef MONGO_CONFIG_SSL
-    struct SSLConnectionContext {
-        std::unique_ptr<asio::ssl::context> ingress;
-        std::unique_ptr<asio::ssl::context> egress;
-        std::shared_ptr<SSLManagerInterface> manager;
-    };
     synchronized_value<std::shared_ptr<SSLConnectionContext>> _sslContext;
 #endif
 

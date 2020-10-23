@@ -3,6 +3,7 @@ test_kind: js_test
 selector:
   roots:
   - jstests/ssl/*.js
+  - build/install/bin/network_interface_ssl_test
   exclude_files:
 
 # ssl tests start their own mongod's.

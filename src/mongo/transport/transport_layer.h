@@ -87,10 +87,15 @@ public:
 
     virtual StatusWith<SessionHandle> connect(HostAndPort peer,
                                               ConnectSSLMode sslMode,
+                                              const boost::optional<TransientSSLParams>& transientSSLParams,
                                               Milliseconds timeout) = 0;
 
+    /**
+     * @param transientSSLParams optional params to override default SSL params - 
+     */
     virtual Future<SessionHandle> asyncConnect(HostAndPort peer,
                                                ConnectSSLMode sslMode,
+                                               const boost::optional<TransientSSLParams>& transientSSLParams,
                                                const ReactorHandle& reactor,
                                                Milliseconds timeout) = 0;
 

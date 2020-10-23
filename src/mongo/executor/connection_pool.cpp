@@ -48,6 +48,8 @@
 #include "mongo/util/lru_cache.h"
 #include "mongo/util/scopeguard.h"
 
+#include "mongo/util/stacktrace.h"
+
 using namespace fmt::literals;
 
 // One interesting implementation note herein concerns how setup() and
@@ -128,6 +130,7 @@ void ConnectionPool::ControllerInterface::init(ConnectionPool* pool) {
                 "pool"_attr = pool->_name,
                 "controller"_attr = name());
     _pool = pool;
+std::cerr << "!!!!! ControllerInterface::init " << pool->_name << std::endl;
 }
 
 std::string ConnectionPool::ConnectionControls::toString() const {
@@ -157,8 +160,8 @@ public:
         stdx::lock_guard lk(_mutex);
         auto& data = getOrInvariant(_poolData, id);
 
-        const auto minConns = getPool()->_options.minConnections;
-        const auto maxConns = getPool()->_options.maxConnections;
+        const auto minConns = getPool()->_options->minConnections;
+        const auto maxConns = getPool()->_options->maxConnections;
 
         data.target = stats.requests + stats.active;
         if (data.target < minConns) {
@@ -179,19 +182,19 @@ public:
         const auto& data = getOrInvariant(_poolData, id);
 
         return {
-            getPool()->_options.maxConnecting,
+            getPool()->_options->maxConnecting,
             data.target,
         };
     }
 
     Milliseconds hostTimeout() const override {
-        return getPool()->_options.hostTimeout;
+        return getPool()->_options->hostTimeout;
     }
     Milliseconds pendingTimeout() const override {
-        return getPool()->_options.refreshTimeout;
+        return getPool()->_options->refreshTimeout;
     }
     Milliseconds toRefreshTimeout() const override {
-        return getPool()->_options.refreshRequirement;
+        return getPool()->_options->refreshRequirement;
     }
 
     StringData name() const override {
@@ -452,18 +455,20 @@ const Status ConnectionPool::kConnectionStateUnknown =
 
 ConnectionPool::ConnectionPool(std::shared_ptr<DependentTypeFactoryInterface> impl,
                                std::string name,
-                               Options options)
+                               std::shared_ptr<const Options> options)
     : _name(std::move(name)),
       _factory(std::move(impl)),
-      _options(std::move(options)),
-      _controller(_options.controllerFactory()),
-      _manager(options.egressTagCloserManager) {
+      _options(options),
+      _controller(_options->controllerFactory()),
+      _manager(options->egressTagCloserManager) {
     if (_manager) {
         _manager->add(this);
     }
 
     invariant(_controller);
     _controller->init(this);
+std::cerr << "!!!!!! ConnectionPool created " << std::endl;
+printStackTrace();
 }
 
 ConnectionPool::~ConnectionPool() {
@@ -1034,6 +1039,8 @@ void ConnectionPool::SpecificPool::spawnConnections() {
                 "Spawning connections",
                 "connAllowance"_attr = allowance,
                 "hostAndPort"_attr = _hostAndPort);
+
+std::cerr << "!!!!!!! spawnConnections " << _hostAndPort << ", ssl " << _sslMode << std::endl;
     for (decltype(allowance) i = 0; i < allowance; ++i) {
         OwnedConnection handle;
         try {

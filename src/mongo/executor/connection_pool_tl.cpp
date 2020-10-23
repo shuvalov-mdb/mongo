@@ -271,7 +271,17 @@ void TLConnection::setup(Milliseconds timeout, SetupCallback cb) {
 
     auto isMasterHook = std::make_shared<TLConnectionSetupHook>(_onConnectHook);
 
-    AsyncDBClient::connect(_peer, _sslMode, _serviceContext, _reactor, timeout)
+    auto options = _connectionPoolOptions.lock();
+    if (!options) {
+        std::string reason = str::stream()
+            << "" << timeout;
+        handler->promise.setError(
+            Status(ErrorCodes::Interrupted, std::move(reason)));
+        return;
+    }
+
+    AsyncDBClient::connect(_peer, _sslMode, 
+                           options->transientSSLParams,  _serviceContext, _reactor, timeout)
         .thenRunOn(_reactor)
         .onError([](StatusWith<AsyncDBClient::Handle> swc) -> StatusWith<AsyncDBClient::Handle> {
             return Status(ErrorCodes::HostUnreachable, swc.getStatus().reason());
@@ -397,9 +407,10 @@ std::shared_ptr<ConnectionPool::ConnectionInterface> TLTypeFactory::makeConnecti
                                                getGlobalServiceContext(),
                                                hostAndPort,
                                                sslMode,
+                                               _connPoolOptions,
                                                generation,
                                                _onConnectHook.get(),
-                                               _connPoolOptions.skipAuthentication);
+                                               _connPoolOptions->skipAuthentication);
     fasten(conn.get());
     return conn;
 }

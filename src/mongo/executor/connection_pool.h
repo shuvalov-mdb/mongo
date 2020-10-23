@@ -43,6 +43,7 @@
 #include "mongo/util/future.h"
 #include "mongo/util/hierarchical_acquisition.h"
 #include "mongo/util/net/hostandport.h"
+#include "mongo/util/net/ssl_options.h"
 #include "mongo/util/out_of_line_executor.h"
 #include "mongo/util/time_support.h"
 
@@ -150,6 +151,14 @@ public:
          */
         bool skipAuthentication = false;
 
+#ifdef MONGO_CONFIG_SSL
+        /**
+         * Provides SSL params if the egress cluster connection requires custom SSL certificates different from the
+         * global (default) certificates.
+         */
+        boost::optional<TransientSSLParams> transientSSLParams;
+#endif
+
         std::function<std::shared_ptr<ControllerInterface>(void)> controllerFactory =
             &ConnectionPool::makeLimitController;
     };
@@ -228,7 +237,13 @@ public:
 
     explicit ConnectionPool(std::shared_ptr<DependentTypeFactoryInterface> impl,
                             std::string name,
-                            Options options = Options{});
+                            std::shared_ptr<const Options> options = std::make_shared<Options>());
+
+    // Compatibility constructor for 'enterprise' module, to be removed.
+    explicit ConnectionPool(std::shared_ptr<DependentTypeFactoryInterface> impl,
+                            std::string name,
+                            Options options = Options{})
+        : ConnectionPool(impl, name, std::make_shared<const Options>(options)) {}
 
     ~ConnectionPool();
 
@@ -257,7 +272,7 @@ private:
     std::string _name;
 
     const std::shared_ptr<DependentTypeFactoryInterface> _factory;
-    Options _options;
+    std::shared_ptr<const Options> _options;
 
     std::shared_ptr<ControllerInterface> _controller;
 

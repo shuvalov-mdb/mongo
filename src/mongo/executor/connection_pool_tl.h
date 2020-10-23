@@ -50,7 +50,7 @@ public:
     TLTypeFactory(transport::ReactorHandle reactor,
                   transport::TransportLayer* tl,
                   std::unique_ptr<NetworkConnectionHook> onConnectHook,
-                  const ConnectionPool::Options& connPoolOptions)
+                  std::shared_ptr<const ConnectionPool::Options> connPoolOptions)
         : _executor(std::move(reactor)),
           _tl(tl),
           _onConnectHook(std::move(onConnectHook)),
@@ -78,7 +78,8 @@ private:
     std::shared_ptr<OutOfLineExecutor> _executor;  // This is always a transport::Reactor
     transport::TransportLayer* _tl;
     std::unique_ptr<NetworkConnectionHook> _onConnectHook;
-    const ConnectionPool::Options _connPoolOptions;
+    // Options originated from instance of NetworkInterfaceTL.
+    std::shared_ptr<const ConnectionPool::Options> _connPoolOptions;
 
     mutable Mutex _mutex =
         MONGO_MAKE_LATCH(HierarchicalAcquisitionLevel(0), "TLTypeFactory::_mutex");
@@ -138,6 +139,7 @@ public:
                  ServiceContext* serviceContext,
                  HostAndPort peer,
                  transport::ConnectSSLMode sslMode,
+                 std::weak_ptr<const ConnectionPool::Options> connPoolOpts,
                  size_t generation,
                  NetworkConnectionHook* onConnectHook,
                  bool skipAuth)
@@ -149,7 +151,10 @@ public:
           _skipAuth(skipAuth),
           _peer(std::move(peer)),
           _sslMode(sslMode),
-          _onConnectHook(onConnectHook) {}
+          _connectionPoolOptions(connPoolOpts),
+          _onConnectHook(onConnectHook) {
+std::cerr << "!!!!!! created TLConnection" << std::endl;
+          }
     ~TLConnection() {
         // Release must be the first expression of this dtor
         release();
@@ -186,6 +191,7 @@ private:
 
     HostAndPort _peer;
     transport::ConnectSSLMode _sslMode;
+    std::weak_ptr<const ConnectionPool::Options> _connectionPoolOptions;
     NetworkConnectionHook* const _onConnectHook;
     AsyncDBClient::Handle _client;
 };

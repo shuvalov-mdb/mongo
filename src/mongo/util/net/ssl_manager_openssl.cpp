@@ -1305,7 +1305,7 @@ private:
     StatusWith<boost::optional<std::vector<DERInteger>>> _parseTLSFeature(X509* peerCert) const;
 
     /** @return true if was successful, otherwise false */
-    bool _setupPEM(SSL_CTX* context, const std::string& keyFile, PasswordFetcher* password);
+    bool _setupPEM(SSL_CTX* context, const std::string& keyFile, PasswordFetcher* password) const;
 
     /**
      * @param payload in-memory payload of a PEM file
@@ -1314,7 +1314,7 @@ private:
     bool _setupPEMFromMemoryPayload(SSL_CTX* context,
                                     const std::string& payload,
                                     PasswordFetcher* password,
-                                    StringData description);
+                                    StringData description) const;
 
     /**
      * Setup PEM from BIO, which could be file or memory input abstraction.
@@ -1326,7 +1326,7 @@ private:
     bool _setupPEMFromBIO(SSL_CTX* context,
                           std::unique_ptr<BIO, decltype(&::BIO_free)> inBio,
                           PasswordFetcher* password,
-                          StringData description);
+                          StringData description) const;
 
     /**
      * Loads a certificate chain from memory into context.
@@ -2392,7 +2392,7 @@ bool SSLManagerOpenSSL::_readCertificateChainFromMemory(SSL_CTX* context,
 
 bool SSLManagerOpenSSL::_setupPEM(SSL_CTX* context,
                                   const std::string& keyFile,
-                                  PasswordFetcher* password) {
+                                  PasswordFetcher* password) const {
     if (SSL_CTX_use_certificate_chain_file(context, keyFile.c_str()) != 1) {
         LOGV2_ERROR(23248,
                     "cannot read certificate file: {keyFile} {error}",
@@ -2428,7 +2428,7 @@ bool SSLManagerOpenSSL::_setupPEM(SSL_CTX* context,
 bool SSLManagerOpenSSL::_setupPEMFromMemoryPayload(SSL_CTX* context,
                                                    const std::string& payload,
                                                    PasswordFetcher* password,
-                                                   StringData description) {
+                                                   StringData description) const {
     if (!_readCertificateChainFromMemory(context, payload, password, description)) {
         return false;
     }
@@ -2449,7 +2449,7 @@ bool SSLManagerOpenSSL::_setupPEMFromMemoryPayload(SSL_CTX* context,
 bool SSLManagerOpenSSL::_setupPEMFromBIO(SSL_CTX* context,
                                          std::unique_ptr<BIO, decltype(&::BIO_free)> inBio,
                                          PasswordFetcher* password,
-                                         StringData description) {
+                                         StringData description) const {
     // Obtain the private key, using our callback to acquire a decryption password if necessary.
     decltype(&SSLManagerOpenSSL::password_cb) password_cb = &SSLManagerOpenSSL::password_cb;
     void* userdata = static_cast<void*>(password);

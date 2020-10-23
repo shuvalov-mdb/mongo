@@ -108,10 +108,12 @@ NetworkInterfaceTL::NetworkInterfaceTL(std::string instanceName,
                                        std::unique_ptr<rpc::EgressMetadataHook> metadataHook)
     : _instanceName(std::move(instanceName)),
       _svcCtx(svcCtx),
-      _connPoolOpts(std::move(connPoolOpts)),
+      _connPoolOpts(std::make_shared<const ConnectionPool::Options>(std::move(connPoolOpts))),
       _onConnectHook(std::move(onConnectHook)),
       _metadataHook(std::move(metadataHook)),
       _state(kDefault) {
+std::cerr << "!!!!!!! NetworkInterfaceTL " << instanceName << " has _svcCtx: " << (_svcCtx != nullptr)
+<< ", has transport: " << (_svcCtx != nullptr && _svcCtx->getTransportLayer() != nullptr) << std::endl;
     if (_svcCtx) {
         _tl = _svcCtx->getTransportLayer();
     }

@@ -59,11 +59,12 @@ namespace mongo {
 
 Future<AsyncDBClient::Handle> AsyncDBClient::connect(const HostAndPort& peer,
                                                      transport::ConnectSSLMode sslMode,
+                                                     const boost::optional<TransientSSLParams>& transientSSLParams,
                                                      ServiceContext* const context,
                                                      transport::ReactorHandle reactor,
                                                      Milliseconds timeout) {
     auto tl = context->getTransportLayer();
-    return tl->asyncConnect(peer, sslMode, std::move(reactor), timeout)
+    return tl->asyncConnect(peer, sslMode, transientSSLParams, std::move(reactor), timeout)
         .then([peer, context](transport::SessionHandle session) {
             return std::make_shared<AsyncDBClient>(peer, std::move(session), context);
         });

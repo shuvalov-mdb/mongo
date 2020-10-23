@@ -27,43 +27,50 @@
  *    it in the license file.
  */
 
+#define MONGO_LOGV2_DEFAULT_COMPONENT ::mongo::logv2::LogComponent::kTest
+
+#include <fstream>
+
 #include "mongo/platform/basic.h"
 
-#include "mongo/executor/network_interface_factory.h"
-
-#include <memory>
-
-#include "mongo/base/init.h"
-#include "mongo/base/status.h"
-#include "mongo/config.h"
-#include "mongo/executor/connection_pool.h"
-#include "mongo/executor/network_connection_hook.h"
-#include "mongo/executor/network_interface_tl.h"
-#include "mongo/rpc/metadata/metadata_hook.h"
+#include "mongo/executor/network_interface_integration_fixture.h"
+#include "mongo/logv2/log.h"
+#include "mongo/unittest/integration_test.h"
+#include "mongo/unittest/unittest.h"
+#include "mongo/util/assert_util.h"
 
 namespace mongo {
 namespace executor {
+namespace {
 
-std::unique_ptr<NetworkInterface> makeNetworkInterface(std::string instanceName) {
-    return makeNetworkInterface(std::move(instanceName), nullptr, nullptr);
+std::string LoadFile(const std::string& name) {
+    std::ifstream input(name);
+    std::string str((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
+    return str;
 }
 
-std::unique_ptr<NetworkInterface> makeNetworkInterface(
-    std::string instanceName,
-    std::unique_ptr<NetworkConnectionHook> hook,
-    std::unique_ptr<rpc::EgressMetadataHook> metadataHook,
-    ConnectionPool::Options connPoolOptions) {
-std::cerr << "!!!!!! makeNetworkInterface " << instanceName << std::endl;
-
-    if (!connPoolOptions.egressTagCloserManager && hasGlobalServiceContext()) {
-        connPoolOptions.egressTagCloserManager =
-            &EgressTagCloserManager::get(getGlobalServiceContext());
+class NetworkInterfaceSSLFixture : public NetworkInterfaceIntegrationFixture {
+public:
+    void setUp() final {
+        ConnectionPool::Options options;
+        options.transientSSLParams.emplace([] {
+            TransientSSLParams params;
+            params.sslClusterPEMPayload = LoadFile("jstests/libs/client.pem");
+            params.targetedClusterConnectionString = ConnectionString::forLocal();
+            return params;
+        }());
+        LOGV2(5181101,
+              "Initializing the test connection with transient SSL params");
+        createNet(nullptr, std::move(options));
+        net().startup();
     }
+};
 
-    auto svcCtx = hasGlobalServiceContext() ? getGlobalServiceContext() : nullptr;
-    return std::make_unique<NetworkInterfaceTL>(
-        instanceName, connPoolOptions, svcCtx, std::move(hook), std::move(metadataHook));
+TEST_F(NetworkInterfaceSSLFixture, Ping) {
+    assertCommandOK("admin", BSON("ping" << 1));
 }
 
+
+}  // namespace
 }  // namespace executor
 }  // namespace mongo

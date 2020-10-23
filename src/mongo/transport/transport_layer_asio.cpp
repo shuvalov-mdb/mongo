@@ -267,7 +267,10 @@ TransportLayerASIO::TransportLayerASIO(const TransportLayerASIO::Options& opts,
       _egressReactor(std::make_shared<ASIOReactor>()),
       _acceptorReactor(std::make_shared<ASIOReactor>()),
       _sep(sep),
-      _listenerOptions(opts) {}
+      _listenerOptions(opts) {
+std::cerr << "!!!!!!! TransportLayerASIO created " << (void*)this << std::endl;
+printStackTrace();
+      }
 
 TransportLayerASIO::~TransportLayerASIO() = default;
 
@@ -453,6 +456,7 @@ Status makeConnectError(Status status, const HostAndPort& peer, const WrappedEnd
 
 StatusWith<SessionHandle> TransportLayerASIO::connect(HostAndPort peer,
                                                       ConnectSSLMode sslMode,
+                                                      const boost::optional<TransientSSLParams>& transientSSLParams,
                                                       Milliseconds timeout) {
 std::cerr << "!!!! connect " << peer << std::endl;
 printStackTrace();//tmp
@@ -572,6 +576,7 @@ printStackTrace();//tmp
 
 Future<SessionHandle> TransportLayerASIO::asyncConnect(HostAndPort peer,
                                                        ConnectSSLMode sslMode,
+                                                       const boost::optional<TransientSSLParams>& transientSSLParams,
                                                        const ReactorHandle& reactor,
                                                        Milliseconds timeout) {
 std::cerr << "!!!! asyncConnect " << peer << std::endl;
@@ -1232,6 +1237,13 @@ Status TransportLayerASIO::rotateCertificates(std::shared_ptr<SSLManagerInterfac
     _sslContext = std::move(newSSLContext);
     return Status::OK();
 }
+
+StatusWith<TransportLayerASIO::SSLConnectionContext> TransportLayerASIO::createTransientSSLContext(
+    const TransientSSLParams& transientSSLParams,
+    const SSLManagerInterface* optionalManager) const {
+    return TransportLayerASIO::SSLConnectionContext();
+}
+
 #endif
 
 #ifdef __linux__
