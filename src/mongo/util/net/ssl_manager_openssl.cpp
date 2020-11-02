@@ -1232,6 +1232,19 @@ private:
             return StringData(_password->c_str());
         }
 
+        /**
+         * This method can only return a cached password and never prompts.
+         * @returns cached password if awailable, error if password is not cached.
+         */
+        StatusWith<StringData> fetchCachedPasswordNoPrompt() {
+            stdx::lock_guard<Latch> lock(_mutex);
+            if (_password->size()) {
+                return StringData(_password->c_str());
+            }
+            return Status(ErrorCodes::UnknownError,
+                          "Failed to return a cached password, cannot prompt.");
+        }
+
     private:
         Mutex _mutex = MONGO_MAKE_LATCH("PasswordFetcher::_mutex");
         SecureString _password;  // Protected by _mutex
@@ -1305,7 +1318,10 @@ private:
     StatusWith<boost::optional<std::vector<DERInteger>>> _parseTLSFeature(X509* peerCert) const;
 
     /** @return true if was successful, otherwise false */
-    bool _setupPEM(SSL_CTX* context, const std::string& keyFile, PasswordFetcher* password);
+    bool _setupPEM(SSL_CTX* context,
+                   const std::string& keyFile,
+                   PasswordFetcher* password,
+                   StringData certScopeDescription);
 
     /**
      * @param payload in-memory payload of a PEM file
@@ -1314,19 +1330,24 @@ private:
     bool _setupPEMFromMemoryPayload(SSL_CTX* context,
                                     const std::string& payload,
                                     PasswordFetcher* password,
-                                    StringData description);
+                                    StringData certOriginDescription,
+                                    StringData certScopeDescription);
 
     /**
      * Setup PEM from BIO, which could be file or memory input abstraction.
      * @param inBio input BIO, where smart pointer is created with a custom deleter to call
      * 'BIO_free()'.
-     * @param log_msg additional log message to print in case of error.
+     * @param certOriginDescription human-readable description of the certificate origin for
+     *    logging, which could be a file or a memory payload coming from command.
+     * @param certScopeDescription human-readable description of the certificate scope for
+     *    logging, which could be local or remote cluster.
      * @return true if was successful, otherwise false
      */
     bool _setupPEMFromBIO(SSL_CTX* context,
                           UniqueBIO inBio,
                           PasswordFetcher* password,
-                          StringData description);
+                          StringData certOriginDescription,
+                          StringData certScopeDescription);
 
     /**
      * Loads a certificate chain from memory into context.
@@ -1337,7 +1358,8 @@ private:
     static bool _readCertificateChainFromMemory(SSL_CTX* context,
                                                 const std::string& payload,
                                                 PasswordFetcher* password,
-                                                StringData description);
+                                                StringData certOriginDescription,
+                                                StringData certScopeDescription);
 
     /*
      * Set up an SSL context for certificate validation by loading a CA
@@ -1365,10 +1387,26 @@ private:
      */
     void _flushNetworkBIO(SSLConnectionOpenSSL* conn);
 
+    /*
+     * Utility method to process the result returned by password Fetcher.
+     */
+    static int _processPasswordFetcherOutput(StatusWith<StringData>* fetcherResult,
+                                             char* buf,
+                                             int num,
+                                             int rwflag);
+
     /**
      * Callbacks for SSL functions.
      */
+
     static int password_cb(char* buf, int num, int rwflag, void* userdata);
+
+    /**
+     * Special flawor of password callback that is using Fetcher's cached password data and
+     * never prompts.
+     * @return password size or -1 if password Fetcher has no cached password.
+     */
+    static int no_prompt_password_cb(char* buf, int num, int rwflag, void* userdata);
     static int servername_cb(SSL* s, int* al, void* arg);
     static int verify_cb(int ok, X509_STORE_CTX* ctx);
 };
@@ -1537,20 +1575,31 @@ SSLManagerOpenSSL::SSLManagerOpenSSL(const SSLParams& params, bool isServer)
 }
 
 int SSLManagerOpenSSL::password_cb(char* buf, int num, int rwflag, void* userdata) {
-    // Unless OpenSSL misbehaves, num should always be positive
-    fassert(17314, num > 0);
     invariant(userdata);
-
     auto pwFetcher = static_cast<PasswordFetcher*>(userdata);
     auto swPassword = pwFetcher->fetchPassword();
-    if (!swPassword.isOK()) {
-        LOGV2_ERROR(23239,
-                    "Unable to fetch password: {error}",
-                    "Unable to fetch password",
-                    "error"_attr = swPassword.getStatus());
+    return _processPasswordFetcherOutput(&swPassword, buf, num, rwflag);
+}
+
+int SSLManagerOpenSSL::no_prompt_password_cb(char* buf, int num, int rwflag, void* userdata) {
+    invariant(userdata);
+    auto pwFetcher = static_cast<PasswordFetcher*>(userdata);
+    auto swPassword = pwFetcher->fetchCachedPasswordNoPrompt();
+    return _processPasswordFetcherOutput(&swPassword, buf, num, rwflag);
+}
+
+int SSLManagerOpenSSL::_processPasswordFetcherOutput(StatusWith<StringData>* swPassword,
+                                                     char* buf,
+                                                     int num,
+                                                     int rwflag) {
+    // Unless OpenSSL misbehaves, num should always be positive
+    fassert(17314, num > 0);
+
+    if (!swPassword->isOK()) {
+        LOGV2_ERROR(23239, "Unable to fetch password", "error"_attr = swPassword->getStatus());
         return -1;
     }
-    StringData password = std::move(swPassword.getValue());
+    StringData password = std::move(swPassword->getValue());
 
     const size_t copyCount = std::min(password.size(), static_cast<size_t>(num));
     std::copy_n(password.begin(), copyCount, buf);
@@ -2136,15 +2185,15 @@ Status SSLManagerOpenSSL::initSSLContext(SSL_CTX* context,
                                     << getSSLErrorMessage(ERR_get_error()));
     }
 
-    if (direction == ConnectionDirection::kOutgoing && params.tlsWithholdClientCertificate) {
-        // Do not send a client certificate if they have been suppressed.
 
-    } else if (direction == ConnectionDirection::kOutgoing &&
-               !transientParams.sslClusterPEMPayload.empty()) {
+    if (direction == ConnectionDirection::kOutgoing &&
+        !transientParams.sslClusterPEMPayload.empty()) {
+
         // Transient params for outgoing connection have priority over global params.
         if (!_setupPEMFromMemoryPayload(context,
                                         transientParams.sslClusterPEMPayload,
                                         &_clusterPEMPassword,
+                                        "memory payload",
                                         str::stream()
                                             << "Transient cluster certificate for "
                                             << transientParams.targetedClusterConnectionString)) {
@@ -2152,17 +2201,19 @@ Status SSLManagerOpenSSL::initSSLContext(SSL_CTX* context,
                           str::stream() << "Can not set up transient ssl cluster certificate for "
                                         << transientParams.targetedClusterConnectionString);
         }
+    } else if (direction == ConnectionDirection::kOutgoing && params.tlsWithholdClientCertificate) {
+        // Do not send a client certificate if they have been suppressed.
 
     } else if (direction == ConnectionDirection::kOutgoing && !params.sslClusterFile.empty()) {
         // Use the configured clusterFile as our client certificate.
-        if (!_setupPEM(context, params.sslClusterFile, &_clusterPEMPassword)) {
+        if (!_setupPEM(context, params.sslClusterFile, &_clusterPEMPassword, "outgoing")) {
             return Status(ErrorCodes::InvalidSSLConfiguration, "Can not set up ssl clusterFile.");
         }
 
     } else if (!params.sslPEMKeyFile.empty()) {
         // Use the base pemKeyFile for any other outgoing connections,
         // as well as all incoming connections.
-        if (!_setupPEM(context, params.sslPEMKeyFile, &_serverPEMPassword)) {
+        if (!_setupPEM(context, params.sslPEMKeyFile, &_serverPEMPassword, "server")) {
             return Status(ErrorCodes::InvalidSSLConfiguration, "Can not set up PEM key file.");
         }
     }
@@ -2320,7 +2371,8 @@ bool SSLManagerOpenSSL::_parseAndValidateCertificate(const std::string& keyFile,
 bool SSLManagerOpenSSL::_readCertificateChainFromMemory(SSL_CTX* context,
                                                         const std::string& payload,
                                                         PasswordFetcher* password,
-                                                        StringData description) {
+                                                        StringData certOriginDescription,
+                                                        StringData certScopeDescription) {
     ERR_clear_error();  // Clear error stack for SSL_CTX_use_certificate().
 
     UniqueBIO inBio(BIO_new_mem_buf(payload.c_str(), payload.length()));
@@ -2328,29 +2380,35 @@ bool SSLManagerOpenSSL::_readCertificateChainFromMemory(SSL_CTX* context,
     if (!inBio) {
         LOGV2_ERROR(5159906,
                     "Failed to allocate BIO from in memory payload",
+                    "origin"_attr = certOriginDescription,
+                    "scope"_attr = certScopeDescription,
                     "error"_attr = SSLManagerInterface::getSSLErrorMessage(ERR_get_error()));
         return false;
     }
 
-    auto password_cb = &SSLManagerOpenSSL::password_cb;
+    auto password_cb = &SSLManagerOpenSSL::no_prompt_password_cb;  // Will not block for prompt.
     void* userdata = static_cast<void*>(password);
     UniqueX509 x509cert(PEM_read_bio_X509_AUX(inBio.get(), NULL, password_cb, userdata));
 
     if (!x509cert) {
         LOGV2_ERROR(5159907,
                     "Failed to read the X509 certificate from memory",
+                    "origin"_attr = certOriginDescription,
+                    "scope"_attr = certScopeDescription,
                     "error"_attr = SSLManagerInterface::getSSLErrorMessage(ERR_get_error()));
         return false;
     }
 
     CertInformationToLog debugInfo;
     _getX509CertInfo(x509cert, &debugInfo);
-    logCert(debugInfo, description, 5159908);
+    logCert(debugInfo, "", certOriginDescription, certScopeDescription, 5159908);
 
     // SSL_CTX_use_certificate increments the refcount on cert.
     if (1 != SSL_CTX_use_certificate(context, x509cert.get())) {
         LOGV2_ERROR(5159907,
                     "Failed to use the X509 certificate loaded from memory",
+                    "origin"_attr = certOriginDescription,
+                    "scope"_attr = certScopeDescription,
                     "error"_attr = SSLManagerInterface::getSSLErrorMessage(ERR_get_error()));
         return false;
     }
@@ -2362,11 +2420,13 @@ bool SSLManagerOpenSSL::_readCertificateChainFromMemory(SSL_CTX* context,
         if (1 != SSL_CTX_add1_chain_cert(context, ca.get())) {
             LOGV2_ERROR(5159908,
                         "Failed to use the CA X509 certificate loaded from memory",
+                        "origin"_attr = certOriginDescription,
+                        "scope"_attr = certScopeDescription,
                         "error"_attr = getSSLErrorMessage(ERR_get_error()));
             return false;
         }
         _getX509CertInfo(ca, &debugInfo);
-        logCert(debugInfo, description, 5159908);
+        logCert(debugInfo, "", certOriginDescription, certScopeDescription, 5159908);
     }
     // When the while loop ends, it's usually just EOF.
     auto err = ERR_peek_last_error();
@@ -2375,6 +2435,8 @@ bool SSLManagerOpenSSL::_readCertificateChainFromMemory(SSL_CTX* context,
     } else {
         LOGV2_ERROR(5159909,
                     "Error remained after scanning all X509 certificates from memory",
+                    "origin"_attr = certOriginDescription,
+                    "scope"_attr = certScopeDescription,
                     "error"_attr = getSSLErrorMessage(ERR_get_error()));
         return false;  // Some real error.
     }
@@ -2384,43 +2446,50 @@ bool SSLManagerOpenSSL::_readCertificateChainFromMemory(SSL_CTX* context,
 
 bool SSLManagerOpenSSL::_setupPEM(SSL_CTX* context,
                                   const std::string& keyFile,
-                                  PasswordFetcher* password) {
+                                  PasswordFetcher* password,
+                                  StringData certScopeDescription) {
     if (SSL_CTX_use_certificate_chain_file(context, keyFile.c_str()) != 1) {
         LOGV2_ERROR(23248,
-                    "cannot read certificate file: {keyFile} {error}",
                     "Cannot read certificate file",
                     "keyFile"_attr = keyFile,
+                    "scope"_attr = certScopeDescription,
                     "error"_attr = getSSLErrorMessage(ERR_get_error()));
         return false;
     }
 
-    UniqueBIO inBio(BIO_new(BIO_s_file()));  // Custom deleter is required for BIO.
+    UniqueBIO inBio(BIO_new(BIO_s_file()));
 
     if (!inBio) {
         LOGV2_ERROR(23249,
-                    "failed to allocate BIO object: {error}",
                     "Failed to allocate BIO object",
+                    "keyFile"_attr = keyFile,
+                    "scope"_attr = certScopeDescription,
                     "error"_attr = getSSLErrorMessage(ERR_get_error()));
         return false;
     }
 
     if (BIO_read_filename(inBio.get(), keyFile.c_str()) <= 0) {
         LOGV2_ERROR(23250,
-                    "cannot read PEM key file: {keyFile} {error}",
                     "Cannot read PEM key file",
                     "keyFile"_attr = keyFile,
+                    "scope"_attr = certScopeDescription,
                     "error"_attr = getSSLErrorMessage(ERR_get_error()));
         return false;
     }
-    return _setupPEMFromBIO(
-        context, std::move(inBio), password, str::stream() << "keyFile " << keyFile);
+    return _setupPEMFromBIO(context,
+                            std::move(inBio),
+                            password,
+                            str::stream() << "keyFile " << keyFile,
+                            certScopeDescription);
 }
 
 bool SSLManagerOpenSSL::_setupPEMFromMemoryPayload(SSL_CTX* context,
                                                    const std::string& payload,
                                                    PasswordFetcher* password,
-                                                   StringData description) {
-    if (!_readCertificateChainFromMemory(context, payload, password, description)) {
+                                                   StringData certOriginDescription,
+                                                   StringData certScopeDescription) {
+    if (!_readCertificateChainFromMemory(
+            context, payload, password, certOriginDescription, certScopeDescription)) {
         return false;
     }
     UniqueBIO inBio(BIO_new_mem_buf(payload.c_str(), payload.length()));
@@ -2428,25 +2497,30 @@ bool SSLManagerOpenSSL::_setupPEMFromMemoryPayload(SSL_CTX* context,
     if (!inBio) {
         LOGV2_ERROR(5159901,
                     "Failed to allocate BIO object from in-memory payload",
+                    "origin"_attr = certOriginDescription,
+                    "scope"_attr = certScopeDescription,
                     "error"_attr = getSSLErrorMessage(ERR_get_error()));
         return false;
     }
 
-    return _setupPEMFromBIO(context, std::move(inBio), password, description);
+    return _setupPEMFromBIO(
+        context, std::move(inBio), password, certOriginDescription, certScopeDescription);
 }
 
 bool SSLManagerOpenSSL::_setupPEMFromBIO(SSL_CTX* context,
                                          UniqueBIO inBio,
                                          PasswordFetcher* password,
-                                         StringData description) {
+                                         StringData certOriginDescription,
+                                         StringData certScopeDescription) {
     // Obtain the private key, using our callback to acquire a decryption password if necessary.
     auto password_cb = &SSLManagerOpenSSL::password_cb;
     void* userdata = static_cast<void*>(password);
     EVP_PKEY* privateKey = PEM_read_bio_PrivateKey(inBio.get(), nullptr, password_cb, userdata);
     if (!privateKey) {
         LOGV2_ERROR(23251,
-                    "Cannot read PEM key file",
-                    "msg"_attr = description,
+                    "Cannot read PEM key",
+                    "origin"_attr = certOriginDescription,
+                    "scope"_attr = certScopeDescription,
                     "error"_attr = getSSLErrorMessage(ERR_get_error()));
         return false;
     }
@@ -2454,8 +2528,9 @@ bool SSLManagerOpenSSL::_setupPEMFromBIO(SSL_CTX* context,
 
     if (SSL_CTX_use_PrivateKey(context, privateKey) != 1) {
         LOGV2_ERROR(23252,
-                    "Cannot use PEM key file",
-                    "msg"_attr = description,
+                    "Cannot use PEM key",
+                    "origin"_attr = certOriginDescription,
+                    "scope"_attr = certScopeDescription,
                     "error"_attr = getSSLErrorMessage(ERR_get_error()));
         return false;
     }
@@ -2464,7 +2539,8 @@ bool SSLManagerOpenSSL::_setupPEMFromBIO(SSL_CTX* context,
     if (SSL_CTX_check_private_key(context) != 1) {
         LOGV2_ERROR(23253,
                     "SSL certificate validation failed",
-                    "msg"_attr = description,
+                    "origin"_attr = certOriginDescription,
+                    "scope"_attr = certScopeDescription,
                     "error"_attr = getSSLErrorMessage(ERR_get_error()));
         return false;
     }

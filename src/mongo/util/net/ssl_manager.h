@@ -398,17 +398,32 @@ void tlsEmitWarningExpiringClientCertificate(const SSLX509Name& peer, Days days)
 
 /**
  * Logs the SSL information by dispatching to either logCert() or logCRL().
+ * @param certOriginDescription human-readable description of the certificate origin for
+ *    logging, which could be a file or a memory payload coming from command.
+ * @param certScopeDescription human-readable description of the certificate scope for
+ *    logging, which could be local or remote cluster.
  */
 void logSSLInfo(const SSLInformationToLog& info,
+                StringData certOriginDescription,
+                StringData certScopeDescription,
                 const int logNumPEM = 4913010,
                 const int logNumCluster = 4913011,
                 const int logNumCrl = 4913012);
 
 /**
  * Logs the certificate.
+ * @param certType human-readable description of the certificate type.
+ * @see logSSLInfo() for other params description.
  */
-void logCert(const CertInformationToLog& cert, StringData certType, const int logNum);
-void logCRL(const CRLInformationToLog& crl, const int logNum);
+void logCert(const CertInformationToLog& cert,
+             StringData certType,
+             StringData certOriginDescription,
+             StringData certScopeDescription,
+             const int logNum);
+void logCRL(const CRLInformationToLog& crl,
+            StringData certOriginDescription,
+            StringData certScopeDescription,
+            const int logNum);
 
 }  // namespace mongo
 #endif  // #ifdef MONGO_CONFIG_SSL
