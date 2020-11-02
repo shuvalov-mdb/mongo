@@ -1234,7 +1234,7 @@ private:
 
         /**
          * This method can only return a cached password and never prompts.
-         * @returns cached password if awailable, error if password is not cached.
+         * @returns cached password if available, error if password is not cached.
          */
         StatusWith<StringData> fetchCachedPasswordNoPrompt() {
             stdx::lock_guard<Latch> lock(_mutex);
