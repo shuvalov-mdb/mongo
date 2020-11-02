@@ -175,7 +175,7 @@ public:
 
     /**
      * actualServer is set to the actual server where they call went if there was a choice (for
-     * example SlaveOk).
+     * example SecondaryOk).
      */
     virtual bool call(Message& toSend,
                       Message& response,
@@ -274,7 +274,7 @@ public:
         directly call runCommand.
 
         @param dbname database name.  Use "admin" for global administrative commands.
-        @param cmd  the command object to execute.  For example, { ismaster : 1 }
+        @param cmd  the command object to execute.  For example, { hello : 1 }
         @param info the result object the database returns. Typically has { ok : ..., errmsg : ... }
                     fields set.
         @param options see enum QueryOptions - normally not needed to run a command
@@ -376,15 +376,14 @@ public:
     static std::string createPasswordDigest(const std::string& username,
                                             const std::string& clearTextPassword);
 
-    /** returns true in isMaster parm if this db is the current master
-       of a replica pair.
+    /** returns true in isPrimary param if this db is the current primary of a replica pair.
 
        pass in info for more details e.g.:
-         { "ismaster" : 1.0 , "msg" : "not paired" , "ok" : 1.0  }
+         { "isprimary" : 1.0 , "msg" : "not paired" , "ok" : 1.0  }
 
        returns true if command invoked successfully.
     */
-    virtual bool isMaster(bool& isMaster, BSONObj* info = nullptr);
+    virtual bool isPrimary(bool& isPrimary, BSONObj* info = nullptr);
 
     /**
        Create a new collection in the database.  Normally, collection creation is automatic.  You
@@ -616,7 +615,7 @@ public:
     virtual int getMinWireVersion() = 0;
     virtual int getMaxWireVersion() = 0;
 
-    const std::vector<std::string>& getIsMasterSaslMechanisms() const {
+    const std::vector<std::string>& getIsPrimarySaslMechanisms() const {
         return _saslMechsForAuth;
     }
 
@@ -783,8 +782,8 @@ protected:
     /** if the result of a command is ok*/
     bool isOk(const BSONObj&);
 
-    /** if the element contains a not master error */
-    bool isNotMasterErrorString(const BSONElement& e);
+    /** if the element contains a not primary error */
+    bool isNotPrimaryErrorString(const BSONElement& e);
 
     BSONObj _countCmd(const NamespaceStringOrUUID nsOrUuid,
                       const BSONObj& query,
@@ -851,5 +850,35 @@ private:
 
 BSONElement getErrField(const BSONObj& result);
 bool hasErrField(const BSONObj& result);
+
+/*
+ * RAII-style class to set new RequestMetadataWriter and ReplyMetadataReader on DBClientConnection
+ * "_conn". On object destruction, '_conn' is set back to it's old RequestsMetadataWriter and
+ * ReplyMetadataReader.
+ */
+class ScopedMetadataWriterAndReader {
+    ScopedMetadataWriterAndReader(const ScopedMetadataWriterAndReader&) = delete;
+    ScopedMetadataWriterAndReader& operator=(const ScopedMetadataWriterAndReader&) = delete;
+
+public:
+    ScopedMetadataWriterAndReader(DBClientBase* conn,
+                                  rpc::RequestMetadataWriter writer,
+                                  rpc::ReplyMetadataReader reader)
+        : _conn(conn),
+          _oldWriter(std::move(conn->getRequestMetadataWriter())),
+          _oldReader(std::move(conn->getReplyMetadataReader())) {
+        _conn->setRequestMetadataWriter(std::move(writer));
+        _conn->setReplyMetadataReader(std::move(reader));
+    }
+    ~ScopedMetadataWriterAndReader() {
+        _conn->setRequestMetadataWriter(std::move(_oldWriter));
+        _conn->setReplyMetadataReader(std::move(_oldReader));
+    }
+
+private:
+    DBClientBase* const _conn;  // not owned.
+    rpc::RequestMetadataWriter _oldWriter;
+    rpc::ReplyMetadataReader _oldReader;
+};
 
 }  // namespace mongo

@@ -49,13 +49,13 @@ public:
                PlanYieldPolicySBE* yieldPolicy)
         : BaseRuntimePlanner{opCtx, collection, cq, yieldPolicy}, _queryParams{queryParams} {}
 
-    plan_ranker::CandidatePlan plan(
+    CandidatePlans plan(
         std::vector<std::unique_ptr<QuerySolution>> solutions,
         std::vector<std::pair<std::unique_ptr<PlanStage>, stage_builder::PlanStageData>> roots)
         final;
 
 private:
-    plan_ranker::CandidatePlan planWholeQuery() const;
+    CandidatePlans planWholeQuery() const;
 
     // Query parameters used to create a query solution for each $or branch.
     const QueryPlannerParams _queryParams;

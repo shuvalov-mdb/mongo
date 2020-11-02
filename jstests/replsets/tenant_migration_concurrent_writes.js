@@ -19,8 +19,17 @@ load("jstests/replsets/libs/tenant_migration_util.js");
 
 const donorRst = new ReplSetTest(
     {nodes: 1, name: 'donor', nodeOptions: {setParameter: {enableTenantMigrations: true}}});
-const recipientRst = new ReplSetTest(
-    {nodes: 1, name: 'recipient', nodeOptions: {setParameter: {enableTenantMigrations: true}}});
+const recipientRst = new ReplSetTest({
+    nodes: 1,
+    name: 'recipient',
+    nodeOptions: {
+        setParameter: {
+            enableTenantMigrations: true,
+            // TODO SERVER-51734: Remove the failpoint 'returnResponseOkForRecipientSyncDataCmd'.
+            'failpoint.returnResponseOkForRecipientSyncDataCmd': tojson({mode: 'alwaysOn'})
+        }
+    }
+});
 
 donorRst.startSet();
 donorRst.initiate();
@@ -174,7 +183,7 @@ function runTest(
     primary, testCase, testFunc, dbName, collName, {useTransaction, useRetryableWrite} = {}) {
     const testOpts =
         makeTestOptions(primary, testCase, dbName, collName, useTransaction, useRetryableWrite);
-    jsTest.log("Testing command " + tojson(testOpts.command));
+    jsTest.log("Testing testOpts: " + tojson(testOpts) + " with testFunc " + testFunc.name);
 
     if (testCase.explicitlyCreateCollection) {
         createCollectionAndInsertDocs(testOpts.primaryDB, collName, testCase.isCapped);
@@ -463,18 +472,20 @@ const testCases = {
         }
     },
     appendOplogNote: {skip: isNotRunOnUserDatabase},
-    applyOps: {
-        explicitlyCreateCollection: true,
-        command: function(dbName, collName) {
-            return {applyOps: [{op: "i", ns: dbName + "." + collName, o: {_id: 0}}]};
-        },
-        assertCommandSucceeded: function(db, dbName, collName) {
-            assert.eq(countDocs(db, collName, {_id: 0}), 1);
-        },
-        assertCommandFailed: function(db, dbName, collName) {
-            assert.eq(countDocs(db, collName, {_id: 0}), 0);
-        }
-    },
+
+    // TODO (SERVER-51753): Handle applyOps running concurrently with a tenant migration.
+    // applyOps: {
+    //     explicitlyCreateCollection: true,
+    //     command: function(dbName, collName) {
+    //         return {applyOps: [{op: "i", ns: dbName + "." + collName, o: {_id: 0}}]};
+    //     },
+    //     assertCommandSucceeded: function(db, dbName, collName) {
+    //         assert.eq(countDocs(db, collName, {_id: 0}), 1);
+    //     },
+    //     assertCommandFailed: function(db, dbName, collName) {
+    //         assert.eq(countDocs(db, collName, {_id: 0}), 0);
+    //     }
+    // },
     authenticate: {skip: isAuthCommand},
     availableQueryOptions: {skip: isNotWriteCommand},
     buildInfo: {skip: isNotWriteCommand},

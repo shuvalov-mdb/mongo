@@ -74,8 +74,9 @@ protected:
         setupShards({shard});
 
         CollectionType collection;
-        collection.setNs(_namespace);
+        collection.setNss(_namespace);
         collection.setEpoch(_epoch);
+        collection.setUpdatedAt(Date_t::now());
         collection.setKeyPattern(BSON("x" << 1));
 
         ASSERT_OK(insertToConfigCollection(

@@ -70,9 +70,15 @@ public:
     Future<SessionHandle> asyncConnect(
         HostAndPort peer,
         ConnectSSLMode sslMode,
+<<<<<<< HEAD
         const boost::optional<TransientSSLParams>& transientSSLParams,
         const ReactorHandle& reactor,
         Milliseconds timeout) override;
+=======
+        const ReactorHandle& reactor,
+        Milliseconds timeout,
+        std::shared_ptr<SSLConnectionContext> sslContextOverride = nullptr) override;
+>>>>>>> master
 
     Status start() override;
     void shutdown() override;

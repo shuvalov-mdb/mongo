@@ -95,7 +95,7 @@ public:
     SemiFuture<std::vector<HostAndPort>> getHostsOrRefresh(
         const ReadPreferenceSetting& readPref, Milliseconds maxWait = kDefaultFindHostTimeout);
 
-    HostAndPort getMasterOrUassert();
+    HostAndPort getPrimaryOrUassert();
 
     void failedHost(const HostAndPort& host, const Status& status) override;
     void failedHostPreHandshake(const HostAndPort& host,
@@ -178,10 +178,10 @@ private:
 
     void onServerPingFailedEvent(const HostAndPort& hostAndPort, const Status& status) override;
 
-    void onServerPingSucceededEvent(sdam::IsMasterRTT durationMS,
+    void onServerPingSucceededEvent(sdam::HelloRTT durationMS,
                                     const HostAndPort& hostAndPort) override;
 
-    void onServerHandshakeCompleteEvent(sdam::IsMasterRTT durationMs,
+    void onServerHandshakeCompleteEvent(sdam::HelloRTT durationMs,
                                         const HostAndPort& hostAndPort,
                                         const BSONObj reply) override;
 

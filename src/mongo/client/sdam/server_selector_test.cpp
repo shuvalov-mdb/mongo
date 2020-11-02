@@ -91,7 +91,7 @@ public:
         static inline const auto secondarySet = TagSet(BSON_ARRAY(secondary));
     };
 
-    static ServerDescriptionPtr make_with_latency(IsMasterRTT latency,
+    static ServerDescriptionPtr make_with_latency(HelloRTT latency,
                                                   HostAndPort address,
                                                   ServerType serverType = ServerType::kRSPrimary,
                                                   std::map<std::string, std::string> tags = {}) {
@@ -180,7 +180,8 @@ TEST_F(ServerSelectorTestFixture, ShouldThrowOnWireError) {
 TEST_F(ServerSelectorTestFixture, ShouldReturnNoneIfTopologyUnknown) {
     auto topologyDescription = std::make_shared<TopologyDescription>(sdamConfiguration);
     ASSERT_EQ(TopologyType::kUnknown, topologyDescription->getType());
-    ASSERT_EQ(boost::none, selector.selectServers(topologyDescription, ReadPreferenceSetting()));
+    ASSERT_EQ(adaptForAssert(boost::none),
+              adaptForAssert(selector.selectServers(topologyDescription, ReadPreferenceSetting())));
 }
 
 TEST_F(ServerSelectorTestFixture, ShouldBeAbleToSelectWithMaxStalenessFromClonedTopology) {

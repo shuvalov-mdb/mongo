@@ -15,8 +15,17 @@ const kTenantId = "testTenantId";
 
 const donorRst = new ReplSetTest(
     {nodes: 1, name: "donorRst", nodeOptions: {setParameter: {enableTenantMigrations: true}}});
-const recipientRst = new ReplSetTest(
-    {nodes: 1, name: "recipientRst", nodeOptions: {setParameter: {enableTenantMigrations: true}}});
+const recipientRst = new ReplSetTest({
+    nodes: 1,
+    name: "recipientRst",
+    nodeOptions: {
+        setParameter: {
+            enableTenantMigrations: true,
+            // TODO SERVER-51734: Remove the failpoint 'returnResponseOkForRecipientSyncDataCmd'.
+            'failpoint.returnResponseOkForRecipientSyncDataCmd': tojson({mode: 'alwaysOn'})
+        }
+    }
+});
 
 donorRst.startSet();
 donorRst.initiate();
@@ -30,10 +39,6 @@ recipientRst.initiate();
  */
 function testAbortInitialState(donorRst) {
     const donorPrimary = donorRst.getPrimary();
-
-    // Create the config.tenantMigrationDonors collection so the first storage transaction after
-    // the migration starts corresponds to the donor's state doc insert.
-    assert.commandWorked(donorPrimary.getDB("config").createCollection("tenantMigrationDonors"));
 
     const migrationId = UUID();
     const migrationOpts = {

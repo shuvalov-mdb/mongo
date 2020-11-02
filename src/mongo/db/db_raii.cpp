@@ -244,7 +244,7 @@ AutoGetCollectionForReadBase<AutoGetCollectionType>::AutoGetCollectionForReadBas
 
         if (readSource == RecoveryUnit::ReadSource::kMajorityCommitted) {
             replCoord->waitUntilSnapshotCommitted(opCtx, *minSnapshot);
-            uassertStatusOK(opCtx->recoveryUnit()->obtainMajorityCommittedSnapshot());
+            uassertStatusOK(opCtx->recoveryUnit()->majorityCommittedSnapshotAvailable());
         }
 
         {
@@ -263,7 +263,7 @@ AutoGetCollectionForReadLockFree::AutoGetCollectionForReadLockFree(
     Date_t deadline) {
     // Supported lock-free reads should never have an open storage snapshot prior to calling
     // this helper. The storage snapshot and in-memory state fetched here must be consistent.
-    invariant(supportsLockFreeRead(opCtx) && !opCtx->recoveryUnit()->inActiveTxn());
+    invariant(supportsLockFreeRead(opCtx) && !opCtx->recoveryUnit()->isActive());
 
     while (true) {
         // AutoGetCollectionForReadBase can choose a read source based on the current replication
@@ -278,21 +278,31 @@ AutoGetCollectionForReadLockFree::AutoGetCollectionForReadLockFree(
         }
 
         // We must open a storage snapshot consistent with the fetched in-memory Collection instance
-        // and chosen read source based on replication state. The Collection instance and
-        // replication state after opening a snapshot will be compared with the previously acquired
-        // state. If either does not match, then this loop will retry lock acquisition and read
-        // source selection until there is a match.
+        // and chosen read source. The Collection instance and replication state after opening a
+        // snapshot will be compared with the previously acquired state. If either does not match,
+        // then this loop will retry lock acquisition and read source selection until there is a
+        // match.
         //
         // Note: AutoGetCollectionForReadBase may open a snapshot for PIT reads, so
         // preallocateSnapshot() may be a no-op, but that is OK because the snapshot is established
         // by _autoGetCollectionForReadBase after it fetches a Collection instance.
 
-        opCtx->recoveryUnit()->preallocateSnapshot();
+        if (_autoGetCollectionForReadBase->getNss().isOplog()) {
+            // Signal to the RecoveryUnit that the snapshot will be used for reading the oplog.
+            // Normally the snapshot is opened from a cursor that can take special action when
+            // reading from the oplog.
+            opCtx->recoveryUnit()->preallocateSnapshotForOplogRead();
+        } else {
+            opCtx->recoveryUnit()->preallocateSnapshot();
+        }
 
         auto newCollection = CollectionCatalog::get(opCtx).lookupCollectionByUUIDForRead(
             opCtx, _autoGetCollectionForReadBase.get()->uuid());
 
-        if (_autoGetCollectionForReadBase.get()->getMinimumVisibleSnapshot() ==
+        // The collection may have been dropped since the previous lookup, run the loop one more
+        // time to cleanup if newCollection is nullptr
+        if (newCollection &&
+            _autoGetCollectionForReadBase.get()->getMinimumVisibleSnapshot() ==
                 newCollection->getMinimumVisibleSnapshot() &&
             replTerm == repl::ReplicationCoordinator::get(opCtx)->getTerm()) {
             break;

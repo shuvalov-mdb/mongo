@@ -53,6 +53,8 @@ selector:
   # These tests use legacy read mode which does not use runCommand.
   - jstests/core/comment_field.js
   - jstests/core/invalidated_legacy_cursors.js
+  # TODO (SERVER-51753): Handle applyOps running concurrently with a tenant migration.
+  - jstests/core/rename_stayTemp.js
 
 executor:
   archive:
@@ -95,6 +97,9 @@ executor:
       set_parameters:
         enableTestCommands: 1
         enableTenantMigrations: true
+        # TODO SERVER-51734: Remove the failpoint 'returnResponseOkForRecipientSyncDataCmd'.
+        failpoint.returnResponseOkForRecipientSyncDataCmd:
+            mode: alwaysOn
     num_replica_sets: 2
     num_nodes_per_replica_set: 3
     use_replica_set_connection_string: true

@@ -498,14 +498,20 @@ StatusWith<StringDataSet> parseRequired(BSONElement requiredElt) {
  */
 StatusWithMatchExpression translateRequired(const boost::intrusive_ptr<ExpressionContext>& expCtx,
                                             const StringDataSet& requiredProperties,
+                                            BSONElement requiredElt,
                                             StringData path,
                                             InternalSchemaTypeExpression* typeExpr) {
-    auto andExpr = std::make_unique<AndMatchExpression>();
+    auto andExpr = std::make_unique<AndMatchExpression>(
+        doc_validation_error::createAnnotation(expCtx, "required", requiredElt.wrap()));
 
     std::vector<StringData> sortedProperties(requiredProperties.begin(), requiredProperties.end());
     std::sort(sortedProperties.begin(), sortedProperties.end());
     for (auto&& propertyName : sortedProperties) {
-        andExpr->add(new ExistsMatchExpression(propertyName));
+        // This node is tagged as '_propertyExists' to indicate that it will produce a path instead
+        // of a detailed BSONObj error during error generation.
+        andExpr->add(new ExistsMatchExpression(
+            propertyName,
+            doc_validation_error::createAnnotation(expCtx, "_propertyExists", BSONObj())));
     }
 
     // If this is a top-level schema, then we know that we are matching against objects, and there
@@ -514,8 +520,10 @@ StatusWithMatchExpression translateRequired(const boost::intrusive_ptr<Expressio
         return {std::move(andExpr)};
     }
 
-    auto objectMatch =
-        std::make_unique<InternalSchemaObjectMatchExpression>(path, std::move(andExpr));
+    auto objectMatch = std::make_unique<InternalSchemaObjectMatchExpression>(
+        path,
+        std::move(andExpr),
+        doc_validation_error::createAnnotation(expCtx, AnnotationMode::kIgnoreButDescend));
 
     return makeRestriction(expCtx, BSONType::Object, path, std::move(objectMatch), typeExpr);
 }
@@ -554,7 +562,9 @@ StatusWithMatchExpression parseProperties(const boost::intrusive_ptr<ExpressionC
         }
 
         nestedSchemaMatch.getValue()->setErrorAnnotation(doc_validation_error::createAnnotation(
-            expCtx, "", BSON("propertyName" << property.fieldNameStringData().toString())));
+            expCtx,
+            "_property",
+            BSON("propertyName" << property.fieldNameStringData().toString())));
         if (requiredProperties.find(property.fieldNameStringData()) != requiredProperties.end()) {
             // The field name for which we created the nested schema is a required property. This
             // property must exist and therefore must match 'nestedSchemaMatch'.
@@ -648,7 +658,8 @@ StatusWithMatchExpression parseAdditionalProperties(
     if (!additionalPropertiesElt) {
         // The absence of the 'additionalProperties' keyword is identical in meaning to the presence
         // of 'additionalProperties' with a value of true.
-        return {std::make_unique<AlwaysTrueMatchExpression>()};
+        return {std::make_unique<AlwaysTrueMatchExpression>(
+            doc_validation_error::createAnnotation(expCtx, AnnotationMode::kIgnore))};
     }
 
     if (additionalPropertiesElt.type() != BSONType::Bool &&
@@ -659,11 +670,12 @@ StatusWithMatchExpression parseAdditionalProperties(
                                      << "' must be an object or a boolean")};
     }
 
+    auto annotation = doc_validation_error::createAnnotation(expCtx, AnnotationMode::kIgnore);
     if (additionalPropertiesElt.type() == BSONType::Bool) {
         if (additionalPropertiesElt.boolean()) {
-            return {std::make_unique<AlwaysTrueMatchExpression>()};
+            return {std::make_unique<AlwaysTrueMatchExpression>(std::move(annotation))};
         } else {
-            return {std::make_unique<AlwaysFalseMatchExpression>()};
+            return {std::make_unique<AlwaysFalseMatchExpression>(std::move(annotation))};
         }
     }
 
@@ -718,11 +730,22 @@ StatusWithMatchExpression parseAllowedProperties(
     auto otherwiseWithPlaceholder = std::make_unique<ExpressionWithPlaceholder>(
         kNamePlaceholder.toString(), std::move(otherwiseExpr.getValue()));
 
+    clonable_ptr<ErrorAnnotation> annotation;
+    // In the case of no 'additionalProperties' keyword, but a 'patternProperties' keyword is
+    // present, we still want '$_internalSchemaAllowedProperties' to generate an error, so we
+    // provide an annotation with empty information.
+    if (additionalPropertiesElt.eoo()) {
+        annotation = doc_validation_error::createAnnotation(expCtx, "", BSONObj());
+    } else {
+        annotation =
+            doc_validation_error::createAnnotation(expCtx, "", additionalPropertiesElt.wrap());
+    }
     auto allowedPropertiesExpr = std::make_unique<InternalSchemaAllowedPropertiesMatchExpression>(
         std::move(propertyNames),
         kNamePlaceholder,
         std::move(patternProperties.getValue()),
-        std::move(otherwiseWithPlaceholder));
+        std::move(otherwiseWithPlaceholder),
+        std::move(annotation));
 
     // If this is a top-level schema, then we have no path and there is no need for an explicit
     // object match node.
@@ -731,7 +754,9 @@ StatusWithMatchExpression parseAllowedProperties(
     }
 
     auto objectMatch = std::make_unique<InternalSchemaObjectMatchExpression>(
-        path, std::move(allowedPropertiesExpr));
+        path,
+        std::move(allowedPropertiesExpr),
+        doc_validation_error::createAnnotation(expCtx, AnnotationMode::kIgnoreButDescend));
 
     return makeRestriction(expCtx, BSONType::Object, path, std::move(objectMatch), typeExpr);
 }
@@ -772,7 +797,7 @@ StatusWithMatchExpression makeDependencyExistsClause(
     StringData path,
     StringData dependencyName) {
     // This node is tagged as '_propertyExists' to indicate that it will produce a path instead
-    // of a detail BSONObj error during error generation.
+    // of a detailed BSONObj error during error generation.
     auto existsExpr = std::make_unique<ExistsMatchExpression>(
         dependencyName,
         doc_validation_error::createAnnotation(expCtx, "_propertyExists", BSONObj()));
@@ -1342,7 +1367,11 @@ Status translateObjectKeywords(StringMap<BSONElement>& keywordMap,
     }
 
     if (!requiredProperties.empty()) {
-        auto requiredExpr = translateRequired(expCtx, requiredProperties, path, typeExpr);
+        auto requiredExpr = translateRequired(expCtx,
+                                              requiredProperties,
+                                              keywordMap[JSONSchemaParser::kSchemaRequiredKeyword],
+                                              path,
+                                              typeExpr);
         if (!requiredExpr.isOK()) {
             return requiredExpr.getStatus();
         }

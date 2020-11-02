@@ -163,17 +163,38 @@ ThreadPool::Limits TenantMigrationRecipientService::getThreadPoolLimits() const 
 
 std::shared_ptr<PrimaryOnlyService::Instance> TenantMigrationRecipientService::constructInstance(
     BSONObj initialStateDoc) const {
-    return std::make_shared<TenantMigrationRecipientService::Instance>(initialStateDoc);
+    return std::make_shared<TenantMigrationRecipientService::Instance>(this, initialStateDoc);
 }
 
-TenantMigrationRecipientService::Instance::Instance(BSONObj stateDoc)
+TenantMigrationRecipientService::Instance::Instance(
+    const TenantMigrationRecipientService* recipientService, BSONObj stateDoc)
     : PrimaryOnlyService::TypedInstance<Instance>(),
+      _recipientService(recipientService),
       _stateDoc(TenantMigrationRecipientDocument::parse(IDLParserErrorContext("recipientStateDoc"),
                                                         stateDoc)),
       _tenantId(_stateDoc.getTenantId().toString()),
       _migrationUuid(_stateDoc.getId()),
       _donorConnectionString(_stateDoc.getDonorConnectionString().toString()),
       _readPreference(_stateDoc.getReadPreference()) {}
+
+Status TenantMigrationRecipientService::Instance::checkIfOptionsConflict(
+    const TenantMigrationRecipientDocument& requestedStateDoc) const {
+    invariant(requestedStateDoc.getId() == _migrationUuid);
+
+    if (requestedStateDoc.getTenantId() == _tenantId &&
+        requestedStateDoc.getDonorConnectionString() == _donorConnectionString &&
+        requestedStateDoc.getReadPreference().equals(_readPreference)) {
+        return Status::OK();
+    }
+
+    return Status(ErrorCodes::ConflictingOperationInProgress,
+                  str::stream() << "Requested options for tenant migration doesn't match"
+                                << " the active migration options, migrationId: " << _migrationUuid
+                                << ", tenantId: " << _tenantId
+                                << ", connectionString: " << _donorConnectionString
+                                << ", readPreference: " << _readPreference.toString()
+                                << ", requested options:" << requestedStateDoc.toBSON());
+}
 
 OpTime TenantMigrationRecipientService::Instance::waitUntilMigrationReachesConsistentState(
     OperationContext* opCtx) const {
@@ -276,11 +297,22 @@ TenantMigrationRecipientService::Instance::_createAndConnectClients() {
     return _donorReplicaSetMonitor->getHostOrRefresh(_readPreference, findHostTimeout)
         .thenRunOn(**_scopedExecutor)
         .then([this](const HostAndPort& serverAddress) {
+            // Application name is constructed such that it doesn't exceeds
+            // kMaxApplicationNameByteLength (128 bytes).
+            // "TenantMigration_" (16 bytes) + <tenantId> (61 bytes) + "_" (1 byte) +
+            // <migrationUuid> (36 bytes) =  114 bytes length.
+            // Note: Since the total length of tenant database name (<tenantId>_<user provided db
+            // name>) can't exceed 63 bytes and the user provided db name should be at least one
+            // character long, the maximum length of tenantId can only be 61 bytes.
             auto applicationName =
-                "TenantMigrationRecipient_" + getTenantId() + "_" + getMigrationUUID().toString();
+                "TenantMigration_" + getTenantId() + "_" + getMigrationUUID().toString();
             auto client = _connectAndAuth(serverAddress, applicationName, _authParams);
 
-            applicationName += "_fetcher";
+            // Application name is constructed such that it doesn't exceeds
+            // kMaxApplicationNameByteLength (128 bytes).
+            // "TenantMigration_" (16 bytes) + <tenantId> (61 bytes) + "_" (1 byte) +
+            // <migrationUuid> (36 bytes) + _oplogFetcher" (13 bytes) =  127 bytes length.
+            applicationName += "_oplogFetcher";
             auto oplogFetcherClient = _connectAndAuth(serverAddress, applicationName, _authParams);
             return ConnectionPair(std::move(client), std::move(oplogFetcherClient));
         })
@@ -314,7 +346,6 @@ SemiFuture<void> TenantMigrationRecipientService::Instance::_initializeStateDoc(
     auto uniqueOpCtx = cc().makeOperationContext();
     auto opCtx = uniqueOpCtx.get();
 
-
     LOGV2_DEBUG(5081400,
                 2,
                 "Recipient migration service initializing state document",
@@ -325,7 +356,11 @@ SemiFuture<void> TenantMigrationRecipientService::Instance::_initializeStateDoc(
 
     // Persist the state doc before starting the data sync.
     _stateDoc.setState(TenantMigrationRecipientStateEnum::kStarted);
-    uassertStatusOK(tenantMigrationRecipientEntryHelpers::insertStateDoc(opCtx, _stateDoc));
+    {
+        Lock::ExclusiveLock stateDocInsertLock(
+            opCtx, opCtx->lockState(), _recipientService->_stateDocInsertMutex);
+        uassertStatusOK(tenantMigrationRecipientEntryHelpers::insertStateDoc(opCtx, _stateDoc));
+    }
 
     if (MONGO_unlikely(failWhilePersistingTenantMigrationRecipientInstanceStateDoc.shouldFail())) {
         LOGV2(4878500, "Persisting state doc failed due to fail point enabled.");
@@ -352,7 +387,7 @@ void TenantMigrationRecipientService::Instance::_getStartOpTimesFromDonor(WithLo
         _client->findOne(NamespaceString::kRsOplogNamespace.ns(),
                          Query().sort("$natural", -1),
                          &oplogOpTimeFields,
-                         QueryOption_SlaveOk,
+                         QueryOption_SecondaryOk,
                          ReadConcernArgs(ReadConcernLevel::kMajorityReadConcern).toBSONInner());
     uassert(4880601, "Found no entries in the remote oplog", !lastOplogEntry1Bson.isEmpty());
     LOGV2_DEBUG(4880600,
@@ -374,7 +409,7 @@ void TenantMigrationRecipientService::Instance::_getStartOpTimesFromDonor(WithLo
         QUERY("state" << BSON("$in" << BSON_ARRAY(preparedState << inProgressState)))
             .sort(SessionTxnRecord::kStartOpTimeFieldName.toString(), 1),
         &transactionTableOpTimeFields,
-        QueryOption_SlaveOk,
+        QueryOption_SecondaryOk,
         ReadConcernArgs(ReadConcernLevel::kMajorityReadConcern).toBSONInner());
     LOGV2_DEBUG(4880602,
                 2,
@@ -393,7 +428,7 @@ void TenantMigrationRecipientService::Instance::_getStartOpTimesFromDonor(WithLo
         _client->findOne(NamespaceString::kRsOplogNamespace.ns(),
                          Query().sort("$natural", -1),
                          &oplogOpTimeFields,
-                         QueryOption_SlaveOk,
+                         QueryOption_SecondaryOk,
                          ReadConcernArgs(ReadConcernLevel::kMajorityReadConcern).toBSONInner());
     uassert(4880603, "Found no entries in the remote oplog", !lastOplogEntry2Bson.isEmpty());
     LOGV2_DEBUG(4880604,
@@ -455,6 +490,7 @@ void TenantMigrationRecipientService::Instance::_startOplogFetcher() {
         OplogFetcher::StartingPoint::kEnqueueFirstDoc,
         _getOplogFetcherFilter(),
         ReadConcernArgs(repl::ReadConcernLevel::kMajorityReadConcern),
+        true /* requestResumeToken */,
         "TenantOplogFetcher_" + getTenantId() + "_" + getMigrationUUID().toString());
     _donorOplogFetcher->setConnection(std::move(_oplogFetcherClient));
     uassertStatusOK(_donorOplogFetcher->startup());
@@ -467,16 +503,43 @@ Status TenantMigrationRecipientService::Instance::_enqueueDocuments(
 
     invariant(_donorOplogBuffer);
 
-    if (info.toApplyDocumentCount == 0)
-        return Status::OK();
-
     auto opCtx = cc().makeOperationContext();
-    // Wait for enough space.
-    _donorOplogBuffer->waitForSpace(opCtx.get(), info.toApplyDocumentBytes);
+    if (info.toApplyDocumentCount != 0) {
+        // Wait for enough space.
+        _donorOplogBuffer->waitForSpace(opCtx.get(), info.toApplyDocumentBytes);
 
-    // Buffer docs for later application.
-    _donorOplogBuffer->push(opCtx.get(), begin, end);
+        // Buffer docs for later application.
+        _donorOplogBuffer->push(opCtx.get(), begin, end);
+    }
+    if (info.resumeToken.isNull()) {
+        return Status(ErrorCodes::Error(5124600), "Resume token returned is null");
+    }
 
+    const auto lastPushedTS = _donorOplogBuffer->getLastPushedTimestamp();
+    if (lastPushedTS == info.resumeToken) {
+        // We don't want to insert a resume token noop if it would be a duplicate.
+        return Status::OK();
+    }
+    invariant(lastPushedTS < info.resumeToken,
+              str::stream() << "LastPushed: " << lastPushedTS.toString()
+                            << ", resumeToken: " << info.resumeToken.toString());
+
+    MutableOplogEntry noopEntry;
+    noopEntry.setOpType(repl::OpTypeEnum::kNoop);
+    noopEntry.setObject(BSON("msg" << TenantMigrationRecipientService::kNoopMsg << "tenantId"
+                                   << getTenantId() << "migrationId" << getMigrationUUID()));
+    noopEntry.setTimestamp(info.resumeToken);
+    // This term is not used for anything.
+    noopEntry.setTerm(OpTime::kUninitializedTerm);
+
+    // Use an empty namespace string so this op is ignored by the applier.
+    noopEntry.setNss({});
+    // Use an empty wall clock time since we have no wall clock time, but we must give it one, and
+    // we want it to be clearly fake.
+    noopEntry.setWallClockTime({});
+
+    OplogBuffer::Batch noopVec = {noopEntry.toBSON()};
+    _donorOplogBuffer->push(opCtx.get(), noopVec.cbegin(), noopVec.cend());
     return Status::OK();
 }
 
@@ -724,6 +787,13 @@ void TenantMigrationRecipientService::Instance::run(
     _scopedExecutor = executor;
     pauseBeforeRunTenantMigrationRecipientInstance.pauseWhileSet();
 
+    LOGV2(4879607,
+          "Starting tenant migration recipient instance: ",
+          "migrationId"_attr = getMigrationUUID(),
+          "tenantId"_attr = getTenantId(),
+          "connectionString"_attr = _donorConnectionString,
+          "readPreference"_attr = _readPreference);
+
     ExecutorFuture(**executor)
         .then([this] {
             stdx::lock_guard lk(_mutex);
@@ -768,7 +838,7 @@ void TenantMigrationRecipientService::Instance::run(
                     str::stream() << "Can't start the data sync as the state doc is already marked "
                                      "for garbage collect for migration uuid: "
                                   << getMigrationUUID(),
-                    !_stateDoc.getGarbageCollect());
+                    !_stateDoc.getExpireAt());
             _getStartOpTimesFromDonor(lk);
             auto opCtx = cc().makeOperationContext();
             uassertStatusOK(

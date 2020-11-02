@@ -689,6 +689,8 @@ MongoRunner.mongodOptions = function(opts = {}) {
     _removeSetParameterIfBeforeVersion(opts, "numInitialSyncConnectAttempts", "3.3.12");
     _removeSetParameterIfBeforeVersion(opts, "migrationLockAcquisitionMaxWaitMS", "4.1.7");
     _removeSetParameterIfBeforeVersion(opts, "shutdownTimeoutMillisForSignaledShutdown", "4.5.0");
+    _removeSetParameterIfBeforeVersion(
+        opts, "failpoint.PrimaryOnlyServiceSkipRebuildingInstances", "4.8.0");
 
     if (!opts.logFile && opts.useLogFiles) {
         opts.logFile = opts.dbpath + "/mongod.log";
@@ -721,6 +723,18 @@ MongoRunner.mongodOptions = function(opts = {}) {
                             "specified");
         }
         opts.enableEncryption = "";
+    }
+
+    if (opts.hasOwnProperty("encryptionCipherMode")) {
+        if (typeof opts.encryptionCipherMode !== "string") {
+            // opts.encryptionCipherMode, if set, must be a string
+            throw new Error("The encryptionCipherMode option must be a string if it is specified");
+        }
+    } else if (jsTestOptions().encryptionCipherMode !== undefined) {
+        if (typeof jsTestOptions().encryptionCipherMode !== "string") {
+            throw new Error("The encryptionCipherMode option must be a string if it is specified");
+        }
+        opts.encryptionCipherMode = jsTestOptions().encryptionCipherMode;
     }
 
     if (opts.hasOwnProperty("encryptionKeyFile")) {

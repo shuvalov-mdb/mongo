@@ -54,13 +54,19 @@
 #include "mongo/db/query/get_executor.h"
 #include "mongo/db/repl/repl_client_info.h"
 #include "mongo/db/repl/replication_coordinator.h"
+#include "mongo/db/repl/tenant_migration_access_blocker_registry.h"
+#include "mongo/db/repl/tenant_migration_committed_info.h"
+#include "mongo/db/repl/tenant_migration_conflict_info.h"
 #include "mongo/db/stats/counters.h"
 #include "mongo/db/storage/duplicate_key_error_info.h"
 #include "mongo/db/write_concern.h"
 #include "mongo/s/stale_exception.h"
+#include "mongo/util/fail_point.h"
 
 namespace mongo {
 namespace {
+
+MONGO_FAIL_POINT_DEFINE(hangWriteBeforeWaitingForMigrationDecision);
 
 void redactTooLongLog(mutablebson::Document* cmdObj, StringData fieldName) {
     namespace mmb = mutablebson;
@@ -100,7 +106,8 @@ void serializeReply(OperationContext* opCtx,
         const auto& lastResult = result.results.back();
 
         if (lastResult == ErrorCodes::StaleDbVersion ||
-            ErrorCodes::isStaleShardVersionError(lastResult.getStatus())) {
+            ErrorCodes::isStaleShardVersionError(lastResult.getStatus()) ||
+            ErrorCodes::isTenantMigrationError(lastResult.getStatus())) {
             // For ordered:false commands we need to duplicate these error results for all ops after
             // we stopped. See handleError() in write_ops_exec.cpp for more info.
             //
@@ -159,6 +166,34 @@ void serializeReply(OperationContext* opCtx,
                 status.extraInfo<doc_validation_error::DocumentValidationFailureInfo>();
             error.append("code", static_cast<int>(ErrorCodes::DocumentValidationFailure));
             error.append("errInfo", docValidationError->getDetails());
+        } else if (ErrorCodes::isTenantMigrationError(status.code())) {
+            if (ErrorCodes::TenantMigrationConflict == status.code()) {
+                auto migrationConflictInfo = status.extraInfo<TenantMigrationConflictInfo>();
+
+                hangWriteBeforeWaitingForMigrationDecision.pauseWhileSet(opCtx);
+
+                auto mtab = migrationConflictInfo->getTenantMigrationAccessBlocker();
+
+                auto migrationStatus = mtab->waitUntilCommittedOrAbortedNoThrow(opCtx);
+                error.append("code", static_cast<int>(migrationStatus.code()));
+
+                // We want to append an empty errmsg for the errors after the first one, so let the
+                // code below that appends errmsg do that.
+                if (status.reason() != "") {
+                    error.append("errmsg", errorMessage(migrationStatus.reason()));
+                }
+                if (migrationStatus.extraInfo()) {
+                    error.append(
+                        "errInfo",
+                        migrationStatus.extraInfo<TenantMigrationCommittedInfo>()->toBSON());
+                }
+            } else {
+                error.append("code", int(status.code()));
+                if (status.extraInfo()) {
+                    error.append("errInfo",
+                                 status.extraInfo<TenantMigrationCommittedInfo>()->toBSON());
+                }
+            }
         } else {
             error.append("code", int(status.code()));
             if (auto const extraInfo = status.extraInfo()) {
@@ -166,7 +201,11 @@ void serializeReply(OperationContext* opCtx,
             }
         }
 
-        error.append("errmsg", errorMessage(status.reason()));
+        // Skip appending errmsg if it has already been appended like in the case of
+        // TenantMigrationConflict.
+        if (!error.hasField("errmsg")) {
+            error.append("errmsg", errorMessage(status.reason()));
+        }
         errors.push_back(error.obj());
     }
 
@@ -276,7 +315,7 @@ private:
         uassert(50791,
                 str::stream() << "Cannot write to system collection " << ns().toString()
                               << " within a transaction.",
-                !ns().isSystem());
+                !ns().isSystem() || ns().isPrivilegeCollection());
         auto replCoord = repl::ReplicationCoordinator::get(opCtx);
         uassert(50790,
                 str::stream() << "Cannot write to unreplicated collection " << ns().toString()

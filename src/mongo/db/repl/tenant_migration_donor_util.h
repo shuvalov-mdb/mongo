@@ -92,8 +92,6 @@ void migrationConflictHandler(OperationContext* opCtx,
                               rpc::ReplyBuilderInterface* replyBuilder) {
     checkIfCanReadOrBlock(opCtx, dbName);
 
-    auto& mtabByPrefix = TenantMigrationAccessBlockerRegistry::get(opCtx->getServiceContext());
-
     try {
         // callable will modify replyBuilder.
         callable();
@@ -102,8 +100,7 @@ void migrationConflictHandler(OperationContext* opCtx,
         // getStatusFromWriteCommandReply expects an 'ok' field.
         CommandHelpers::extractOrAppendOk(replyBodyBuilder);
 
-        // Commands such as insert, update, delete, and applyOps return the result as a status
-        // rather than throwing.
+        // applyOps returns the result as a status rather than throwing.
         const auto status = getStatusFromWriteCommandReply(replyBodyBuilder.asTempObj());
 
         if (status == ErrorCodes::TenantMigrationConflict) {
@@ -114,10 +111,8 @@ void migrationConflictHandler(OperationContext* opCtx,
         auto migrationConflictInfo = ex.extraInfo<TenantMigrationConflictInfo>();
         invariant(migrationConflictInfo);
 
-        if (auto mtab = mtabByPrefix.getTenantMigrationAccessBlockerForTenantId(
-                migrationConflictInfo->getTenantId())) {
-            replyBuilder->getBodyBuilder().resetToEmpty();
-            mtab->checkIfCanWriteOrBlock(opCtx);
+        if (auto mtab = migrationConflictInfo->getTenantMigrationAccessBlocker()) {
+            mtab->waitUntilCommittedOrAborted(opCtx);
         }
     }
 }

@@ -31,20 +31,158 @@
 
 #include "mongo/db/query/plan_explainer_sbe.h"
 
+#include <queue>
+
+#include "mongo/db/keypattern.h"
+
 namespace mongo {
 std::string PlanExplainerSBE::getPlanSummary() const {
-    // TODO: SERVER-50743
-    return "unsupported";
+    if (!_solution) {
+        return {};
+    }
+
+    StringBuilder sb;
+    std::queue<const QuerySolutionNode*> queue;
+    queue.push(_solution->root());
+
+    while (!queue.empty()) {
+        auto node = queue.front();
+        queue.pop();
+
+        sb << stageTypeToString(node->getType());
+
+        switch (node->getType()) {
+            case STAGE_COUNT_SCAN: {
+                auto csn = static_cast<const CountScanNode*>(node);
+                const KeyPattern keyPattern{csn->index.keyPattern};
+                sb << " " << keyPattern;
+                break;
+            }
+            case STAGE_DISTINCT_SCAN: {
+                auto dn = static_cast<const DistinctNode*>(node);
+                const KeyPattern keyPattern{dn->index.keyPattern};
+                sb << " " << keyPattern;
+                break;
+            }
+            case STAGE_GEO_NEAR_2D: {
+                auto geo2d = static_cast<const GeoNear2DNode*>(node);
+                const KeyPattern keyPattern{geo2d->index.keyPattern};
+                sb << " " << keyPattern;
+                break;
+            }
+            case STAGE_GEO_NEAR_2DSPHERE: {
+                auto geo2dsphere = static_cast<const GeoNear2DSphereNode*>(node);
+                const KeyPattern keyPattern{geo2dsphere->index.keyPattern};
+                sb << " " << keyPattern;
+                break;
+            }
+            case STAGE_IXSCAN: {
+                auto ixn = static_cast<const IndexScanNode*>(node);
+                const KeyPattern keyPattern{ixn->index.keyPattern};
+                sb << " " << keyPattern;
+                break;
+            }
+            case STAGE_TEXT: {
+                auto tn = static_cast<const TextNode*>(node);
+                const KeyPattern keyPattern{tn->indexPrefix};
+                sb << " " << keyPattern;
+                break;
+            }
+            default:
+                break;
+        }
+
+        for (auto&& child : node->children) {
+            queue.push(child);
+        }
+
+        if (!queue.empty()) {
+            sb << ", ";
+        }
+    }
+
+    return sb.str();
 }
 
 void PlanExplainerSBE::getSummaryStats(PlanSummaryStats* statsOut) const {
-    // TODO: SERVER-50744
+    invariant(statsOut);
+
+    if (!_solution || !_root) {
+        return;
+    }
+
+    auto common = _root->getCommonStats();
+    statsOut->nReturned = common->advances;
+    statsOut->fromMultiPlanner = isMultiPlan();
+    statsOut->totalKeysExamined = 0;
+    statsOut->totalDocsExamined = 0;
+
+    // Collect cumulative execution stats for the plan.
+    _root->accumulate(kEmptyPlanNodeId, *statsOut);
+
+    std::queue<const QuerySolutionNode*> queue;
+    queue.push(_solution->root());
+
+    // Look through the QuerySolution to collect some static stat details.
+    //
+    // TODO SERVER-51138: handle replan reason for cached plan.
+    while (!queue.empty()) {
+        auto node = queue.front();
+        queue.pop();
+        invariant(node);
+
+        switch (node->getType()) {
+            case STAGE_COUNT_SCAN: {
+                auto csn = static_cast<const CountScanNode*>(node);
+                statsOut->indexesUsed.insert(csn->index.identifier.catalogName);
+                break;
+            }
+            case STAGE_DISTINCT_SCAN: {
+                auto dn = static_cast<const DistinctNode*>(node);
+                statsOut->indexesUsed.insert(dn->index.identifier.catalogName);
+                break;
+            }
+            case STAGE_GEO_NEAR_2D: {
+                auto geo2d = static_cast<const GeoNear2DNode*>(node);
+                statsOut->indexesUsed.insert(geo2d->index.identifier.catalogName);
+                break;
+            }
+            case STAGE_GEO_NEAR_2DSPHERE: {
+                auto geo2dsphere = static_cast<const GeoNear2DSphereNode*>(node);
+                statsOut->indexesUsed.insert(geo2dsphere->index.identifier.catalogName);
+                break;
+            }
+            case STAGE_IXSCAN: {
+                auto ixn = static_cast<const IndexScanNode*>(node);
+                statsOut->indexesUsed.insert(ixn->index.identifier.catalogName);
+                break;
+            }
+            case STAGE_TEXT: {
+                auto tn = static_cast<const TextNode*>(node);
+                statsOut->indexesUsed.insert(tn->index.identifier.catalogName);
+                break;
+            }
+            case STAGE_COLLSCAN: {
+                statsOut->collectionScans++;
+                auto csn = static_cast<const CollectionScanNode*>(node);
+                if (!csn->tailable) {
+                    statsOut->collectionScansNonTailable++;
+                }
+            }
+            default:
+                break;
+        }
+
+        for (auto&& child : node->children) {
+            queue.push(child);
+        }
+    }
 }
 
 PlanExplainer::PlanStatsDetails PlanExplainerSBE::getWinningPlanStats(
     ExplainOptions::Verbosity verbosity) const {
     // TODO: SERVER-50728
-    return {{}, {}};
+    return {{}, PlanSummaryStats{}};
 }
 
 std::vector<PlanExplainer::PlanStatsDetails> PlanExplainerSBE::getRejectedPlansStats(
@@ -54,7 +192,7 @@ std::vector<PlanExplainer::PlanStatsDetails> PlanExplainerSBE::getRejectedPlansS
 }
 
 std::vector<PlanExplainer::PlanStatsDetails> PlanExplainerSBE::getCachedPlanStats(
-    const PlanCacheEntry& entry, ExplainOptions::Verbosity verbosity) const {
+    const PlanCacheEntry::DebugInfo&, ExplainOptions::Verbosity) const {
     // TODO: SERVER-50728
     return {};
 }

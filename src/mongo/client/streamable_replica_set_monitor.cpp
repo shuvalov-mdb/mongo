@@ -188,11 +188,14 @@ void StreamableReplicaSetMonitor::init() {
                 "uri"_attr = _uri,
                 "config"_attr = _sdamConfig.toBson());
 
+    invariant(shared_from_this().use_count() > 1,
+              "StreamableReplicaSetMonitor::init() is invoked when there is no owner");
+
     _eventsPublisher = std::make_shared<sdam::TopologyEventsPublisher>(_executor);
     _topologyManager = std::make_unique<TopologyManager>(
         _sdamConfig, getGlobalServiceContext()->getPreciseClockSource(), _eventsPublisher);
 
-    _eventsPublisher->registerListener(shared_from_this());
+    _eventsPublisher->registerListener(weak_from_this());
 
     _pingMonitor = std::make_unique<ServerPingMonitor>(
         _uri, _eventsPublisher.get(), _sdamConfig.getHeartBeatFrequency(), _executor);
@@ -373,7 +376,7 @@ boost::optional<std::vector<HostAndPort>> StreamableReplicaSetMonitor::_getHosts
     return _getHosts(_currentTopology(), criteria);
 }
 
-HostAndPort StreamableReplicaSetMonitor::getMasterOrUassert() {
+HostAndPort StreamableReplicaSetMonitor::getPrimaryOrUassert() {
     return getHostOrRefresh(kPrimaryOnlyReadPreference).get();
 }
 
@@ -638,7 +641,7 @@ void StreamableReplicaSetMonitor::onTopologyDescriptionChangedEvent(
 void StreamableReplicaSetMonitor::onServerHeartbeatSucceededEvent(const HostAndPort& hostAndPort,
                                                                   const BSONObj reply) {
     // After the inital handshake, isMasterResponses should not update the RTT with durationMs.
-    IsMasterOutcome outcome(hostAndPort, reply, boost::none);
+    HelloOutcome outcome(hostAndPort, reply, boost::none);
     _topologyManager->onServerDescription(outcome);
 }
 
@@ -660,7 +663,7 @@ void StreamableReplicaSetMonitor::onServerHandshakeFailedEvent(const HostAndPort
     _failedHost(HostAndPort(address), status, reply, HandshakeStage::kPreHandshake, false);
 };
 
-void StreamableReplicaSetMonitor::onServerPingSucceededEvent(sdam::IsMasterRTT durationMS,
+void StreamableReplicaSetMonitor::onServerPingSucceededEvent(sdam::HelloRTT durationMS,
                                                              const HostAndPort& hostAndPort) {
     LOGV2_DEBUG(4668132,
                 kLowerLogLevel,
@@ -671,10 +674,10 @@ void StreamableReplicaSetMonitor::onServerPingSucceededEvent(sdam::IsMasterRTT d
     _topologyManager->onServerRTTUpdated(hostAndPort, durationMS);
 }
 
-void StreamableReplicaSetMonitor::onServerHandshakeCompleteEvent(sdam::IsMasterRTT durationMs,
+void StreamableReplicaSetMonitor::onServerHandshakeCompleteEvent(sdam::HelloRTT durationMs,
                                                                  const HostAndPort& hostAndPort,
                                                                  const BSONObj reply) {
-    IsMasterOutcome outcome(hostAndPort, reply, durationMs);
+    HelloOutcome outcome(hostAndPort, reply, durationMs);
     _topologyManager->onServerDescription(outcome);
 }
 

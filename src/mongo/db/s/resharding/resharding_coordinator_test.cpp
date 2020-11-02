@@ -47,6 +47,7 @@
 #include "mongo/util/clock_source_mock.h"
 
 namespace mongo {
+namespace {
 
 class ReshardingCoordinatorPersistenceTest : public ConfigServerTestFixture {
 protected:
@@ -97,7 +98,7 @@ protected:
         OID epoch,
         Date_t lastUpdated) {
         CollectionType collType;
-        collType.setNs(coordinatorDoc.getNss());
+        collType.setNss(coordinatorDoc.getNss());
 
         if (coordinatorDoc.getState() >= CoordinatorStateEnum::kCommitted &&
             coordinatorDoc.getState() != CoordinatorStateEnum::kError) {
@@ -109,7 +110,6 @@ protected:
         }
         collType.setEpoch(std::move(epoch));
         collType.setUpdatedAt(lastUpdated);
-        collType.setDefaultCollation(BSONObj());
         collType.setUnique(false);
         collType.setDistributionMode(CollectionType::DistributionMode::kSharded);
         if (reshardingFields)
@@ -266,7 +266,7 @@ protected:
             (expectedReshardingFields &&
              expectedReshardingFields->getState() >= CoordinatorStateEnum::kCommitted &&
              expectedReshardingFields->getState() != CoordinatorStateEnum::kError)) {
-            ASSERT_EQUALS(onDiskEntry.getNs(), _originalNss);
+            ASSERT_EQUALS(onDiskEntry.getNss(), _originalNss);
             ASSERT(onDiskEntry.getUUID().get() == _reshardingUUID);
             ASSERT_EQUALS(onDiskEntry.getKeyPattern().toBSON().woCompare(_newShardKey.toBSON()), 0);
             ASSERT_NOT_EQUALS(onDiskEntry.getEpoch(), _originalEpoch);
@@ -665,4 +665,5 @@ TEST_F(ReshardingCoordinatorPersistenceTest,
                        ErrorCodes::NamespaceNotFound);
 }
 
+}  // namespace
 }  // namespace mongo

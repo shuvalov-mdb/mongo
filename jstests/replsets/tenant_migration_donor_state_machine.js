@@ -72,8 +72,17 @@ const donorRst = new ReplSetTest({
         }
     }
 });
-const recipientRst = new ReplSetTest(
-    {nodes: 1, name: "recipient", nodeOptions: {setParameter: {enableTenantMigrations: true}}});
+const recipientRst = new ReplSetTest({
+    nodes: 1,
+    name: "recipient",
+    nodeOptions: {
+        setParameter: {
+            enableTenantMigrations: true,
+            // TODO SERVER-51734: Remove the failpoint 'returnResponseOkForRecipientSyncDataCmd'.
+            'failpoint.returnResponseOkForRecipientSyncDataCmd': tojson({mode: 'alwaysOn'})
+        }
+    }
+});
 
 donorRst.startSet();
 donorRst.initiate();
@@ -89,7 +98,6 @@ const kTenantId = "testDb";
 const kConfigDonorsNS = "config.tenantMigrationDonors";
 
 let configDonorsColl = donorPrimary.getCollection(kConfigDonorsNS);
-configDonorsColl.createIndex({expireAt: 1}, {expireAfterSeconds: 0});
 
 (() => {
     jsTest.log("Test the case where the migration commits");

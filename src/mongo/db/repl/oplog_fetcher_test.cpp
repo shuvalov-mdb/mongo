@@ -100,7 +100,8 @@ BSONObj makeNoopOplogEntry(OpTime opTime) {
                          boost::none,   // optime of previous write within same transaction
                          boost::none,   // pre-image optime
                          boost::none,   // post-image optime
-                         boost::none);  // ShardId of resharding recipient
+                         boost::none,   // ShardId of resharding recipient
+                         boost::none);  // _id
     return oplogEntry.toBSON();
 }
 
@@ -161,7 +162,8 @@ void validateFindCommand(Message m,
                          ReadConcernArgs readConcern = ReadConcernArgs::fromBSONThrows(
                              BSON("level"
                                   << "local"
-                                  << "afterClusterTime" << Timestamp(0, 1)))) {
+                                  << "afterClusterTime" << Timestamp(0, 1))),
+                         bool requestResumeToken = false) {
     auto msg = mongo::OpMsg::parse(m);
     ASSERT_EQ(mongo::StringData(msg.body.firstElement().fieldName()), "find");
     ASSERT_TRUE(msg.body.getBoolField("tailable"));
@@ -172,15 +174,17 @@ void validateFindCommand(Message m,
 
                           msg.body.getObjectField("filter"));
     } else {
-        ASSERT_BSONOBJ_EQ(
-            BSON("ts" << BSON("$gte" << lastFetched.getTimestamp()) << "$and" << filter),
-            msg.body.getObjectField("filter"));
+        ASSERT_BSONOBJ_EQ(BSON("ts" << BSON("$gte" << lastFetched.getTimestamp()) << "$and"
+                                    << BSON_ARRAY(filter)),
+                          msg.body.getObjectField("filter"));
     }
     ASSERT_EQUALS(lastFetched.getTerm(), msg.body.getIntField("term"));
     ASSERT_BSONOBJ_EQ(readConcern.toBSONInner(), msg.body.getObjectField("readConcern"));
 
     // The find command should not specify the deprecated 'oplogReplay' flag.
     ASSERT_FALSE(msg.body["oplogReplay"]);
+
+    ASSERT_EQUALS(msg.body.hasField("$_requestResumeToken"), requestResumeToken);
 
     validateMetadataRequest(msg);
 }
@@ -318,7 +322,8 @@ protected:
         OplogFetcher::StartingPoint startingPoint = OplogFetcher::StartingPoint::kSkipFirstDoc,
         int requiredRBID = ReplicationProcess::kUninitializedRollbackId,
         BSONObj filter = BSONObj(),
-        ReadConcernArgs readConcern = ReadConcernArgs());
+        ReadConcernArgs readConcern = ReadConcernArgs(),
+        bool requestResumeToken = false);
     std::unique_ptr<OplogFetcher> getOplogFetcherAfterConnectionCreated(
         OplogFetcher::OnShutdownCallbackFn fn,
         int numRestarts = 0,
@@ -326,7 +331,8 @@ protected:
         OplogFetcher::StartingPoint startingPoint = OplogFetcher::StartingPoint::kSkipFirstDoc,
         int requiredRBID = ReplicationProcess::kUninitializedRollbackId,
         BSONObj filter = BSONObj(),
-        ReadConcernArgs args = ReadConcernArgs());
+        ReadConcernArgs args = ReadConcernArgs(),
+        bool requestResumeToken = false);
 
     std::unique_ptr<ShutdownState> processSingleBatch(
         const Message& response,
@@ -407,7 +413,8 @@ std::unique_ptr<OplogFetcher> OplogFetcherTest::getOplogFetcherAfterConnectionCr
     OplogFetcher::StartingPoint startingPoint,
     int requiredRBID,
     BSONObj filter,
-    ReadConcernArgs readConcern) {
+    ReadConcernArgs readConcern,
+    bool requestResumeToken) {
     auto oplogFetcher = makeOplogFetcherWithDifferentExecutor(&getExecutor(),
                                                               fn,
                                                               numRestarts,
@@ -415,7 +422,8 @@ std::unique_ptr<OplogFetcher> OplogFetcherTest::getOplogFetcherAfterConnectionCr
                                                               startingPoint,
                                                               requiredRBID,
                                                               filter,
-                                                              readConcern);
+                                                              readConcern,
+                                                              requestResumeToken);
 
     auto waitForConnCreatedFailPoint =
         globalFailPointRegistry().find("hangAfterOplogFetcherCallbackScheduled");
@@ -440,7 +448,8 @@ std::unique_ptr<OplogFetcher> OplogFetcherTest::makeOplogFetcherWithDifferentExe
     OplogFetcher::StartingPoint startingPoint,
     int requiredRBID,
     BSONObj filter,
-    ReadConcernArgs readConcern) {
+    ReadConcernArgs readConcern,
+    bool requestResumeToken) {
     auto oplogFetcher = std::make_unique<OplogFetcher>(
         executor,
         lastFetched,
@@ -455,7 +464,8 @@ std::unique_ptr<OplogFetcher> OplogFetcherTest::makeOplogFetcherWithDifferentExe
         defaultBatchSize,
         startingPoint,
         filter,
-        readConcern);
+        readConcern,
+        requestResumeToken);
     oplogFetcher->setCreateClientFn_forTest([this]() {
         const auto autoReconnect = true;
         return std::unique_ptr<DBClientConnection>(
@@ -2315,7 +2325,7 @@ TEST_F(OplogFetcherTest, CheckFindCommandIncludesFilter) {
     // Create an oplog fetcher without any retries but with a filter.  Note the filter is not
     // respected as our Mock objects do not respect them; this unit test only tests the command
     // is well-formed.
-    const BSONObj filter = BSON("ns" << BSON("$regexp"
+    const BSONObj filter = BSON("ns" << BSON("$regex"
                                              << "/^tenant_.*/"));
     auto oplogFetcher =
         getOplogFetcherAfterConnectionCreated(std::ref(shutdownState),
@@ -2382,6 +2392,61 @@ TEST_F(OplogFetcherTest, CheckFindCommandIncludesCustomReadConcern) {
                         durationCount<Milliseconds>(oplogFetcher->getInitialFindMaxTime_forTest()),
                         BSONObj() /* filter */,
                         readConcern);
+
+    oplogFetcher->shutdown();
+    oplogFetcher->join();
+}
+
+TEST_F(OplogFetcherTest, CheckFindCommandIncludesRequestResumeTokenWhenRequested) {
+    ShutdownState shutdownState;
+
+    auto oplogFetcher =
+        getOplogFetcherAfterConnectionCreated(std::ref(shutdownState),
+                                              0 /* numRestarts */,
+                                              true /* requireFresherSyncSourc */,
+                                              OplogFetcher::StartingPoint::kSkipFirstDoc,
+                                              ReplicationProcess::kUninitializedRollbackId,
+                                              BSONObj() /* filter */,
+                                              ReadConcernArgs() /* readConcern */,
+                                              true /* requestResumeToken */);
+
+    CursorId cursorId = 22LL;
+    auto firstEntry = makeNoopOplogEntry(lastFetched);
+    auto secondEntry = makeNoopOplogEntry({{Seconds(456), 0}, lastFetched.getTerm()});
+    auto resumeToken = Timestamp(Seconds(567), 0);
+    auto resumeTokenObj = BSON("ts" << resumeToken);
+    auto metadataObj = makeOplogBatchMetadata(replSetMetadata, oqMetadata);
+    auto firstBatch = {firstEntry, secondEntry};
+
+    // Update lastFetched before it is updated by getting the next batch.
+    lastFetched = oplogFetcher->getLastOpTimeFetched_forTest();
+
+    auto cursorRes = CursorResponse(NamespaceString::kRsOplogNamespace,
+                                    cursorId,
+                                    firstBatch,
+                                    boost::none,
+                                    boost::none,
+                                    resumeTokenObj);
+
+    BSONObjBuilder bob(cursorRes.toBSON(CursorResponse::ResponseType::InitialResponse));
+    bob.appendElementsUnique(metadataObj);
+    auto batchResponse = OpMsg{bob.obj()}.serialize();
+
+    // Creating the cursor will succeed.
+    auto m = processSingleRequestResponse(
+        oplogFetcher->getDBClientConnection_forTest(), batchResponse, true);
+
+    validateFindCommand(
+        m,
+        lastFetched,
+        durationCount<Milliseconds>(oplogFetcher->getInitialFindMaxTime_forTest()),
+        BSONObj() /* filter */,
+        ReadConcernArgs::fromBSONThrows(BSON("level"
+                                             << "local"
+                                             << "afterClusterTime" << Timestamp(0, 1))),
+        true /* requestResumeToken */);
+
+    ASSERT_EQUALS(lastEnqueuedDocumentsInfo.resumeToken, resumeToken);
 
     oplogFetcher->shutdown();
     oplogFetcher->join();

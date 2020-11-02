@@ -32,6 +32,7 @@
 #include "mongo/client/read_preference.h"
 #include "mongo/db/catalog_raii.h"
 #include "mongo/db/client.h"
+#include "mongo/db/dbdirectclient.h"
 #include "mongo/db/query/cursor_response.h"
 #include "mongo/db/query/find_and_modify_request.h"
 #include "mongo/db/repl/replication_coordinator.h"
@@ -268,6 +269,21 @@ TEST_F(ShardLocalTest, CreateIndex) {
     ASSERT_EQUALS(ErrorCodes::IndexOptionsConflict, status);
     indexes = unittest::assertGet(getIndexes(nss));
     ASSERT_EQ(2U, indexes.size());
+}
+
+TEST_F(ShardLocalTest, CreateIndexNonEmptyCollection) {
+    NamespaceString nss("config.foo");
+
+    ASSERT_EQUALS(ErrorCodes::NamespaceNotFound, getIndexes(nss).getStatus());
+
+    // Inserting the document should implicitly create the collection
+    DBDirectClient dbDirectClient(_opCtx.get());
+    dbDirectClient.insert(nss.toString(), BSON("_id" << 1 << "a" << 1));
+
+    auto status = _shardLocal->createIndexOnConfig(_opCtx.get(), nss, BSON("a" << 1), false);
+    ASSERT_OK(status);
+    auto indexes = unittest::assertGet(getIndexes(nss));
+    ASSERT_EQ(2U, indexes.size()) << BSON("indexes" << indexes);
 }
 
 }  // namespace

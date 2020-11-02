@@ -76,6 +76,9 @@ public:
     // Prefix for temporary resharding collection.
     static constexpr StringData kTemporaryReshardingCollectionPrefix = "system.resharding."_sd;
 
+    // Prefix for time-series buckets collection.
+    static constexpr StringData kTimeseriesBucketsCollectionPrefix = "system.buckets."_sd;
+
     // Namespace for storing configuration data, which needs to be replicated if the server is
     // running as a replica set. Documents in this collection should represent some configuration
     // state of the server, which needs to be recovered/consulted at startup. Each document in this
@@ -139,6 +142,9 @@ public:
     // Namespace for vector clock state.
     static const NamespaceString kVectorClockNamespace;
 
+    // Namespace for storing oplog applier progress for resharding.
+    static const NamespaceString kReshardingApplierProgressNamespace;
+
     /**
      * Constructs an empty NamespaceString.
      */
@@ -162,10 +168,10 @@ public:
     NamespaceString(StringData dbName, StringData collectionName)
         : _ns(dbName.size() + collectionName.size() + 1, '\0') {
         uassert(ErrorCodes::InvalidNamespace,
-                "'.' is an invalid character in a database name",
+                "'.' is an invalid character in the database name: " + dbName,
                 dbName.find('.') == std::string::npos);
         uassert(ErrorCodes::InvalidNamespace,
-                "Collection names cannot start with '.'",
+                "Collection names cannot start with '.': " + collectionName,
                 collectionName.empty() || collectionName[0] != '.');
 
         std::string::iterator it = std::copy(dbName.begin(), dbName.end(), _ns.begin());
@@ -303,6 +309,16 @@ public:
      * Returns whether the specified namespace is <database>.system.resharding.<>.
      */
     bool isTemporaryReshardingCollection() const;
+
+    /**
+     * Returns whether the specified namespace is <database>.system.buckets.<>.
+     */
+    bool isTimeseriesBucketsCollection() const;
+
+    /**
+     * Returns the time-series buckets namespace for this view.
+     */
+    NamespaceString makeTimeseriesBucketsNamespace() const;
 
     /**
      * Returns whether a namespace is replicated, based only on its string value. One notable

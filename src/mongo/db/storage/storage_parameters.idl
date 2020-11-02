@@ -85,7 +85,7 @@ server_parameters:
         default: true
 
 feature_flags:
-    featureFlagTimeSeriesCollection:
+    featureFlagTimeseriesCollection:
         description: "When enabled, support for time-series collections"
-        cpp_varname: feature_flags::gTimeSeriesCollection
+        cpp_varname: feature_flags::gTimeseriesCollection
         default: false

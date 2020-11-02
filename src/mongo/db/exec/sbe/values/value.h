@@ -69,6 +69,10 @@ using IndexKeysInclusionSet = std::bitset<Ordering::kMaxCompoundIndexKeys>;
 
 namespace value {
 
+static constexpr std::int32_t kStringMaxDisplayLength = 160;
+static constexpr std::int32_t kBinDataMaxDisplayLength = 80;
+static constexpr std::int32_t kNewUUIDLength = 16;
+
 /**
  * Type dispatch tags.
  */
@@ -947,6 +951,12 @@ private:
     const char* _arrayCurrent{nullptr};
     const char* _arrayEnd{nullptr};
 };
+
+/**
+ * Copies the content of the input array into an ArraySet. If the input has duplicate elements, they
+ * will be removed.
+ */
+std::pair<TypeTags, Value> arrayToSet(TypeTags tag, Value val);
 
 }  // namespace value
 }  // namespace sbe

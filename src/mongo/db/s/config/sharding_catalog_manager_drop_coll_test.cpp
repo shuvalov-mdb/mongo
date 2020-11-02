@@ -49,8 +49,6 @@ namespace {
 
 using executor::RemoteCommandRequest;
 using executor::RemoteCommandResponse;
-using std::string;
-using std::vector;
 using unittest::assertGet;
 
 class DropColl2ShardTest : public ConfigServerTestFixture {
@@ -83,8 +81,9 @@ public:
 
         // insert documents into the config database
         CollectionType shardedCollection;
-        shardedCollection.setNs(dropNS());
+        shardedCollection.setNss(dropNS());
         shardedCollection.setEpoch(OID::gen());
+        shardedCollection.setUpdatedAt(Date_t::now());
         shardedCollection.setKeyPattern(BSON(_shardKey << 1));
         ASSERT_OK(insertToConfigCollection(
             operationContext(), CollectionType::ConfigNS, shardedCollection.toBSON()));
@@ -153,11 +152,10 @@ public:
             HostAndPort(shard.getHost()), shard, dropNS(), ChunkVersion::DROPPED());
     }
 
-    void expectCollectionDocMarkedAsDropped() {
+    void expectNoCollectionDocs() {
         auto findStatus =
             findOneOnConfigCollection(operationContext(), CollectionType::ConfigNS, BSONObj());
-        ASSERT_OK(findStatus.getStatus());
-        ASSERT_TRUE(findStatus.getValue().getField("dropped"));
+        ASSERT_EQ(ErrorCodes::NoMatchingDocument, findStatus);
     }
 
     void expectNoChunkDocs() {
@@ -199,8 +197,8 @@ private:
     const NamespaceString _dropNS{"test.user"};
     ShardType _shard1;
     ShardType _shard2;
-    string _zoneName;
-    string _shardKey;
+    std::string _zoneName;
+    std::string _shardKey;
     BSONObj _min;
     BSONObj _max;
 };
@@ -216,7 +214,7 @@ TEST_F(DropColl2ShardTest, Basic) {
 
     future.default_timed_get();
 
-    expectCollectionDocMarkedAsDropped();
+    expectNoCollectionDocs();
     expectNoChunkDocs();
     expectNoTagDocs();
 }
@@ -263,7 +261,7 @@ TEST_F(DropColl2ShardTest, NSNotFound) {
 
     future.default_timed_get();
 
-    expectCollectionDocMarkedAsDropped();
+    expectNoCollectionDocs();
     expectNoChunkDocs();
     expectNoTagDocs();
 }
@@ -347,7 +345,7 @@ TEST_F(DropColl2ShardTest, CleanupChunkError) {
 
     future.default_timed_get();
 
-    expectCollectionDocMarkedAsDropped();
+    expectNoCollectionDocs();
     expectNoChunkDocs();
     expectNoTagDocs();
 }
@@ -366,7 +364,7 @@ TEST_F(DropColl2ShardTest, SSVCmdErrorOnShard1) {
 
     future.default_timed_get();
 
-    expectCollectionDocMarkedAsDropped();
+    expectNoCollectionDocs();
     expectNoChunkDocs();
     expectNoTagDocs();
 }
@@ -385,7 +383,7 @@ TEST_F(DropColl2ShardTest, SSVErrorOnShard1) {
 
     future.default_timed_get();
 
-    expectCollectionDocMarkedAsDropped();
+    expectNoCollectionDocs();
     expectNoChunkDocs();
     expectNoTagDocs();
 }
@@ -406,7 +404,7 @@ TEST_F(DropColl2ShardTest, SSVCmdErrorOnShard2) {
 
     future.default_timed_get();
 
-    expectCollectionDocMarkedAsDropped();
+    expectNoCollectionDocs();
     expectNoChunkDocs();
     expectNoTagDocs();
 }
@@ -427,7 +425,7 @@ TEST_F(DropColl2ShardTest, SSVErrorOnShard2) {
 
     future.default_timed_get();
 
-    expectCollectionDocMarkedAsDropped();
+    expectNoCollectionDocs();
     expectNoChunkDocs();
     expectNoTagDocs();
 }
@@ -447,7 +445,7 @@ TEST_F(DropColl2ShardTest, AfterSuccessRetryWillStillSendDropSSV) {
 
     firstDropFuture.default_timed_get();
 
-    expectCollectionDocMarkedAsDropped();
+    expectNoCollectionDocs();
     expectNoChunkDocs();
     expectNoTagDocs();
 
@@ -461,7 +459,7 @@ TEST_F(DropColl2ShardTest, AfterSuccessRetryWillStillSendDropSSV) {
 
     secondDropFuture.default_timed_get();
 
-    expectCollectionDocMarkedAsDropped();
+    expectNoCollectionDocs();
     expectNoChunkDocs();
     expectNoTagDocs();
 }
@@ -486,7 +484,7 @@ TEST_F(DropColl2ShardTest, AfterFailedDropRetryWillStillSendDropSSV) {
 
     secondDropFuture.default_timed_get();
 
-    expectCollectionDocMarkedAsDropped();
+    expectNoCollectionDocs();
     expectNoChunkDocs();
     expectNoTagDocs();
     expectNoTagDocs();
@@ -515,7 +513,7 @@ TEST_F(DropColl2ShardTest, AfterFailedSSVRetryWillStillSendDropSSV) {
 
     secondDropFuture.default_timed_get();
 
-    expectCollectionDocMarkedAsDropped();
+    expectNoCollectionDocs();
     expectNoChunkDocs();
     expectNoTagDocs();
     expectNoTagDocs();
@@ -533,7 +531,7 @@ TEST_F(DropColl2ShardTest, SSVisRetried) {
 
     dropFuture.default_timed_get();
 
-    expectCollectionDocMarkedAsDropped();
+    expectNoCollectionDocs();
     expectNoChunkDocs();
     expectNoTagDocs();
     expectNoTagDocs();

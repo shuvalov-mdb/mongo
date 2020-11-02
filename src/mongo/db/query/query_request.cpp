@@ -65,15 +65,9 @@ Status checkFieldType(const BSONElement& el, BSONType type) {
 QueryRequest::QueryRequest(NamespaceStringOrUUID nssOrUuid)
     : _nss(nssOrUuid.nss() ? *nssOrUuid.nss() : NamespaceString()), _uuid(nssOrUuid.uuid()) {}
 
-void QueryRequest::refreshNSS(OperationContext* opCtx) {
+void QueryRequest::refreshNSS(const NamespaceString& nss) {
     if (_uuid) {
-        const CollectionCatalog& catalog = CollectionCatalog::get(opCtx);
-        auto foundColl = catalog.lookupCollectionByUUID(opCtx, _uuid.get());
-        uassert(ErrorCodes::NamespaceNotFound,
-                str::stream() << "UUID " << _uuid.get() << " specified in query request not found",
-                foundColl);
-        dassert(opCtx->lockState()->isDbLockedForMode(foundColl->ns().db(), MODE_IS));
-        _nss = foundColl->ns();
+        _nss = nss;
     }
     invariant(!_nss.isEmpty());
 }
@@ -904,7 +898,7 @@ int QueryRequest::getOptions() const {
         options |= QueryOption_AwaitData;
     }
     if (_slaveOk) {
-        options |= QueryOption_SlaveOk;
+        options |= QueryOption_SecondaryOk;
     }
     if (_noCursorTimeout) {
         options |= QueryOption_NoCursorTimeout;
@@ -922,7 +916,7 @@ void QueryRequest::initFromInt(int options) {
     bool tailable = (options & QueryOption_CursorTailable) != 0;
     bool awaitData = (options & QueryOption_AwaitData) != 0;
     _tailableMode = uassertStatusOK(tailableModeFromBools(tailable, awaitData));
-    _slaveOk = (options & QueryOption_SlaveOk) != 0;
+    _slaveOk = (options & QueryOption_SecondaryOk) != 0;
     _noCursorTimeout = (options & QueryOption_NoCursorTimeout) != 0;
     _exhaust = (options & QueryOption_Exhaust) != 0;
     _allowPartialResults = (options & QueryOption_PartialResults) != 0;

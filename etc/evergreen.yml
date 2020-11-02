@@ -1891,6 +1891,11 @@ functions:
           extra_args="$extra_args --release"
         fi
 
+        if [ "Windows_NT" = "$OS" ]; then
+          vcvars="$(vswhere -latest -property installationPath | tr '\\' '/' | dos2unix.exe)/VC/Auxiliary/Build/"
+          export PATH="$(echo "$(cd "$vcvars" && cmd /C "vcvarsall.bat amd64 && C:/cygwin/bin/bash -c 'echo \$PATH'")" | tail -n +6)":$PATH
+        fi
+
         ${activate_virtualenv}
 
         chmod -R ugo-w ./src
@@ -3525,6 +3530,7 @@ tasks:
           - "src/mongo/util/options_parser/test_config_files/**"
           - "src/third_party/JSON-Schema-Test-Suite/tests/draft4/**"
           - "src/third_party/mock_ocsp_responder/**"
+          - "src/third_party/schemastore.org/**"
         exclude_files:
           - "*_test.pdb"
 
@@ -3576,7 +3582,50 @@ tasks:
       params:
         working_dir: src
         shell: bash
-        script: ninja -f build.ninja
+        script: |
+          ${activate_virtualenv}
+          if [ "Windows_NT" = "$OS" ]; then
+            vcvars="$(vswhere -latest -property installationPath | tr '\\' '/' | dos2unix.exe)/VC/Auxiliary/Build/"
+            cd "$vcvars" && cmd /K "vcvarsall.bat amd64 && cd ${workdir}\src"
+          fi
+          python -m pip install ninja
+          ninja install-core
+
+- name: compile_ninja_next
+  commands:
+    - func: "scons compile"
+      vars:
+        task_install_action:
+            default
+        task_compile_flags: >-
+          --build-tools=next
+          --ninja
+        targets:
+          generate-ninja
+    - command: shell.exec
+      params:
+        working_dir: src
+        shell: bash
+        script: |
+          ${activate_virtualenv}
+          if [ "Windows_NT" = "$OS" ]; then
+            vcvars="$(vswhere -latest -property installationPath | tr '\\' '/' | dos2unix.exe)/VC/Auxiliary/Build/"
+            cd "$vcvars" && cmd /K "vcvarsall.bat amd64 && cd ${workdir}\src"
+          fi
+          python -m pip install ninja
+          ninja install-core
+
+
+- name: compile_build_tools_next
+  commands:
+    - func: "scons compile"
+      vars:
+        task_install_action:
+            default
+        task_compile_flags: >-
+          --build-tools=next
+        targets:
+          install-core
 
 ## compile_all - build all scons targets ##
 - name: compile_all
@@ -3603,7 +3652,7 @@ tasks:
 
 ## clang_tidy - run clang_tidy
 - name: clang_tidy
-  exec_timeout_secs: 14400
+  exec_timeout_secs: 3600 # 1 hour timeout for the task overall
   commands:
     - func: "scons compile"
       vars:
@@ -3611,7 +3660,7 @@ tasks:
         compiling_for_test: true
     - command: shell.exec
       type: test
-      timeout_secs: 14400
+      timeout_secs: 3600 # 1 hour timeout for no output
       params:
         working_dir: "src"
         script: |
@@ -3619,14 +3668,14 @@ tasks:
           set -o verbose
           # TODO SERVER-49884 Remove this when we no longer check in generated Bison.
           BISON_GENERATED_PATTERN=parser_gen\.cpp
-          # This could probably be accelerated with gnu parallel
-          /opt/mongodbtoolchain/v3/bin/clang-tidy \
+          jq -r '.[] | .file' compile_commands.json | \
+            grep src/mongo | \
+            grep -v $BISON_GENERATED_PATTERN | \
+            xargs -n 32 -P $(grep -c ^processor /proc/cpuinfo) -t \
+            /opt/mongodbtoolchain/v3/bin/clang-tidy \
             -p ./compile_commands.json \
             --checks="-*,bugprone-unused-raii,bugprone-use-after-move,readability-const-return-type,readability-avoid-const-params-in-decls" \
-            -warnings-as-errors="*" \
-            $(jq -r '.[] | .file' compile_commands.json | \
-            grep src/mongo | \
-            grep -v $BISON_GENERATED_PATTERN)
+            -warnings-as-errors="*"
 
 ## unittests - run unittests ##
 - name: unittests
@@ -6114,6 +6163,17 @@ tasks:
       use_multiversion: /data/multiversion
       fallback_num_sub_suites: 1
 
+# Tests the runFeatureFlagMultiversionTest helper.
+# This requires the 'featureFlagToaster' and 'featureFlagSpoon' parameters to be set to true on
+# build variants that enable this task.
+- name: feature_flag_multiversion_gen
+  commands:
+  - func: "generate resmoke tasks"
+    vars:
+      resmoke_args: "--storageEngine=wiredTiger"
+      use_multiversion: /data/multiversion
+      fallback_num_sub_suites: 1
+
 - name: unittest_shell_hang_analyzer_gen
   commands:
   - func: "generate resmoke tasks"
@@ -8424,6 +8484,17 @@ task_groups:
   - package
 
 - <<: *compile_task_group_template
+  name: compile_ninja_next_TG
+  tasks:
+  - compile_build_tools_next
+  - compile_ninja_next
+
+- <<: *compile_task_group_template
+  name: compile_build_tools_next_TG
+  tasks:
+  - compile_build_tools_next
+
+- <<: *compile_task_group_template
   name: compile_ninja_TG
   tasks:
   - compile_ninja
@@ -8824,6 +8895,9 @@ buildvariants:
     scons_cache_scope: shared
   tasks:
   - name: compile_all_run_unittests_TG
+    distros:
+    - ubuntu1804-build
+  - name: compile_ninja_next_TG
     distros:
     - ubuntu1804-build
   - name: compile_ninja_TG
@@ -9280,6 +9354,9 @@ buildvariants:
   - name: compile_all_run_unittests_TG
     distros:
     - ubuntu2004-large
+  - name: compile_ninja_next_TG
+    distros:
+    - ubuntu2004-large
   - name: compile_ninja_TG
   - name: .aggfuzzer .common !.multiversion
   - name: audit
@@ -9643,6 +9720,9 @@ buildvariants:
   - name: compile_all_run_unittests_TG
     distros:
     - windows-64-vs2019-large
+  - name: compile_build_tools_next_TG
+    distros:
+    - windows-64-vs2019-large
   - name: .aggregation !.auth !.encrypt
   - name: aggregation_expression_multiversion_fuzzer_gen
   - name: aggregation_expression_optimization_fuzzer_gen
@@ -9716,8 +9796,11 @@ buildvariants:
   - name: compile_TG
     distros:
     - windows-64-vs2019-large
-  # - name: burn_in_tests_gen
-  # - name: buildscripts_test
+  - name: compile_build_tools_next_TG
+    distros:
+    - windows-64-vs2019-large
+  - name: burn_in_tests_gen
+  - name: buildscripts_test
   - name: noPassthrough_gen
   - name: server_discovery_and_monitoring_json_test_TG
   - name: server_selection_json_test_TG
@@ -9941,6 +10024,9 @@ buildvariants:
   - name: compile_TG
     distros:
     - windows-64-vs2019-large
+  - name: compile_ninja_next_TG
+    distros:
+    - windows-64-vs2019-large
   - name: audit
   # Do not add more tasks to this list.
 
@@ -10007,6 +10093,7 @@ buildvariants:
     num_scons_link_jobs_available: 0.99
   tasks:
   - name: compile_all_run_unittests_TG
+  - name: compile_build_tools_next_TG
   - name: aggregation
   - name: auth_gen
   - name: causally_consistent_jscore_txns_passthrough
@@ -10038,6 +10125,7 @@ buildvariants:
     resmoke_jobs_max: 6
   tasks:
   - name: compile_all_run_unittests_TG
+  - name: compile_ninja_next_TG
   - name: audit
   - name: auth_audit_gen
   - name: causally_consistent_jscore_txns_passthrough
@@ -10352,7 +10440,7 @@ buildvariants:
     burn_in_tag_buildvariants: enterprise-rhel-62-64-bit-majority-read-concern-off enterprise-rhel-62-64-bit-inmem linux-64-duroff enterprise-rhel-62-64-bit-multiversion
     num_scons_link_jobs_available: 0.99
     test_flags: >-
-        --mongodSetParameters="{featureFlagTimeSeriesCollection: true}"
+        --mongodSetParameters="{featureFlagTimeseriesCollection: true, featureFlagToaster: true, featureFlagSpoon: true}"
   tasks:
   - name: compile_parallel_TG
     distros:
@@ -10377,6 +10465,7 @@ buildvariants:
     - rhel62-large
   - name: disk_wiredtiger
   - name: .encrypt
+  - name: feature_flag_multiversion_gen
   - name: idl_tests
   - name: initial_sync_fuzzer_gen
   - name: .integration
@@ -10780,6 +10869,34 @@ buildvariants:
   - name: jsCore
   - name: .replica_sets
 
+- name: enterprise-rhel-62-64-bit-time-series-collection
+  display_name: "Enterprise RHEL 6.2 (Time-series Collection)"
+  modules:
+  - enterprise
+  run_on:
+  - rhel62-small
+  expansions: &enterprise-rhel-62-64-bit-time-series-collection-expansions
+    test_flags: >-
+      --mongodSetParameters="{featureFlagTimeseriesCollection: true}"
+    compile_flags: >-
+      -j$(grep -c ^processor /proc/cpuinfo)
+      --ssl
+      --variables-files=etc/scons/mongodbtoolchain_v3_gcc.vars
+      MONGO_DISTMOD=rhel62
+    multiversion_platform: rhel62
+    multiversion_edition: enterprise
+    repo_edition: enterprise
+    scons_cache_scope: shared
+    build_mongoreplay: false
+    large_distro_name: rhel62-large
+  tasks:
+  - name: burn_in_tests_gen
+  - name: compile_TG
+    distros:
+    - rhel62-large
+  - name: jsCore
+  - name: jsCore_txns
+
 - name: enterprise-rhel-62-64-bit-operation-resource-consumption-metrics
   display_name: "Enterprise RHEL 6.2 Shared Library (Operation Resource Consumption Metrics)"
   modules:
@@ -10970,6 +11087,9 @@ buildvariants:
     scons_cache_scope: shared
   tasks:
   - name: compile_all_run_unittests_TG
+    distros:
+    - rhel70
+  - name: compile_build_tools_next_TG
     distros:
     - rhel70
   - name: .aggfuzzer
@@ -11216,6 +11336,9 @@ buildvariants:
     num_scons_link_jobs_available: 0.99
   tasks:
   - name: compile_TG
+    distros:
+    - ubuntu1604-build
+  - name: compile_build_tools_next_TG
     distros:
     - ubuntu1604-build
   - name: jsCore

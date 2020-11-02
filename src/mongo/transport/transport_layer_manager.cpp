@@ -72,10 +72,17 @@ StatusWith<SessionHandle> TransportLayerManager::connect(
 Future<SessionHandle> TransportLayerManager::asyncConnect(
     HostAndPort peer,
     ConnectSSLMode sslMode,
+<<<<<<< HEAD
     const boost::optional<TransientSSLParams>& transientSSLParams,
     const ReactorHandle& reactor,
     Milliseconds timeout) {
     return _tls.front()->asyncConnect(peer, sslMode, transientSSLParams, reactor, timeout);
+=======
+    const ReactorHandle& reactor,
+    Milliseconds timeout,
+    std::shared_ptr<SSLConnectionContext> sslContextOverride) {
+    return _tls.front()->asyncConnect(peer, sslMode, reactor, timeout, sslContextOverride);
+>>>>>>> master
 }
 
 ReactorHandle TransportLayerManager::getReactor(WhichReactor which) {

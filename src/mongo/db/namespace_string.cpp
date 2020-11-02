@@ -102,6 +102,8 @@ const NamespaceString NamespaceString::kConfigSettingsNamespace(NamespaceString:
 const NamespaceString NamespaceString::kVectorClockNamespace(NamespaceString::kConfigDb,
                                                              "vectorClock");
 
+const NamespaceString NamespaceString::kReshardingApplierProgressNamespace(
+    NamespaceString::kConfigDb, "localReshardingOperations.recipient.progress_applier");
 
 bool NamespaceString::isListCollectionsCursorNS() const {
     return coll() == listCollectionsCursorCol;
@@ -142,6 +144,9 @@ bool NamespaceString::isLegalClientSystemNS() const {
     if (coll() == kSystemDotViewsCollectionName)
         return true;
     if (isTemporaryReshardingCollection()) {
+        return true;
+    }
+    if (isTimeseriesBucketsCollection()) {
         return true;
     }
 
@@ -272,6 +277,15 @@ bool NamespaceString::isConfigDotCacheDotChunks() const {
 
 bool NamespaceString::isTemporaryReshardingCollection() const {
     return coll().startsWith(kTemporaryReshardingCollectionPrefix);
+}
+
+bool NamespaceString::isTimeseriesBucketsCollection() const {
+    return coll().startsWith(kTimeseriesBucketsCollectionPrefix);
+}
+
+NamespaceString NamespaceString::makeTimeseriesBucketsNamespace() const {
+    auto bucketsColl = kTimeseriesBucketsCollectionPrefix.toString() + coll();
+    return {db(), bucketsColl};
 }
 
 bool NamespaceString::isReplicated() const {

@@ -26,27 +26,66 @@
  *    exception statement from all source files in the program, then also delete
  *    it in the license file.
  */
+#define MONGO_LOGV2_DEFAULT_COMPONENT ::mongo::logv2::LogComponent::kCommand
 
 #include "mongo/db/commands.h"
+#include "mongo/db/commands/tenant_migration_donor_cmds_gen.h"
 #include "mongo/db/commands/tenant_migration_recipient_cmds_gen.h"
+#include "mongo/db/repl/primary_only_service.h"
 #include "mongo/db/repl/repl_server_parameters_gen.h"
+#include "mongo/db/repl/tenant_migration_recipient_service.h"
+#include "mongo/logv2/log.h"
 
 namespace mongo {
 namespace {
 
+MONGO_FAIL_POINT_DEFINE(returnResponseOkForRecipientSyncDataCmd);
+
 class RecipientSyncDataCmd : public TypedCommand<RecipientSyncDataCmd> {
 public:
     using Request = RecipientSyncData;
+    using Response = RecipientSyncDataResponse;
 
     class Invocation : public InvocationBase {
 
     public:
         using InvocationBase::InvocationBase;
 
-        void typedRun(OperationContext* opCtx) {
+        Response typedRun(OperationContext* opCtx) {
             uassert(ErrorCodes::CommandNotSupported,
                     "recipientSyncData command not enabled",
                     repl::enableTenantMigrations);
+
+            const auto& cmd = request();
+
+            TenantMigrationRecipientDocument stateDoc(cmd.getMigrationId(),
+                                                      cmd.getDonorConnectionString().toString(),
+                                                      cmd.getTenantId().toString(),
+                                                      cmd.getReadPreference());
+
+
+            if (MONGO_unlikely(returnResponseOkForRecipientSyncDataCmd.shouldFail())) {
+                LOGV2(4879608,
+                      "'returnResponseOkForRecipientSyncDataCmd' failpoint enabled.",
+                      "tenantMigrationRecipientInstance"_attr = stateDoc.toBSON());
+                return Response(repl::OpTime());
+            }
+
+            auto recipientService =
+                repl::PrimaryOnlyServiceRegistry::get(opCtx->getServiceContext())
+                    ->lookupServiceByName(repl::TenantMigrationRecipientService::
+                                              kTenantMigrationRecipientServiceName);
+            auto recipientInstance = repl::TenantMigrationRecipientService::Instance::getOrCreate(
+                opCtx, recipientService, stateDoc.toBSON());
+            uassertStatusOK(recipientInstance->checkIfOptionsConflict(stateDoc));
+
+            auto returnAfterReachingTimestamp = cmd.getReturnAfterReachingTimestamp();
+            if (!returnAfterReachingTimestamp) {
+                return Response(recipientInstance->waitUntilMigrationReachesConsistentState(opCtx));
+            }
+
+            return Response(recipientInstance->waitUntilTimestampIsMajorityCommitted(
+                opCtx, *returnAfterReachingTimestamp));
         }
 
         void doCheckAuthorization(OperationContext* opCtx) const {}
@@ -61,7 +100,8 @@ public:
     };
 
     std::string help() const {
-        return "Instructs the recipient to sync data as part of a tenant migration.";
+        return "Internal replica set command; instructs the recipient to sync data as part of a "
+               "tenant migration.";
     }
 
     bool adminOnly() const override {

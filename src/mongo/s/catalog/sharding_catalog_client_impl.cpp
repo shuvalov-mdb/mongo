@@ -167,11 +167,9 @@ Status ShardingCatalogClientImpl::updateShardingCatalogEntryForCollection(
     const NamespaceString& nss,
     const CollectionType& coll,
     const bool upsert) {
-    fassert(28634, coll.validate());
-
     auto status = _updateConfigDocument(opCtx,
                                         CollectionType::ConfigNS,
-                                        BSON(CollectionType::fullNs(nss.ns())),
+                                        BSON(CollectionType::kNssFieldName << nss.ns()),
                                         coll.toBSON(),
                                         upsert,
                                         ShardingCatalogClient::kMajorityWriteConcern);
@@ -286,7 +284,7 @@ StatusWith<repl::OpTimeWith<CollectionType>> ShardingCatalogClientImpl::getColle
                                               kConfigReadSelector,
                                               readConcernLevel,
                                               CollectionType::ConfigNS,
-                                              BSON(CollectionType::fullNs(nss.ns())),
+                                              BSON(CollectionType::kNssFieldName << nss.ns()),
                                               BSONObj(),
                                               1);
     if (!statusFind.isOK()) {
@@ -324,7 +322,7 @@ StatusWith<std::vector<CollectionType>> ShardingCatalogClientImpl::getCollection
     BSONObjBuilder b;
     if (dbName) {
         invariant(!dbName->empty());
-        b.appendRegex(CollectionType::fullNs(),
+        b.appendRegex(CollectionType::kNssFieldName,
                       string(str::stream() << "^" << pcrecpp::RE::QuoteMeta(*dbName) << "\\."));
     }
 
@@ -375,7 +373,7 @@ std::vector<NamespaceString> ShardingCatalogClientImpl::getAllShardedCollections
             continue;
         }
 
-        collectionsToReturn.push_back(coll.getNs());
+        collectionsToReturn.push_back(coll.getNss());
     }
 
     return collectionsToReturn;

@@ -21,6 +21,7 @@ env.Library(
     LIBDEPS=[
         '$BUILD_DIR/mongo/base',
         '$BUILD_DIR/mongo/db/command_generic_argument',
+        '$BUILD_DIR/mongo/db/commands/create_command',
         '$BUILD_DIR/mongo/db/query/collation/collator_interface',
     ],
 )
@@ -64,7 +65,7 @@ env.Library(
 env.Library(
     target='commit_quorum_idl',
     source=[
-        env.Idlc('commit_quorum.idl')[0],
+        'commit_quorum.idl',
     ],
     LIBDEPS=[
         '$BUILD_DIR/mongo/base',
@@ -76,7 +77,7 @@ env.Library(
 env.Library(
     target='validate_idl',
     source=[
-        env.Idlc('validate.idl')[0],
+        'validate.idl',
     ],
     LIBDEPS=[
         '$BUILD_DIR/mongo/idl/server_parameter',
@@ -86,7 +87,7 @@ env.Library(
 env.Library(
     target='index_build_entry_idl',
     source=[
-        env.Idlc('index_build_entry.idl')[0],
+        'index_build_entry.idl',
     ],
     LIBDEPS=[
         '$BUILD_DIR/mongo/util/net/network',
@@ -98,7 +99,7 @@ env.Library(
     target='health_log',
     source=[
         "health_log.cpp",
-        env.Idlc("health_log.idl")[0],
+        "health_log.idl",
     ],
     LIBDEPS=[
         "$BUILD_DIR/mongo/base",
@@ -106,7 +107,10 @@ env.Library(
         "$BUILD_DIR/mongo/db/service_context",
         "$BUILD_DIR/mongo/idl/idl_parser",
     ],
-);
+    LIBDEPS_PRIVATE=[
+        'collection_options',
+    ],
+)
 
 env.Library(
     target='index_builds_manager',
@@ -230,7 +234,7 @@ env.Library(
     target='multi_index_block',
     source=[
         'multi_index_block.cpp',
-        env.Idlc('multi_index_block.idl')[0],
+        'multi_index_block.idl',
     ],
     LIBDEPS=[
         '$BUILD_DIR/mongo/base',
@@ -470,7 +474,7 @@ env.Library(
 env.Library(
     target='import_collection_oplog_entry',
     source=[
-        env.Idlc('import_collection_oplog_entry.idl')[0],
+        'import_collection_oplog_entry.idl',
     ],
     LIBDEPS=[
         '$BUILD_DIR/mongo/base',

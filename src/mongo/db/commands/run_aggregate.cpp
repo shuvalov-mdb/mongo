@@ -39,6 +39,7 @@
 
 #include "mongo/db/auth/authorization_session.h"
 #include "mongo/db/catalog/database.h"
+#include "mongo/db/catalog/database_holder.h"
 #include "mongo/db/curop.h"
 #include "mongo/db/cursor_manager.h"
 #include "mongo/db/db_raii.h"
@@ -117,6 +118,7 @@ bool handleCursorCommand(OperationContext* opCtx,
                          const NamespaceString& nsForCursor,
                          std::vector<ClientCursor*> cursors,
                          const AggregationRequest& request,
+                         const BSONObj& cmdObj,
                          rpc::ReplyBuilderInterface* result) {
     invariant(!cursors.empty());
     long long batchSize = request.getBatchSize();
@@ -186,10 +188,11 @@ bool handleCursorCommand(OperationContext* opCtx,
             auto&& [stats, _] =
                 explainer.getWinningPlanStats(ExplainOptions::Verbosity::kExecStats);
             LOGV2_WARNING(23799,
-                          "Aggregate command executor error: {error}, stats: {stats}",
+                          "Aggregate command executor error: {error}, stats: {stats}, cmd: {cmd}",
                           "Aggregate command executor error",
                           "error"_attr = exception.toStatus(),
-                          "stats"_attr = redact(stats));
+                          "stats"_attr = redact(stats),
+                          "cmd"_attr = cmdObj);
 
             exception.addContext("PlanExecutor error during aggregation");
             throw;
@@ -332,10 +335,11 @@ StatusWith<StringMap<ExpressionContext::ResolvedNamespace>> resolveInvolvedNames
  * 'collator'. Otherwise, returns ErrorCodes::OptionNotSupportedOnView.
  */
 Status collatorCompatibleWithPipeline(OperationContext* opCtx,
-                                      Database* db,
+                                      StringData dbName,
                                       const CollatorInterface* collator,
                                       const LiteParsedPipeline& liteParsedPipeline) {
-    if (!db) {
+    auto viewCatalog = DatabaseHolder::get(opCtx)->getSharedViewCatalog(opCtx, dbName);
+    if (!viewCatalog) {
         return Status::OK();
     }
     for (auto&& potentialViewNs : liteParsedPipeline.getInvolvedNamespaces()) {
@@ -343,7 +347,7 @@ Status collatorCompatibleWithPipeline(OperationContext* opCtx,
             continue;
         }
 
-        auto view = ViewCatalog::get(db)->lookup(opCtx, potentialViewNs.ns());
+        auto view = viewCatalog->lookup(opCtx, potentialViewNs.ns());
         if (!view) {
             continue;
         }
@@ -592,8 +596,10 @@ Status runAggregate(OperationContext* opCtx,
                 }
             }
 
-            auto resolvedView =
-                uassertStatusOK(ViewCatalog::get(ctx->getDb())->resolveView(opCtx, nss));
+
+            auto resolvedView = uassertStatusOK(DatabaseHolder::get(opCtx)
+                                                    ->getSharedViewCatalog(opCtx, nss.db())
+                                                    ->resolveView(opCtx, nss));
             uassert(std::move(resolvedView),
                     "On sharded systems, resolved views must be executed by mongos",
                     !ShardingState::get(opCtx)->enabled());
@@ -633,9 +639,8 @@ Status runAggregate(OperationContext* opCtx,
         // Check that the view's collation matches the collation of any views involved in the
         // pipeline.
         if (!pipelineInvolvedNamespaces.empty()) {
-            invariant(ctx);
             auto pipelineCollationStatus = collatorCompatibleWithPipeline(
-                opCtx, ctx->getDb(), expCtx->getCollator(), liteParsedPipeline);
+                opCtx, nss.db(), expCtx->getCollator(), liteParsedPipeline);
             if (!pipelineCollationStatus.isOK()) {
                 return pipelineCollationStatus;
             }
@@ -772,8 +777,8 @@ Status runAggregate(OperationContext* opCtx,
         }
     } else {
         // Cursor must be specified, if explain is not.
-        const bool keepCursor =
-            handleCursorCommand(opCtx, expCtx, origNss, std::move(cursors), request, result);
+        const bool keepCursor = handleCursorCommand(
+            opCtx, expCtx, origNss, std::move(cursors), request, cmdObj, result);
         if (keepCursor) {
             cursorFreer.dismiss();
         }

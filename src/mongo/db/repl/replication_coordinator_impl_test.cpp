@@ -38,6 +38,7 @@
 #include <set>
 #include <vector>
 
+#include "mongo/base/init.h"
 #include "mongo/bson/util/bson_extract.h"
 #include "mongo/db/catalog/commit_quorum_options.h"
 #include "mongo/db/concurrency/lock_state.h"
@@ -91,6 +92,12 @@ using rpc::OplogQueryMetadata;
 using rpc::ReplSetMetadata;
 using unittest::assertGet;
 using unittest::EnsureFCV;
+
+MONGO_INITIALIZER(ServerLogRedirection)(mongo::InitializerContext*) {
+    // mongod_options.cpp has an initializer which depends on logging.
+    // We can stub that dependency out for unit testing purposes.
+    return Status::OK();
+}
 
 typedef ReplicationCoordinator::ReplSetReconfigArgs ReplSetReconfigArgs;
 // Helper class to wrap Timestamp as an OpTime with term 1.
@@ -1431,7 +1438,6 @@ TEST_F(ReplCoordTest, UpdatePositionArgsAdvancesWallTimes) {
     ASSERT_TRUE(repl->getMemberState().primary());
 
     // Catch up the secondaries using only replSetUpdatePosition.
-    long long configVersion = repl->getConfig().getConfigVersion();
     UpdatePositionArgs updatePositionArgs;
 
     Date_t memberOneAppliedWallTime = Date_t() + Seconds(3);
@@ -1444,20 +1450,22 @@ TEST_F(ReplCoordTest, UpdatePositionArgsAdvancesWallTimes) {
         << 1 << UpdatePositionArgs::kUpdateArrayFieldName
         << BSON_ARRAY(
                BSON(UpdatePositionArgs::kConfigVersionFieldName
-                    << configVersion << UpdatePositionArgs::kMemberIdFieldName << 1
+                    << repl->getConfig().getConfigVersion()
+                    << UpdatePositionArgs::kMemberIdFieldName << 1
                     << UpdatePositionArgs::kAppliedOpTimeFieldName << opTime2.asOpTime().toBSON()
                     << UpdatePositionArgs::kAppliedWallTimeFieldName << memberOneAppliedWallTime
                     << UpdatePositionArgs::kDurableOpTimeFieldName << opTime2.asOpTime().toBSON()
                     << UpdatePositionArgs::kDurableWallTimeFieldName << memberOneDurableWallTime)
                << BSON(UpdatePositionArgs::kConfigVersionFieldName
-                       << configVersion << UpdatePositionArgs::kMemberIdFieldName << 2
+                       << repl->getConfig().getConfigVersion()
+                       << UpdatePositionArgs::kMemberIdFieldName << 2
                        << UpdatePositionArgs::kAppliedOpTimeFieldName << opTime2.asOpTime().toBSON()
                        << UpdatePositionArgs::kAppliedWallTimeFieldName << memberTwoAppliedWallTime
                        << UpdatePositionArgs::kDurableOpTimeFieldName << opTime2.asOpTime().toBSON()
                        << UpdatePositionArgs::kDurableWallTimeFieldName
                        << memberTwoDurableWallTime)))));
 
-    ASSERT_OK(repl->processReplSetUpdatePosition(updatePositionArgs, &configVersion));
+    ASSERT_OK(repl->processReplSetUpdatePosition(updatePositionArgs));
 
     // Make sure wall times are propagated through processReplSetUpdatePosition
     auto memberDataVector = repl->getMemberData();
@@ -1720,7 +1728,6 @@ TEST_F(StepDownTest, StepDownCanCompleteBasedOnReplSetUpdatePositionAlone) {
     ASSERT_TRUE(repl->getMemberState().primary());
 
     // Catch up one of the secondaries using only replSetUpdatePosition.
-    long long configVersion = repl->getConfig().getConfigVersion();
     UpdatePositionArgs updatePositionArgs;
 
     ASSERT_OK(updatePositionArgs.initialize(BSON(
@@ -1728,7 +1735,8 @@ TEST_F(StepDownTest, StepDownCanCompleteBasedOnReplSetUpdatePositionAlone) {
         << 1 << UpdatePositionArgs::kUpdateArrayFieldName
         << BSON_ARRAY(
                BSON(UpdatePositionArgs::kConfigVersionFieldName
-                    << configVersion << UpdatePositionArgs::kMemberIdFieldName << 1
+                    << repl->getConfig().getConfigVersion()
+                    << UpdatePositionArgs::kMemberIdFieldName << 1
                     << UpdatePositionArgs::kAppliedOpTimeFieldName << opTime2.asOpTime().toBSON()
                     << UpdatePositionArgs::kAppliedWallTimeFieldName
                     << Date_t() + Seconds(opTime2.asOpTime().getSecs())
@@ -1736,7 +1744,8 @@ TEST_F(StepDownTest, StepDownCanCompleteBasedOnReplSetUpdatePositionAlone) {
                     << UpdatePositionArgs::kDurableWallTimeFieldName
                     << Date_t() + Seconds(opTime2.asOpTime().getSecs()))
                << BSON(UpdatePositionArgs::kConfigVersionFieldName
-                       << configVersion << UpdatePositionArgs::kMemberIdFieldName << 2
+                       << repl->getConfig().getConfigVersion()
+                       << UpdatePositionArgs::kMemberIdFieldName << 2
                        << UpdatePositionArgs::kAppliedOpTimeFieldName << opTime1.asOpTime().toBSON()
                        << UpdatePositionArgs::kAppliedWallTimeFieldName
                        << Date_t() + Seconds(opTime1.asOpTime().getSecs())
@@ -1744,7 +1753,7 @@ TEST_F(StepDownTest, StepDownCanCompleteBasedOnReplSetUpdatePositionAlone) {
                        << UpdatePositionArgs::kDurableWallTimeFieldName
                        << Date_t() + Seconds(opTime1.asOpTime().getSecs()))))));
 
-    ASSERT_OK(repl->processReplSetUpdatePosition(updatePositionArgs, &configVersion));
+    ASSERT_OK(repl->processReplSetUpdatePosition(updatePositionArgs));
 
     // Verify that stepDown completes successfully.
     ASSERT_OK(*result.second.get());
@@ -1856,7 +1865,6 @@ TEST_F(StepDownTestWithUnelectableNode,
     // Use replSetUpdatePosition to catch up the first secondary, which is not electable.
     // This will yield a majority at the primary's opTime, so the waiter will be woken up,
     // but stepDown will not be able to complete.
-    long long configVersion = repl->getConfig().getConfigVersion();
     UpdatePositionArgs catchupFirstSecondary;
 
     ASSERT_OK(catchupFirstSecondary.initialize(BSON(
@@ -1864,7 +1872,8 @@ TEST_F(StepDownTestWithUnelectableNode,
         << 1 << UpdatePositionArgs::kUpdateArrayFieldName
         << BSON_ARRAY(
                BSON(UpdatePositionArgs::kConfigVersionFieldName
-                    << configVersion << UpdatePositionArgs::kMemberIdFieldName << 1
+                    << repl->getConfig().getConfigVersion()
+                    << UpdatePositionArgs::kMemberIdFieldName << 1
                     << UpdatePositionArgs::kAppliedOpTimeFieldName << opTime2.asOpTime().toBSON()
                     << UpdatePositionArgs::kAppliedWallTimeFieldName
                     << Date_t() + Seconds(opTime2.asOpTime().getSecs())
@@ -1872,7 +1881,8 @@ TEST_F(StepDownTestWithUnelectableNode,
                     << UpdatePositionArgs::kDurableWallTimeFieldName
                     << Date_t() + Seconds(opTime2.asOpTime().getSecs()))
                << BSON(UpdatePositionArgs::kConfigVersionFieldName
-                       << configVersion << UpdatePositionArgs::kMemberIdFieldName << 2
+                       << repl->getConfig().getConfigVersion()
+                       << UpdatePositionArgs::kMemberIdFieldName << 2
                        << UpdatePositionArgs::kAppliedOpTimeFieldName << opTime1.asOpTime().toBSON()
                        << UpdatePositionArgs::kAppliedWallTimeFieldName
                        << Date_t() + Seconds(opTime1.asOpTime().getSecs())
@@ -1880,7 +1890,7 @@ TEST_F(StepDownTestWithUnelectableNode,
                        << UpdatePositionArgs::kDurableWallTimeFieldName
                        << Date_t() + Seconds(opTime1.asOpTime().getSecs()))))));
 
-    ASSERT_OK(repl->processReplSetUpdatePosition(catchupFirstSecondary, &configVersion));
+    ASSERT_OK(repl->processReplSetUpdatePosition(catchupFirstSecondary));
 
     // The primary has still not been able to finish stepping down.
     ASSERT_TRUE(repl->getMemberState().primary());
@@ -1894,7 +1904,8 @@ TEST_F(StepDownTestWithUnelectableNode,
         << 1 << UpdatePositionArgs::kUpdateArrayFieldName
         << BSON_ARRAY(
                BSON(UpdatePositionArgs::kConfigVersionFieldName
-                    << configVersion << UpdatePositionArgs::kMemberIdFieldName << 1
+                    << repl->getConfig().getConfigVersion()
+                    << UpdatePositionArgs::kMemberIdFieldName << 1
                     << UpdatePositionArgs::kAppliedOpTimeFieldName << opTime2.asOpTime().toBSON()
                     << UpdatePositionArgs::kAppliedWallTimeFieldName
                     << Date_t() + Seconds(opTime2.asOpTime().getSecs())
@@ -1902,7 +1913,8 @@ TEST_F(StepDownTestWithUnelectableNode,
                     << UpdatePositionArgs::kDurableWallTimeFieldName
                     << Date_t() + Seconds(opTime2.asOpTime().getSecs()))
                << BSON(UpdatePositionArgs::kConfigVersionFieldName
-                       << configVersion << UpdatePositionArgs::kMemberIdFieldName << 2
+                       << repl->getConfig().getConfigVersion()
+                       << UpdatePositionArgs::kMemberIdFieldName << 2
                        << UpdatePositionArgs::kAppliedOpTimeFieldName << opTime2.asOpTime().toBSON()
                        << UpdatePositionArgs::kAppliedWallTimeFieldName
                        << Date_t() + Seconds(opTime2.asOpTime().getSecs())
@@ -1910,7 +1922,7 @@ TEST_F(StepDownTestWithUnelectableNode,
                        << UpdatePositionArgs::kDurableWallTimeFieldName
                        << Date_t() + Seconds(opTime2.asOpTime().getSecs()))))));
 
-    ASSERT_OK(repl->processReplSetUpdatePosition(catchupOtherSecondary, &configVersion));
+    ASSERT_OK(repl->processReplSetUpdatePosition(catchupOtherSecondary));
 
     // Verify that stepDown completes successfully.
     ASSERT_OK(*result.second.get());
@@ -4922,7 +4934,7 @@ TEST_F(ReplCoordTest, DoNotProcessSelfWhenUpdatePositionContainsInfoAboutSelf) {
                                 << UpdatePositionArgs::kAppliedWallTimeFieldName
                                 << Date_t() + Seconds(time2.getSecs()))))));
 
-    ASSERT_OK(getReplCoord()->processReplSetUpdatePosition(args, nullptr));
+    ASSERT_OK(getReplCoord()->processReplSetUpdatePosition(args));
     ASSERT_EQUALS(ErrorCodes::WriteConcernFailed,
                   getReplCoord()->awaitReplication(opCtx.get(), time2, writeConcern).status);
 }
@@ -4971,7 +4983,7 @@ TEST_F(ReplCoordTest, ProcessUpdatePositionWhenItsConfigVersionIsDifferent) {
 
     auto opCtx = makeOperationContext();
 
-    ASSERT_OK(getReplCoord()->processReplSetUpdatePosition(args, nullptr));
+    ASSERT_OK(getReplCoord()->processReplSetUpdatePosition(args));
     ASSERT_OK(getReplCoord()->awaitReplication(opCtx.get(), time2, writeConcern).status);
 }
 
@@ -5020,8 +5032,7 @@ TEST_F(ReplCoordTest, DoNotProcessUpdatePositionOfMembersWhoseIdsAreNotInTheConf
     auto opCtx = makeOperationContext();
 
 
-    ASSERT_EQUALS(ErrorCodes::NodeNotFound,
-                  getReplCoord()->processReplSetUpdatePosition(args, nullptr));
+    ASSERT_EQUALS(ErrorCodes::NodeNotFound, getReplCoord()->processReplSetUpdatePosition(args));
     ASSERT_EQUALS(ErrorCodes::WriteConcernFailed,
                   getReplCoord()->awaitReplication(opCtx.get(), time2, writeConcern).status);
 }
@@ -5084,7 +5095,7 @@ TEST_F(ReplCoordTest,
     auto opCtx = makeOperationContext();
 
 
-    ASSERT_OK(getReplCoord()->processReplSetUpdatePosition(args, nullptr));
+    ASSERT_OK(getReplCoord()->processReplSetUpdatePosition(args));
     ASSERT_OK(getReplCoord()->awaitReplication(opCtx.get(), time2, writeConcern).status);
 
     writeConcern.wNumNodes = 3;
@@ -7145,7 +7156,7 @@ TEST_F(ReplCoordTest, StepDownWhenHandleLivenessTimeoutMarksAMajorityOfVotingNod
                        << UpdatePositionArgs::kDurableWallTimeFieldName
                        << Date_t() + Seconds(startingOpTime.getSecs()))))));
 
-    ASSERT_OK(getReplCoord()->processReplSetUpdatePosition(args, nullptr));
+    ASSERT_OK(getReplCoord()->processReplSetUpdatePosition(args));
     // Become PRIMARY.
     simulateSuccessfulV1Election();
 
@@ -7174,7 +7185,7 @@ TEST_F(ReplCoordTest, StepDownWhenHandleLivenessTimeoutMarksAMajorityOfVotingNod
     const Date_t startDate = getNet()->now();
     getNet()->enterNetwork();
     getNet()->runUntil(startDate + Milliseconds(100));
-    ASSERT_OK(getReplCoord()->processReplSetUpdatePosition(args1, nullptr));
+    ASSERT_OK(getReplCoord()->processReplSetUpdatePosition(args1));
 
     // Confirm that the node remains PRIMARY after the other two nodes are marked DOWN.
     getNet()->runUntil(startDate + Milliseconds(2080));
@@ -7219,7 +7230,7 @@ TEST_F(ReplCoordTest, StepDownWhenHandleLivenessTimeoutMarksAMajorityOfVotingNod
                            << UpdatePositionArgs::kAppliedOpTimeFieldName << startingOpTime.toBSON()
                            << UpdatePositionArgs::kAppliedWallTimeFieldName
                            << Date_t() + Seconds(startingOpTime.getSecs()))))));
-    ASSERT_OK(getReplCoord()->processReplSetUpdatePosition(args2, nullptr));
+    ASSERT_OK(getReplCoord()->processReplSetUpdatePosition(args2));
 
     hbArgs.setSetName("mySet");
     hbArgs.setConfigVersion(2);

@@ -287,7 +287,7 @@ public:
     static StatusWith<OplogEntry> parse(const BSONObj& object);
 
     OplogEntry(OpTime opTime,
-               const boost::optional<long long> hash,
+               const boost::optional<int64_t> hash,
                OpTypeEnum opType,
                const NamespaceString& nss,
                const boost::optional<UUID>& uuid,
@@ -302,7 +302,8 @@ public:
                const boost::optional<OpTime>& prevWriteOpTimeInTransaction,
                const boost::optional<OpTime>& preImageOpTime,
                const boost::optional<OpTime>& postImageOpTime,
-               const boost::optional<ShardId>& destinedRecipient);
+               const boost::optional<ShardId>& destinedRecipient,
+               const boost::optional<Value>& idField);
 
     // DEPRECATED: This constructor can throw. Use static parse method instead.
     explicit OplogEntry(BSONObj raw);

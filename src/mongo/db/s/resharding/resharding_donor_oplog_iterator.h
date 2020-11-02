@@ -35,6 +35,7 @@
 #include "mongo/db/pipeline/pipeline.h"
 #include "mongo/db/repl/oplog_entry.h"
 #include "mongo/db/s/resharding/donor_oplog_id_gen.h"
+#include "mongo/db/s/resharding/resharding_donor_oplog_iterator_interface.h"
 #include "mongo/util/future.h"
 
 namespace mongo {
@@ -45,7 +46,7 @@ class OperationContext;
  * Iterator for extracting oplog entries from the resharding donor oplog buffer. This is not thread
  * safe.
  */
-class ReshardingDonorOplogIterator {
+class ReshardingDonorOplogIterator : public ReshardingDonorOplogIteratorInterface {
 public:
     ReshardingDonorOplogIterator(NamespaceString donorOplogBufferNs,
                                  boost::optional<ReshardingDonorOplogId> resumeToken);
@@ -54,13 +55,13 @@ public:
      * Returns the next oplog entry. Returns boost::none when there are no more entries to return.
      * Calling getNext() when the previously returned future is not ready is undefined.
      */
-    Future<boost::optional<repl::OplogEntry>> getNext(OperationContext* opCtx);
+    Future<boost::optional<repl::OplogEntry>> getNext(OperationContext* opCtx) override;
 
     /**
      * Returns false if this iterator has seen the final oplog entry. Since this is not thread safe,
      * should not be called while there is a pending future from getNext() that is not ready.
      */
-    bool hasMore() const;
+    bool hasMore() const override;
 
 private:
     /**

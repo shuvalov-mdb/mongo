@@ -7,6 +7,7 @@
 (function() {
 "use strict";
 
+load("jstests/aggregation/extras/utils.js");
 load("jstests/libs/fail_point_util.js");
 load("jstests/libs/uuid_util.js");
 load("jstests/replsets/libs/tenant_migration_util.js");
@@ -54,7 +55,13 @@ const donorRst = new ReplSetTest(
 const recipientRst = new ReplSetTest({
     name: `${name}_recipient`,
     nodes: 1,
-    nodeOptions: {setParameter: {enableTenantMigrations: true}}
+    nodeOptions: {
+        setParameter: {
+            enableTenantMigrations: true,
+            // TODO SERVER-51734: Remove the failpoint 'returnResponseOkForRecipientSyncDataCmd'.
+            'failpoint.returnResponseOkForRecipientSyncDataCmd': tojson({mode: 'alwaysOn'})
+        }
+    }
 });
 
 donorRst.startSet();
@@ -93,7 +100,7 @@ assert.eq(res.state, "committed");
 
 for (const coll of collNames) {
     for (const db of tenantDBs) {
-        // TODO (SERVER-50528): Change shouldMigrate to true.
+        // TODO (SERVER-51734): Change shouldMigrate to true.
         verifyReceipientDB(recipientPrimary, db, coll, false /* shouldMigrate */);
     }
 

@@ -230,11 +230,18 @@ public:
     virtual void preallocateSnapshot() {}
 
     /**
-     * Obtains a majority committed snapshot. Snapshots should still be separately acquired and
-     * newer committed snapshots should be used if available whenever implementations would normally
-     * change snapshots.
+     * Like preallocateSnapshot() above but also indicates that the snapshot will be used for
+     * reading the oplog.
      *
-     * If no snapshot has yet been marked as Majority Committed, returns a status with error code
+     * StorageEngines may not implement this in which case it works like preallocateSnapshot.
+     */
+    virtual void preallocateSnapshotForOplogRead() {
+        preallocateSnapshot();
+    }
+
+    /**
+     * Returns whether or not a majority commmitted snapshot is available. If no snapshot has yet
+     * been marked as Majority Committed, returns a status with error code
      * ReadConcernMajorityNotAvailableYet. After this returns successfully, at any point where
      * implementations attempt to acquire committed snapshot, if there are none available due to a
      * call to SnapshotManager::clearCommittedSnapshot(), a AssertionException with the same code
@@ -243,7 +250,7 @@ public:
      * StorageEngines that don't support a SnapshotManager should use the default
      * implementation.
      */
-    virtual Status obtainMajorityCommittedSnapshot() {
+    virtual Status majorityCommittedSnapshotAvailable() const {
         return {ErrorCodes::CommandNotSupported,
                 "Current storage engine does not support majority readConcerns"};
     }
@@ -255,10 +262,10 @@ public:
      *  - when using ReadSource::kNoOverlap, the timestamp chosen by the storage engine.
      *  - when using ReadSource::kAllDurableSnapshot, the timestamp chosen using the storage
      * engine's all_durable timestamp.
-     * applied timestamp. Can return boost::none if no timestamp has been established.
+     *  - when using ReadSource::kLastAppplied, the last applied timestamp. Can return boost::none
+     * if no timestamp has been established.
      *  - when using ReadSource::kMajorityCommitted, the majority committed timestamp chosen by the
-     * storage engine after a transaction has been opened or after a call to
-     * obtainMajorityCommittedSnapshot().
+     * storage engine after a transaction has been opened.
      *
      * This may passively start a storage engine transaction to establish a read timestamp.
      */
@@ -471,10 +478,12 @@ public:
     };
 
     /**
-     * Indicates whether a unit of work is active. Will be true after beginUnitOfWork
-     * is called and before either commitUnitOfWork or abortUnitOfWork gets called.
+     * Indicates whether the RecoveryUnit has an open snapshot. A snapshot can be opened inside or
+     * outside of a WriteUnitOfWork.
      */
-    virtual bool inActiveTxn() const = 0;
+    virtual bool isActive() const {
+        return _isActive();
+    };
 
     /**
      * When called, the WriteUnitOfWork ignores the multi timestamp constraint for the remainder of

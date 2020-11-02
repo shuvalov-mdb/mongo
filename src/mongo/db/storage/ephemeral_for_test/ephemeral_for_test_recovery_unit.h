@@ -47,15 +47,11 @@ public:
 
     void beginUnitOfWork(OperationContext* opCtx) override final;
 
-    bool inActiveTxn() const {
-        return _inUnitOfWork();
-    }
-
     virtual bool waitUntilDurable(OperationContext* opCtx) override;
 
     virtual void setOrderedCommit(bool orderedCommit) override;
 
-    Status obtainMajorityCommittedSnapshot() final;
+    Status majorityCommittedSnapshotAvailable() const final;
 
     void prepareUnitOfWork() override;
 

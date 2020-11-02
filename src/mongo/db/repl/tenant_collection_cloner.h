@@ -191,12 +191,6 @@ private:
      */
     void waitForDatabaseWorkToComplete();
 
-    /**
-     * Sets up tracking the lastVisibleOpTime from response metadata.
-     */
-    void setMetadataReader();
-    void unsetMetadataReader();
-
     // All member variables are labeled with one of the following codes indicating the
     // synchronization rules for accessing them.
     //
@@ -222,8 +216,8 @@ private:
     // Function for scheduling database work using the executor.
     ScheduleDbWorkFn _scheduleDbWorkFn;  // (R)
     // Documents read from source to insert.
-    std::vector<InsertStatement> _documentsToInsert;  // (M)
-    Stats _stats;                                     // (M)
+    std::vector<BSONObj> _documentsToInsert;  // (M)
+    Stats _stats;                             // (M)
     // We put _dbWorkTaskRunner after anything the database threads depend on to ensure it is
     // only destroyed after those threads exit.
     TaskRunner _dbWorkTaskRunner;  // (R)

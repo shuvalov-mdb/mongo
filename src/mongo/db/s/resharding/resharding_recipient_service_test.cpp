@@ -137,8 +137,9 @@ public:
 
         expectFindSendBSONObjVector(kConfigHostAndPort, [&]() {
             CollectionType coll;
-            coll.setNs(tempNss);
+            coll.setNss(tempNss);
             coll.setEpoch(epoch);
+            coll.setUpdatedAt(Date_t::now());
             coll.setKeyPattern(skey.getKeyPattern());
             coll.setUnique(false);
             coll.setUUID(uuid);

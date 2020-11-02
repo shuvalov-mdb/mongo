@@ -57,7 +57,7 @@ public:
      * Called when a ServerHandshakeCompleteEvent is published - The initial handshake to the server
      * at hostAndPort was successful. duration is the measured RTT (Round Trip Time).
      */
-    virtual void onServerHandshakeCompleteEvent(IsMasterRTT duration,
+    virtual void onServerHandshakeCompleteEvent(HelloRTT duration,
                                                 const HostAndPort& address,
                                                 const BSONObj reply = BSONObj()){};
 
@@ -83,7 +83,7 @@ public:
      * Called when a ServerPingSucceededEvent is published - A monitoring ping to the server at
      * hostAndPort was successful. duration is the measured RTT (Round Trip Time).
      */
-    virtual void onServerPingSucceededEvent(IsMasterRTT duration, const HostAndPort& hostAndPort){};
+    virtual void onServerPingSucceededEvent(HelloRTT duration, const HostAndPort& hostAndPort){};
 };
 
 /**
@@ -103,7 +103,7 @@ public:
 
     void onTopologyDescriptionChangedEvent(TopologyDescriptionPtr previousDescription,
                                            TopologyDescriptionPtr newDescription) override;
-    virtual void onServerHandshakeCompleteEvent(IsMasterRTT duration,
+    virtual void onServerHandshakeCompleteEvent(HelloRTT duration,
                                                 const HostAndPort& address,
                                                 const BSONObj reply = BSONObj()) override;
 
@@ -117,7 +117,7 @@ public:
                                        const HostAndPort& hostAndPort,
                                        const BSONObj reply) override;
     void onServerPingFailedEvent(const HostAndPort& hostAndPort, const Status& status) override;
-    void onServerPingSucceededEvent(IsMasterRTT duration, const HostAndPort& hostAndPort) override;
+    void onServerPingSucceededEvent(HelloRTT duration, const HostAndPort& hostAndPort) override;
 
 private:
     enum class EventType {
@@ -133,7 +133,7 @@ private:
     struct Event {
         EventType type;
         HostAndPort hostAndPort;
-        IsMasterRTT duration;
+        HelloRTT duration;
         BSONObj reply;
         TopologyDescriptionPtr previousDescription;
         TopologyDescriptionPtr newDescription;
@@ -141,7 +141,7 @@ private:
     };
     using EventPtr = std::unique_ptr<Event>;
 
-    void _sendEvent(TopologyListenerPtr listener, const TopologyEventsPublisher::Event& event);
+    void _sendEvent(TopologyListener* listener, const TopologyEventsPublisher::Event& event);
     void _nextDelivery();
     void _scheduleNextDelivery();
 

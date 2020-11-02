@@ -409,12 +409,19 @@ class Command(Struct):
     Namespace is required.
     """
 
+    # pylint: disable=too-many-instance-attributes
+
     def __init__(self, file_name, line, column):
         # type: (str, int, int) -> None
         """Construct a Command."""
         self.namespace = None  # type: str
         self.type = None  # type: str
-
+        self.reply_type = None  # type: str
+        self.api_version = ""  # type: str
+        self.is_deprecated = False  # type: bool
+        self.unstable = False  # type: bool
+        self.forward_to_shards = False  # type: bool
+        self.forward_from_shards = False  # type: bool
         super(Command, self).__init__(file_name, line, column)
 
 

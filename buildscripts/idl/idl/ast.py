@@ -206,11 +206,19 @@ class Command(Struct):
     All fields are either required or have a non-None default.
     """
 
+    # pylint: disable=too-many-instance-attributes
+
     def __init__(self, file_name, line, column):
         # type: (str, int, int) -> None
         """Construct a command."""
         self.namespace = None  # type: str
         self.command_field = None  # type: Field
+        self.reply_type = None  # type: Field
+        self.api_version = ""  # type: str
+        self.is_deprecated = False  # type: bool
+        self.unstable = False  # type: bool
+        self.forward_to_shards = False  # type: bool
+        self.forward_from_shards = False  # type: bool
         super(Command, self).__init__(file_name, line, column)
 
 

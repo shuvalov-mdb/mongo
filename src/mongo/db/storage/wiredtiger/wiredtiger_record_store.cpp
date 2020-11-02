@@ -671,7 +671,7 @@ public:
         invariantWTOK(_cursor->get_value(_cursor, &value));
 
         auto& metricsCollector = ResourceConsumption::MetricsCollector::get(_opCtx);
-        metricsCollector.incrementDocBytesRead(_opCtx, value.size);
+        metricsCollector.incrementOneDocRead(_opCtx, value.size);
 
         return {{id, {static_cast<const char*>(value.data), static_cast<int>(value.size)}}};
     }
@@ -1033,7 +1033,7 @@ bool WiredTigerRecordStore::findRecord(OperationContext* opCtx,
     *out = _getData(curwrap);
 
     auto& metricsCollector = ResourceConsumption::MetricsCollector::get(opCtx);
-    metricsCollector.incrementDocBytesRead(opCtx, out->size());
+    metricsCollector.incrementOneDocRead(opCtx, out->size());
 
     return true;
 }
@@ -1066,7 +1066,7 @@ void WiredTigerRecordStore::deleteRecord(OperationContext* opCtx, const RecordId
     invariantWTOK(ret);
 
     auto& metricsCollector = ResourceConsumption::MetricsCollector::get(opCtx);
-    metricsCollector.incrementDocBytesWritten(old_length);
+    metricsCollector.incrementOneDocWritten(old_length);
 
     _changeNumRecords(opCtx, -1);
     _increaseDataSize(opCtx, -old_length);
@@ -1509,13 +1509,15 @@ Status WiredTigerRecordStore::_insertRecords(OperationContext* opCtx,
         int ret = WT_OP_CHECK(wiredTigerCursorInsert(opCtx, c));
         if (ret)
             return wtRCToStatus(ret, "WiredTigerRecordStore::insertRecord");
+
+        // Increment metrics for each insert separately, as opposed to outside of the loop. The API
+        // requires that each record be accounted for separately.
+        auto& metricsCollector = ResourceConsumption::MetricsCollector::get(opCtx);
+        metricsCollector.incrementOneDocWritten(value.size);
     }
 
     _changeNumRecords(opCtx, nRecords);
     _increaseDataSize(opCtx, totalLength);
-
-    auto& metricsCollector = ResourceConsumption::MetricsCollector::get(opCtx);
-    metricsCollector.incrementDocBytesWritten(totalLength);
 
     if (_oplogStones) {
         _oplogStones->updateCurrentStoneAfterInsertOnCommit(
@@ -1654,7 +1656,7 @@ Status WiredTigerRecordStore::updateRecord(OperationContext* opCtx,
                 // are inserting (data.size).
                 modifiedDataSize += entries[i].size + entries[i].data.size;
             };
-            metricsCollector.incrementDocBytesWritten(modifiedDataSize);
+            metricsCollector.incrementOneDocWritten(modifiedDataSize);
 
             WT_ITEM new_value;
             dassert(nentries == 0 ||
@@ -1669,7 +1671,7 @@ Status WiredTigerRecordStore::updateRecord(OperationContext* opCtx,
     if (!skip_update) {
         c->set_value(c, value.Get());
         ret = WT_OP_CHECK(wiredTigerCursorInsert(opCtx, c));
-        metricsCollector.incrementDocBytesWritten(value.size);
+        metricsCollector.incrementOneDocWritten(value.size);
     }
     invariantWTOK(ret);
 
@@ -1721,7 +1723,7 @@ StatusWith<RecordData> WiredTigerRecordStore::updateWithDamages(
         invariantWTOK(WT_OP_CHECK(wiredTigerCursorModify(opCtx, c, entries.data(), nentries)));
 
     auto& metricsCollector = ResourceConsumption::MetricsCollector::get(opCtx);
-    metricsCollector.incrementDocBytesWritten(modifiedDataSize);
+    metricsCollector.incrementOneDocWritten(modifiedDataSize);
 
     WT_ITEM value;
     invariantWTOK(c->get_value(c, &value));
@@ -1865,7 +1867,7 @@ void WiredTigerRecordStore::appendCustomStats(OperationContext* opCtx,
 void WiredTigerRecordStore::waitForAllEarlierOplogWritesToBeVisible(OperationContext* opCtx) const {
     // Make sure that callers do not hold an active snapshot so it will be able to see the oplog
     // entries it waited for afterwards.
-    invariant(!_getRecoveryUnit(opCtx)->inActiveTxn());
+    invariant(!_getRecoveryUnit(opCtx)->isActive());
 
     auto oplogManager = _kvEngine->getOplogManager();
     if (oplogManager->isRunning()) {
@@ -2206,7 +2208,7 @@ boost::optional<Record> WiredTigerRecordStoreCursorBase::next() {
         id = getKey(c);
     }
 
-    if (_oplogVisibleTs && id.repr() > *_oplogVisibleTs) {
+    if (_forward && _oplogVisibleTs && id.repr() > *_oplogVisibleTs) {
         _eof = true;
         return {};
     }
@@ -2231,7 +2233,7 @@ boost::optional<Record> WiredTigerRecordStoreCursorBase::next() {
     invariantWTOK(c->get_value(c, &value));
 
     auto& metricsCollector = ResourceConsumption::MetricsCollector::get(_opCtx);
-    metricsCollector.incrementDocBytesRead(_opCtx, value.size);
+    metricsCollector.incrementOneDocRead(_opCtx, value.size);
 
     _lastReturnedId = id;
     return {{id, {static_cast<const char*>(value.data), static_cast<int>(value.size)}}};
@@ -2239,7 +2241,7 @@ boost::optional<Record> WiredTigerRecordStoreCursorBase::next() {
 
 boost::optional<Record> WiredTigerRecordStoreCursorBase::seekExact(const RecordId& id) {
     invariant(_hasRestored);
-    if (_oplogVisibleTs && id.repr() > *_oplogVisibleTs) {
+    if (_forward && _oplogVisibleTs && id.repr() > *_oplogVisibleTs) {
         _eof = true;
         return {};
     }
@@ -2265,7 +2267,7 @@ boost::optional<Record> WiredTigerRecordStoreCursorBase::seekExact(const RecordI
     invariantWTOK(c->get_value(c, &value));
 
     auto& metricsCollector = ResourceConsumption::MetricsCollector::get(_opCtx);
-    metricsCollector.incrementDocBytesRead(_opCtx, value.size);
+    metricsCollector.incrementOneDocRead(_opCtx, value.size);
 
     _lastReturnedId = id;
     _eof = false;
@@ -2388,7 +2390,7 @@ std::unique_ptr<SeekableRecordCursor> StandardWiredTigerRecordStore::getCursor(
         WiredTigerRecoveryUnit* wru = WiredTigerRecoveryUnit::get(opCtx);
         // If we already have a snapshot we don't know what it can see, unless we know no one
         // else could be writing (because we hold an exclusive lock).
-        invariant(!wru->inActiveTxn() ||
+        invariant(!wru->isActive() ||
                   opCtx->lockState()->isCollectionLockedForMode(NamespaceString(_ns), MODE_X) ||
                   wru->getIsOplogReader());
         wru->setIsOplogReader();
@@ -2440,7 +2442,7 @@ std::unique_ptr<SeekableRecordCursor> PrefixedWiredTigerRecordStore::getCursor(
         WiredTigerRecoveryUnit* wru = WiredTigerRecoveryUnit::get(opCtx);
         // If we already have a snapshot we don't know what it can see, unless we know no one
         // else could be writing (because we hold an exclusive lock).
-        invariant(!wru->inActiveTxn() ||
+        invariant(!wru->isActive() ||
                   opCtx->lockState()->isCollectionLockedForMode(NamespaceString(_ns), MODE_X) ||
                   wru->getIsOplogReader());
         wru->setIsOplogReader();

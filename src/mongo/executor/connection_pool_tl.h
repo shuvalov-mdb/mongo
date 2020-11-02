@@ -153,9 +153,13 @@ public:
           _peer(std::move(peer)),
           _sslMode(sslMode),
           _onConnectHook(onConnectHook),
+<<<<<<< HEAD
           _sslContextOverride(sslContextOverride) {
         std::cerr << "!!!!!! created TLConnection" << std::endl;
     }
+=======
+          _sslContextOverride(sslContextOverride) {}
+>>>>>>> master
     ~TLConnection() {
         // Release must be the first expression of this dtor
         release();

@@ -136,9 +136,15 @@ public:
     Future<SessionHandle> asyncConnect(
         HostAndPort peer,
         ConnectSSLMode sslMode,
+<<<<<<< HEAD
         const boost::optional<TransientSSLParams>& transientSSLParams,
         const ReactorHandle& reactor,
         Milliseconds timeout) final;
+=======
+        const ReactorHandle& reactor,
+        Milliseconds timeout,
+        std::shared_ptr<SSLConnectionContext> sslContextOverride = nullptr) final;
+>>>>>>> master
 
     Status setup() final;
 

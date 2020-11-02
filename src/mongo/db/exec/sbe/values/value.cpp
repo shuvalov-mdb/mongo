@@ -194,9 +194,18 @@ void writeValueToStream(T& stream, TypeTags tag, Value val) {
         case value::TypeTags::StringSmall:
             stream << '"' << getSmallStringView(val) << '"';
             break;
-        case value::TypeTags::StringBig:
-            stream << '"' << getBigStringView(val) << '"';
+        case value::TypeTags::StringBig: {
+            auto sb = getBigStringView(val);
+            if (strlen(sb) <= kStringMaxDisplayLength) {
+                stream << '"' << sb << '"';
+            } else {
+                char truncated[kStringMaxDisplayLength + 1];
+                strncpy(truncated, sb, kStringMaxDisplayLength);
+                truncated[kStringMaxDisplayLength] = '\0';
+                stream << '"' << truncated << '"' << "...";
+            }
             break;
+        }
         case value::TypeTags::Array: {
             auto arr = getArrayView(val);
             stream << '[';
@@ -295,15 +304,50 @@ void writeValueToStream(T& stream, TypeTags tag, Value val) {
             stream << '}';
             break;
         }
-        case value::TypeTags::bsonString:
-            stream << '"' << std::string(getStringView(value::TypeTags::bsonString, val)) << '"';
+        case value::TypeTags::bsonString: {
+            auto bs = std::string(getStringView(value::TypeTags::bsonString, val));
+            if (bs.length() <= kStringMaxDisplayLength) {
+                stream << '"' << bs << '"';
+            } else {
+                stream << '"' << bs.substr(0, kStringMaxDisplayLength) << '"' << "...";
+            }
             break;
+        }
         case value::TypeTags::bsonObjectId:
             stream << "---===*** bsonObjectId ***===---";
             break;
-        case value::TypeTags::bsonBinData:
-            stream << "---===*** bsonBinData ***===---";
+        case value::TypeTags::bsonBinData: {
+            auto data =
+                reinterpret_cast<const char*>(getBSONBinData(value::TypeTags::bsonBinData, val));
+            auto len = getBSONBinDataSize(value::TypeTags::bsonBinData, val);
+            auto type = getBSONBinDataSubtype(value::TypeTags::bsonBinData, val);
+
+            if (type == ByteArrayDeprecated) {
+                // Skip extra size
+                len -= 4;
+                data += 4;
+            }
+
+            // If the BinData is a correctly sized newUUID, display it as such.
+            if (type == newUUID && len == kNewUUIDLength) {
+                using namespace fmt::literals;
+                StringData sd(data, len);
+                // 4 Octets - 2 Octets - 2 Octets - 2 Octets - 6 Octets
+                stream << "UUID(\"{}-{}-{}-{}-{}\")"_format(hexblob::encodeLower(sd.substr(0, 4)),
+                                                            hexblob::encodeLower(sd.substr(4, 2)),
+                                                            hexblob::encodeLower(sd.substr(6, 2)),
+                                                            hexblob::encodeLower(sd.substr(8, 2)),
+                                                            hexblob::encodeLower(sd.substr(10, 6)));
+                break;
+            }
+            stream << "BinData(" << type << ", ";
+            if (len > kBinDataMaxDisplayLength) {
+                stream << hexblob::encode(data, kBinDataMaxDisplayLength) << "...)";
+            } else {
+                stream << hexblob::encode(data, len) << ")";
+            }
             break;
+        }
         case value::TypeTags::ksValue: {
             auto ks = getKeyStringView(val);
             stream << "KS(" << ks->toString() << ")";
@@ -566,6 +610,19 @@ std::pair<TypeTags, Value> compareValue(TypeTags lhsTag,
     } else if (lhsTag == TypeTags::Null && rhsTag == TypeTags::Null) {
         return {TypeTags::NumberInt32, bitcastFrom<int32_t>(0)};
     } else if (isArray(lhsTag) && isArray(rhsTag)) {
+        // ArraySets carry semantics of an unordered set, so we cannot define a deterministic less
+        // or greater operations on them, but only compare for equality. Comparing an ArraySet with
+        // a regular Array is equivalent of converting the ArraySet to an Array and them comparing
+        // the two Arrays, so we can simply use a generic algorithm below.
+        if (lhsTag == TypeTags::ArraySet && rhsTag == TypeTags::ArraySet) {
+            auto lhsArr = getArraySetView(lhsValue);
+            auto rhsArr = getArraySetView(rhsValue);
+            if (lhsArr->values() == rhsArr->values()) {
+                return {TypeTags::NumberInt32, bitcastFrom<int32_t>(0)};
+            }
+            return {TypeTags::Nothing, 0};
+        }
+
         auto lhsArr = ArrayEnumerator{lhsTag, lhsValue};
         auto rhsArr = ArrayEnumerator{rhsTag, rhsValue};
         while (!lhsArr.atEnd() && !rhsArr.atEnd()) {
@@ -783,6 +840,35 @@ void readKeyStringValueIntoAccessors(const KeyString::Value& keyString,
     valBuilder.readValues(accessors);
 }
 
+std::pair<TypeTags, Value> arrayToSet(TypeTags tag, Value val) {
+    if (!isArray(tag)) {
+        return {value::TypeTags::Nothing, 0};
+    }
+    switch (tag) {
+        case TypeTags::ArraySet: {
+            return makeCopyArraySet(*getArraySetView(val));
+        }
+        case TypeTags::Array:
+        case TypeTags::bsonArray: {
+            auto [setTag, setVal] = makeNewArraySet();
+            ValueGuard guard{setTag, setVal};
+            auto setView = getArraySetView(setVal);
+
+            auto arrIter = ArrayEnumerator{tag, val};
+            while (!arrIter.atEnd()) {
+                auto [elTag, elVal] = arrIter.getViewOfValue();
+                auto [copyTag, copyVal] = copyValue(elTag, elVal);
+                setView->push_back(copyTag, copyVal);
+                arrIter.advance();
+            }
+            guard.reset();
+            return {setTag, setVal};
+        }
+
+        default:
+            MONGO_UNREACHABLE;
+    }
+}
 }  // namespace value
 }  // namespace sbe
 }  // namespace mongo
