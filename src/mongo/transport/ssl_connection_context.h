@@ -1,5 +1,5 @@
 /**
- *    Copyright (C) 2018-present MongoDB, Inc.
+ *    Copyright (C) 2020-present MongoDB, Inc.
  *
  *    This program is free software: you can redistribute it and/or modify
  *    it under the terms of the Server Side Public License, version 1,
@@ -27,43 +27,38 @@
  *    it in the license file.
  */
 
-#include "mongo/platform/basic.h"
-
-#include "mongo/executor/network_interface_factory.h"
+#pragma once
 
 #include <memory>
 
-#include "mongo/base/init.h"
-#include "mongo/base/status.h"
 #include "mongo/config.h"
-#include "mongo/executor/connection_pool.h"
-#include "mongo/executor/network_connection_hook.h"
-#include "mongo/executor/network_interface_tl.h"
-#include "mongo/rpc/metadata/metadata_hook.h"
+#include "mongo/util/net/ssl_options.h"
+#include "mongo/util/net/ssl_types.h"
+
+namespace asio {
+
+namespace ssl {
+class context;
+}  // namespace ssl
+}  // namespace asio
 
 namespace mongo {
-namespace executor {
 
-std::unique_ptr<NetworkInterface> makeNetworkInterface(std::string instanceName) {
-    return makeNetworkInterface(std::move(instanceName), nullptr, nullptr);
-}
+class SSLManagerInterface;
 
-std::unique_ptr<NetworkInterface> makeNetworkInterface(
-    std::string instanceName,
-    std::unique_ptr<NetworkConnectionHook> hook,
-    std::unique_ptr<rpc::EgressMetadataHook> metadataHook,
-    ConnectionPool::Options connPoolOptions) {
-    std::cerr << "!!!!!! makeNetworkInterface " << instanceName << std::endl;
+namespace transport {
 
-    if (!connPoolOptions.egressTagCloserManager && hasGlobalServiceContext()) {
-        connPoolOptions.egressTagCloserManager =
-            &EgressTagCloserManager::get(getGlobalServiceContext());
-    }
+#ifdef MONGO_CONFIG_SSL
+struct SSLConnectionContext {
+    std::unique_ptr<asio::ssl::context> ingress;
+    std::unique_ptr<asio::ssl::context> egress;
+    std::shared_ptr<SSLManagerInterface> manager;
+};
+#endif
 
-    auto svcCtx = hasGlobalServiceContext() ? getGlobalServiceContext() : nullptr;
-    return std::make_unique<NetworkInterfaceTL>(
-        instanceName, connPoolOptions, svcCtx, std::move(hook), std::move(metadataHook));
-}
+#ifndef MONGO_CONFIG_SSL
+struct SSLConnectionContext {};
+#endif
 
-}  // namespace executor
+}  // namespace transport
 }  // namespace mongo

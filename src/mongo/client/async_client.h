@@ -55,8 +55,8 @@ public:
     using Handle = std::shared_ptr<AsyncDBClient>;
 
     /**
-     * @param transientSSLParams optional SSL params to replace the default SSL context from the global 
-     * network layer.
+     * @param transientSSLParams optional SSL params to replace the default SSL context from the
+     * global network layer.
      */
     static Future<Handle> connect(const HostAndPort& peer,
                                   transport::ConnectSSLMode sslMode,

@@ -130,7 +130,7 @@ void ConnectionPool::ControllerInterface::init(ConnectionPool* pool) {
                 "pool"_attr = pool->_name,
                 "controller"_attr = name());
     _pool = pool;
-std::cerr << "!!!!! ControllerInterface::init " << pool->_name << std::endl;
+    std::cerr << "!!!!! ControllerInterface::init " << pool->_name << std::endl;
 }
 
 std::string ConnectionPool::ConnectionControls::toString() const {
@@ -467,8 +467,8 @@ ConnectionPool::ConnectionPool(std::shared_ptr<DependentTypeFactoryInterface> im
 
     invariant(_controller);
     _controller->init(this);
-std::cerr << "!!!!!! ConnectionPool created " << std::endl;
-printStackTrace();
+    std::cerr << "!!!!!! ConnectionPool created " << std::endl;
+    printStackTrace();
 }
 
 ConnectionPool::~ConnectionPool() {
@@ -1040,7 +1040,7 @@ void ConnectionPool::SpecificPool::spawnConnections() {
                 "connAllowance"_attr = allowance,
                 "hostAndPort"_attr = _hostAndPort);
 
-std::cerr << "!!!!!!! spawnConnections " << _hostAndPort << ", ssl " << _sslMode << std::endl;
+    std::cerr << "!!!!!!! spawnConnections " << _hostAndPort << ", ssl " << _sslMode << std::endl;
     for (decltype(allowance) i = 0; i < allowance; ++i) {
         OwnedConnection handle;
         try {

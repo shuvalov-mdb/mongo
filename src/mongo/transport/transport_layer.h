@@ -85,19 +85,21 @@ public:
 
     virtual ~TransportLayer() = default;
 
-    virtual StatusWith<SessionHandle> connect(HostAndPort peer,
-                                              ConnectSSLMode sslMode,
-                                              const boost::optional<TransientSSLParams>& transientSSLParams,
-                                              Milliseconds timeout) = 0;
+    virtual StatusWith<SessionHandle> connect(
+        HostAndPort peer,
+        ConnectSSLMode sslMode,
+        const boost::optional<TransientSSLParams>& transientSSLParams,
+        Milliseconds timeout) = 0;
 
     /**
-     * @param transientSSLParams optional params to override default SSL params - 
+     * @param transientSSLParams optional params to override default SSL params -
      */
-    virtual Future<SessionHandle> asyncConnect(HostAndPort peer,
-                                               ConnectSSLMode sslMode,
-                                               const boost::optional<TransientSSLParams>& transientSSLParams,
-                                               const ReactorHandle& reactor,
-                                               Milliseconds timeout) = 0;
+    virtual Future<SessionHandle> asyncConnect(
+        HostAndPort peer,
+        ConnectSSLMode sslMode,
+        const boost::optional<TransientSSLParams>& transientSSLParams,
+        const ReactorHandle& reactor,
+        Milliseconds timeout) = 0;
 
     /**
      * Start the TransportLayer. After this point, the TransportLayer will begin accepting active

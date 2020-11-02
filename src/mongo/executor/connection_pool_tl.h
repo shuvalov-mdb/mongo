@@ -35,6 +35,7 @@
 #include "mongo/executor/connection_pool.h"
 #include "mongo/executor/network_connection_hook.h"
 #include "mongo/executor/network_interface.h"
+#include "mongo/transport/ssl_connection_context.h"
 #include "mongo/util/future.h"
 #include "mongo/util/hierarchical_acquisition.h"
 
@@ -139,10 +140,10 @@ public:
                  ServiceContext* serviceContext,
                  HostAndPort peer,
                  transport::ConnectSSLMode sslMode,
-                 std::weak_ptr<const ConnectionPool::Options> connPoolOpts,
                  size_t generation,
                  NetworkConnectionHook* onConnectHook,
-                 bool skipAuth)
+                 bool skipAuth,
+                 std::shared_ptr<transport::SSLConnectionContext> sslContextOverride = nullptr)
         : ConnectionInterface(generation),
           TLTypeFactory::Type(factory),
           _reactor(reactor),
@@ -151,10 +152,10 @@ public:
           _skipAuth(skipAuth),
           _peer(std::move(peer)),
           _sslMode(sslMode),
-          _connectionPoolOptions(connPoolOpts),
-          _onConnectHook(onConnectHook) {
-std::cerr << "!!!!!! created TLConnection" << std::endl;
-          }
+          _onConnectHook(onConnectHook),
+          _sslContextOverride(sslContextOverride) {
+        std::cerr << "!!!!!! created TLConnection" << std::endl;
+    }
     ~TLConnection() {
         // Release must be the first expression of this dtor
         release();
@@ -191,8 +192,8 @@ private:
 
     HostAndPort _peer;
     transport::ConnectSSLMode _sslMode;
-    std::weak_ptr<const ConnectionPool::Options> _connectionPoolOptions;
     NetworkConnectionHook* const _onConnectHook;
+    std::shared_ptr<transport::SSLConnectionContext> _sslContextOverride;
     AsyncDBClient::Handle _client;
 };
 

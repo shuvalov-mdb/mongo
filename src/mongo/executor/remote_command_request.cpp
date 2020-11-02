@@ -54,15 +54,16 @@ AtomicWord<unsigned long long> requestIdCounter(0);
 
 constexpr Milliseconds RemoteCommandRequestBase::kNoTimeout;
 
-RemoteCommandRequestBase::RemoteCommandRequestBase(RequestId requestId,
-                                                   const std::string& theDbName,
-                                                   const BSONObj& theCmdObj,
-                                                   const BSONObj& metadataObj,
-                                                   OperationContext* opCtx,
-                                                   Milliseconds timeoutMillis,
-                                                   boost::optional<HedgeOptions> hedgeOptions,
-                                                   FireAndForgetMode fireAndForgetMode,
-                                                   boost::optional<TransientSSLParams> transientSSLParams)
+RemoteCommandRequestBase::RemoteCommandRequestBase(
+    RequestId requestId,
+    const std::string& theDbName,
+    const BSONObj& theCmdObj,
+    const BSONObj& metadataObj,
+    OperationContext* opCtx,
+    Milliseconds timeoutMillis,
+    boost::optional<HedgeOptions> hedgeOptions,
+    FireAndForgetMode fireAndForgetMode,
+    boost::optional<TransientSSLParams> transientSSLParams)
     : id(requestId),
       dbname(theDbName),
       metadata(metadataObj),
@@ -125,16 +126,17 @@ template <typename T>
 RemoteCommandRequestImpl<T>::RemoteCommandRequestImpl() = default;
 
 template <typename T>
-RemoteCommandRequestImpl<T>::RemoteCommandRequestImpl(RequestId requestId,
-                                                      const T& theTarget,
-                                                      const std::string& theDbName,
-                                                      const BSONObj& theCmdObj,
-                                                      const BSONObj& metadataObj,
-                                                      OperationContext* opCtx,
-                                                      Milliseconds timeoutMillis,
-                                                      boost::optional<HedgeOptions> hedgeOptions,
-                                                      FireAndForgetMode fireAndForgetMode,
-                                                      boost::optional<TransientSSLParams> transientSSLParams)
+RemoteCommandRequestImpl<T>::RemoteCommandRequestImpl(
+    RequestId requestId,
+    const T& theTarget,
+    const std::string& theDbName,
+    const BSONObj& theCmdObj,
+    const BSONObj& metadataObj,
+    OperationContext* opCtx,
+    Milliseconds timeoutMillis,
+    boost::optional<HedgeOptions> hedgeOptions,
+    FireAndForgetMode fireAndForgetMode,
+    boost::optional<TransientSSLParams> transientSSLParams)
     : RemoteCommandRequestBase(requestId,
                                theDbName,
                                theCmdObj,
@@ -151,15 +153,16 @@ RemoteCommandRequestImpl<T>::RemoteCommandRequestImpl(RequestId requestId,
 }
 
 template <typename T>
-RemoteCommandRequestImpl<T>::RemoteCommandRequestImpl(const T& theTarget,
-                                                      const std::string& theDbName,
-                                                      const BSONObj& theCmdObj,
-                                                      const BSONObj& metadataObj,
-                                                      OperationContext* opCtx,
-                                                      Milliseconds timeoutMillis,
-                                                      boost::optional<HedgeOptions> hedgeOptions,
-                                                      FireAndForgetMode fireAndForgetMode,
-                                                      boost::optional<TransientSSLParams> transientSSLParams)
+RemoteCommandRequestImpl<T>::RemoteCommandRequestImpl(
+    const T& theTarget,
+    const std::string& theDbName,
+    const BSONObj& theCmdObj,
+    const BSONObj& metadataObj,
+    OperationContext* opCtx,
+    Milliseconds timeoutMillis,
+    boost::optional<HedgeOptions> hedgeOptions,
+    FireAndForgetMode fireAndForgetMode,
+    boost::optional<TransientSSLParams> transientSSLParams)
     : RemoteCommandRequestImpl(requestIdCounter.addAndFetch(1),
                                theTarget,
                                theDbName,

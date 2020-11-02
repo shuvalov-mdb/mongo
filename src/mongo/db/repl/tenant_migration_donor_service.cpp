@@ -465,7 +465,7 @@ ExecutorFuture<void> TenantMigrationDonorService::Instance::_sendRecipientForget
 
 void TenantMigrationDonorService::Instance::run(
     std::shared_ptr<executor::ScopedTaskExecutor> executor) noexcept {
-        std::cerr << "!!!!!!!!!! start TenantMigrationDonorService::Instance::run" << std::endl;
+    std::cerr << "!!!!!!!!!! start TenantMigrationDonorService::Instance::run" << std::endl;
     auto recipientUri =
         uassertStatusOK(MongoURI::parse(_stateDoc.getRecipientConnectionString().toString()));
     auto recipientTargeterRS = std::shared_ptr<RemoteCommandTargeterRS>(
@@ -566,7 +566,7 @@ void TenantMigrationDonorService::Instance::run(
             }
         })
         .onCompletion([this, self = shared_from_this()](Status status) {
-           std::cerr << "!!!!!!!!!! done TenantMigrationDonorService::Instance::run" << std::endl;
+            std::cerr << "!!!!!!!!!! done TenantMigrationDonorService::Instance::run" << std::endl;
             LOGV2(5006601,
                   "Tenant migration completed",
                   "migrationId"_attr = _stateDoc.getId(),

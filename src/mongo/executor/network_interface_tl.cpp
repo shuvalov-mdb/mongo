@@ -112,8 +112,9 @@ NetworkInterfaceTL::NetworkInterfaceTL(std::string instanceName,
       _onConnectHook(std::move(onConnectHook)),
       _metadataHook(std::move(metadataHook)),
       _state(kDefault) {
-std::cerr << "!!!!!!! NetworkInterfaceTL " << instanceName << " has _svcCtx: " << (_svcCtx != nullptr)
-<< ", has transport: " << (_svcCtx != nullptr && _svcCtx->getTransportLayer() != nullptr) << std::endl;
+    std::cerr << "!!!!!!! NetworkInterfaceTL " << instanceName
+              << " has _svcCtx: " << (_svcCtx != nullptr) << ", has transport: "
+              << (_svcCtx != nullptr && _svcCtx->getTransportLayer() != nullptr) << std::endl;
     if (_svcCtx) {
         _tl = _svcCtx->getTransportLayer();
     }
@@ -124,6 +125,13 @@ std::cerr << "!!!!!!! NetworkInterfaceTL " << instanceName << " has _svcCtx: " <
         _ownedTransportLayer =
             transport::TransportLayerManager::makeAndStartDefaultEgressTransportLayer();
         _tl = _ownedTransportLayer.get();
+    }
+
+    TransportLayerASIO::SSLConnectionContext sslContext;
+    if (_connPoolOpts->transientSSLParams) {
+        auto statusOrContext = _tl->createTransientSSLContext(_connPoolOpts->transientSSLParams.get(), nullptr, true /* asyncOCSPStaple */);
+        uassertStatusOK(statusOrContext.getStatus());
+        sslContext = statusOrContext.getValue();
     }
 
     _reactor = _tl->getReactor(transport::TransportLayer::kNewReactor);

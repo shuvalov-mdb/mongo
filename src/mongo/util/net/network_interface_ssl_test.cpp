@@ -59,8 +59,7 @@ public:
             params.targetedClusterConnectionString = ConnectionString::forLocal();
             return params;
         }());
-        LOGV2(5181101,
-              "Initializing the test connection with transient SSL params");
+        LOGV2(5181101, "Initializing the test connection with transient SSL params");
         createNet(nullptr, std::move(options));
         net().startup();
     }

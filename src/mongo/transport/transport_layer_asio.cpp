@@ -69,7 +69,7 @@
 
 #include "mongo/transport/session_asio.h"
 
-#include "mongo/util/stacktrace.h"//tmp
+#include "mongo/util/stacktrace.h"  //tmp
 
 namespace mongo {
 namespace transport {
@@ -268,9 +268,9 @@ TransportLayerASIO::TransportLayerASIO(const TransportLayerASIO::Options& opts,
       _acceptorReactor(std::make_shared<ASIOReactor>()),
       _sep(sep),
       _listenerOptions(opts) {
-std::cerr << "!!!!!!! TransportLayerASIO created " << (void*)this << std::endl;
-printStackTrace();
-      }
+    std::cerr << "!!!!!!! TransportLayerASIO created " << (void*)this << std::endl;
+    printStackTrace();
+}
 
 TransportLayerASIO::~TransportLayerASIO() = default;
 
@@ -454,12 +454,13 @@ Status makeConnectError(Status status, const HostAndPort& peer, const WrappedEnd
 }
 
 
-StatusWith<SessionHandle> TransportLayerASIO::connect(HostAndPort peer,
-                                                      ConnectSSLMode sslMode,
-                                                      const boost::optional<TransientSSLParams>& transientSSLParams,
-                                                      Milliseconds timeout) {
-std::cerr << "!!!! connect " << peer << std::endl;
-printStackTrace();//tmp
+StatusWith<SessionHandle> TransportLayerASIO::connect(
+    HostAndPort peer,
+    ConnectSSLMode sslMode,
+    const boost::optional<TransientSSLParams>& transientSSLParams,
+    Milliseconds timeout) {
+    std::cerr << "!!!! connect " << peer << std::endl;
+    printStackTrace();  // tmp
     std::error_code ec;
     GenericSocket sock(*_egressReactor);
     WrappedResolver resolver(*_egressReactor);
@@ -519,8 +520,8 @@ printStackTrace();//tmp
 template <typename Endpoint>
 StatusWith<TransportLayerASIO::ASIOSessionHandle> TransportLayerASIO::_doSyncConnect(
     Endpoint endpoint, const HostAndPort& peer, const Milliseconds& timeout) {
-std::cerr << "!!!! doSyncConnect " << peer << std::endl;
-printStackTrace();//tmp
+    std::cerr << "!!!! doSyncConnect " << peer << std::endl;
+    printStackTrace();  // tmp
     GenericSocket sock(*_egressReactor);
     std::error_code ec;
 
@@ -574,13 +575,14 @@ printStackTrace();//tmp
     }
 }
 
-Future<SessionHandle> TransportLayerASIO::asyncConnect(HostAndPort peer,
-                                                       ConnectSSLMode sslMode,
-                                                       const boost::optional<TransientSSLParams>& transientSSLParams,
-                                                       const ReactorHandle& reactor,
-                                                       Milliseconds timeout) {
-std::cerr << "!!!! asyncConnect " << peer << std::endl;
-printStackTrace();//tmp
+Future<SessionHandle> TransportLayerASIO::asyncConnect(
+    HostAndPort peer,
+    ConnectSSLMode sslMode,
+    const boost::optional<TransientSSLParams>& transientSSLParams,
+    const ReactorHandle& reactor,
+    Milliseconds timeout) {
+    std::cerr << "!!!! asyncConnect " << peer << std::endl;
+    printStackTrace();  // tmp
 
     struct AsyncConnectState {
         AsyncConnectState(HostAndPort peer,
@@ -1197,15 +1199,31 @@ SSLParams::SSLModes TransportLayerASIO::_sslMode() const {
 
 Status TransportLayerASIO::rotateCertificates(std::shared_ptr<SSLManagerInterface> manager,
                                               bool asyncOCSPStaple) {
-    auto newSSLContext = std::make_shared<SSLConnectionContext>();
-    newSSLContext->manager = manager;
+
+    auto contextOrStatus =
+        _createSSLContext(manager, _sslMode(), TransientSSLParams(), asyncOCSPStaple);
+    if (!contextOrStatus.isOK()) {
+        return contextOrStatus.getStatus();
+    }
+    _sslContext = std::make_shared<SSLConnectionContext>(std::move(contextOrStatus.getValue()));
+    return Status::OK();
+}
+
+StatusWith<TransportLayerASIO::SSLConnectionContext> TransportLayerASIO::_createSSLContext(
+    std::shared_ptr<SSLManagerInterface>& manager,
+    SSLParams::SSLModes sslMode,
+    TransientSSLParams transientSSLParams,
+    bool asyncOCSPStaple) const {
+
+    SSLConnectionContext newSSLContext;
+    newSSLContext.manager = manager;
     const auto& sslParams = getSSLGlobalParams();
 
-    if (_sslMode() != SSLParams::SSLMode_disabled && _listenerOptions.isIngress()) {
-        newSSLContext->ingress = std::make_unique<asio::ssl::context>(asio::ssl::context::sslv23);
+    if (sslMode != SSLParams::SSLMode_disabled && _listenerOptions.isIngress()) {
+        newSSLContext.ingress = std::make_unique<asio::ssl::context>(asio::ssl::context::sslv23);
 
-        Status status = newSSLContext->manager->initSSLContext(
-            newSSLContext->ingress->native_handle(),
+        Status status = newSSLContext.manager->initSSLContext(
+            newSSLContext.ingress->native_handle(),
             sslParams,
             TransientSSLParams(),
             SSLManagerInterface::ConnectionDirection::kIncoming);
@@ -1213,8 +1231,8 @@ Status TransportLayerASIO::rotateCertificates(std::shared_ptr<SSLManagerInterfac
             return status;
         }
 
-        auto resp = newSSLContext->manager->stapleOCSPResponse(
-            newSSLContext->ingress->native_handle(), asyncOCSPStaple);
+        auto resp = newSSLContext.manager->stapleOCSPResponse(
+            newSSLContext.ingress->native_handle(), asyncOCSPStaple);
 
         if (!resp.isOK()) {
             return Status(ErrorCodes::InvalidSSLConfiguration,
@@ -1223,10 +1241,10 @@ Status TransportLayerASIO::rotateCertificates(std::shared_ptr<SSLManagerInterfac
         }
     }
 
-    if (_listenerOptions.isEgress() && newSSLContext->manager) {
-        newSSLContext->egress = std::make_unique<asio::ssl::context>(asio::ssl::context::sslv23);
-        Status status = newSSLContext->manager->initSSLContext(
-            newSSLContext->egress->native_handle(),
+    if (_listenerOptions.isEgress() && newSSLContext.manager) {
+        newSSLContext.egress = std::make_unique<asio::ssl::context>(asio::ssl::context::sslv23);
+        Status status = newSSLContext.manager->initSSLContext(
+            newSSLContext.egress->native_handle(),
             sslParams,
             TransientSSLParams(),
             SSLManagerInterface::ConnectionDirection::kOutgoing);
@@ -1234,14 +1252,20 @@ Status TransportLayerASIO::rotateCertificates(std::shared_ptr<SSLManagerInterfac
             return status;
         }
     }
-    _sslContext = std::move(newSSLContext);
-    return Status::OK();
+    return std::move(newSSLContext);
 }
 
 StatusWith<TransportLayerASIO::SSLConnectionContext> TransportLayerASIO::createTransientSSLContext(
     const TransientSSLParams& transientSSLParams,
-    const SSLManagerInterface* optionalManager) const {
-    return TransportLayerASIO::SSLConnectionContext();
+    const SSLManagerInterface* optionalManager,
+    bool asyncOCSPStaple) {
+
+    auto manager = getSSLManager();
+    if (!manager) {
+        return Status(ErrorCodes::InvalidSSLConfiguration, "TransportLayerASIO has no SSL manager");
+    }
+
+    return _createSSLContext(manager, _sslMode(), transientSSLParams, asyncOCSPStaple);
 }
 
 #endif

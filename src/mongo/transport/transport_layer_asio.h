@@ -133,11 +133,12 @@ public:
                                       const boost::optional<TransientSSLParams>& transientSSLParams,
                                       Milliseconds timeout) final;
 
-    Future<SessionHandle> asyncConnect(HostAndPort peer,
-                                       ConnectSSLMode sslMode,
-                                       const boost::optional<TransientSSLParams>& transientSSLParams,
-                                       const ReactorHandle& reactor,
-                                       Milliseconds timeout) final;
+    Future<SessionHandle> asyncConnect(
+        HostAndPort peer,
+        ConnectSSLMode sslMode,
+        const boost::optional<TransientSSLParams>& transientSSLParams,
+        const ReactorHandle& reactor,
+        Milliseconds timeout) final;
 
     Status setup() final;
 
@@ -164,13 +165,15 @@ public:
     }
 
     /**
-     * Creates a transient SSL context using targeted (non default) SSL params. 
+     * Creates a transient SSL context using targeted (non default) SSL params.
      * @param transientSSLParams overrides any value in stored SSLConnectionContext.
-     * @param optionalManager provides an optional SSL manager, otherwise the default one will be used.
+     * @param optionalManager provides an optional SSL manager, otherwise the default one will be
+     * used.
      */
     StatusWith<TransportLayerASIO::SSLConnectionContext> createTransientSSLContext(
         const TransientSSLParams& transientSSLParams,
-        const SSLManagerInterface* optionalManager) const;
+        const SSLManagerInterface* optionalManager,
+        bool asyncOCSPStaple);
 #endif
 
 private:
@@ -188,6 +191,12 @@ private:
     StatusWith<ASIOSessionHandle> _doSyncConnect(Endpoint endpoint,
                                                  const HostAndPort& peer,
                                                  const Milliseconds& timeout);
+
+    StatusWith<TransportLayerASIO::SSLConnectionContext> _createSSLContext(
+        std::shared_ptr<SSLManagerInterface>& manager,
+        SSLParams::SSLModes sslMode,
+        TransientSSLParams transientSSLParams,
+        bool asyncOCSPStaple) const;
 
     void _runListener() noexcept;
 

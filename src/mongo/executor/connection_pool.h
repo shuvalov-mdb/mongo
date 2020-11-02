@@ -153,8 +153,8 @@ public:
 
 #ifdef MONGO_CONFIG_SSL
         /**
-         * Provides SSL params if the egress cluster connection requires custom SSL certificates different from the
-         * global (default) certificates.
+         * Provides SSL params if the egress cluster connection requires custom SSL certificates
+         * different from the global (default) certificates.
          */
         boost::optional<TransientSSLParams> transientSSLParams;
 #endif

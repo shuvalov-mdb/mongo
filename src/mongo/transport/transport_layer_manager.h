@@ -67,11 +67,12 @@ public:
                                       ConnectSSLMode sslMode,
                                       const boost::optional<TransientSSLParams>& transientSSLParams,
                                       Milliseconds timeout) override;
-    Future<SessionHandle> asyncConnect(HostAndPort peer,
-                                       ConnectSSLMode sslMode,
-                                       const boost::optional<TransientSSLParams>& transientSSLParams,
-                                       const ReactorHandle& reactor,
-                                       Milliseconds timeout) override;
+    Future<SessionHandle> asyncConnect(
+        HostAndPort peer,
+        ConnectSSLMode sslMode,
+        const boost::optional<TransientSSLParams>& transientSSLParams,
+        const ReactorHandle& reactor,
+        Milliseconds timeout) override;
 
     Status start() override;
     void shutdown() override;
