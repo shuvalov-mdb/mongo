@@ -41,9 +41,11 @@
 #include "mongo/stdx/thread.h"
 #include "mongo/stdx/unordered_map.h"
 #include "mongo/transport/baton.h"
+#include "mongo/transport/ssl_connection_context.h"
 #include "mongo/transport/transport_layer.h"
 #include "mongo/util/hierarchical_acquisition.h"
 #include "mongo/util/strong_weak_finish_line.h"
+
 
 namespace mongo {
 namespace executor {
@@ -342,7 +344,7 @@ private:
 
     mutable Mutex _mutex =
         MONGO_MAKE_LATCH(HierarchicalAcquisitionLevel(3), "NetworkInterfaceTL::_mutex");
-    std::shared_ptr<const ConnectionPool::Options> _connPoolOpts;
+    const ConnectionPool::Options _connPoolOpts;
     std::unique_ptr<NetworkConnectionHook> _onConnectHook;
     std::shared_ptr<ConnectionPool> _pool;
 

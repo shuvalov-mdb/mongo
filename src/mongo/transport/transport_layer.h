@@ -86,23 +86,21 @@ public:
 
     virtual ~TransportLayer() = default;
 
-<<<<<<< HEAD
-    virtual StatusWith<SessionHandle> connect(
-        HostAndPort peer,
-        ConnectSSLMode sslMode,
-        const boost::optional<TransientSSLParams>& transientSSLParams,
-        Milliseconds timeout) = 0;
+    // virtual StatusWith<SessionHandle> connect(
+    //     HostAndPort peer,
+    //     ConnectSSLMode sslMode,
+    //     const boost::optional<TransientSSLParams>& transientSSLParams,
+    //     Milliseconds timeout) = 0;
 
-    /**
-     * @param transientSSLParams optional params to override default SSL params -
-     */
-    virtual Future<SessionHandle> asyncConnect(
-        HostAndPort peer,
-        ConnectSSLMode sslMode,
-        const boost::optional<TransientSSLParams>& transientSSLParams,
-        const ReactorHandle& reactor,
-        Milliseconds timeout) = 0;
-=======
+    // /**
+    //  * @param transientSSLParams optional params to override default SSL params -
+    //  */
+    // virtual Future<SessionHandle> asyncConnect(
+    //     HostAndPort peer,
+    //     ConnectSSLMode sslMode,
+    //     const boost::optional<TransientSSLParams>& transientSSLParams,
+    //     const ReactorHandle& reactor,
+    //     Milliseconds timeout) = 0;
     virtual StatusWith<SessionHandle> connect(HostAndPort peer,
                                               ConnectSSLMode sslMode,
                                               Milliseconds timeout) = 0;
@@ -113,7 +111,6 @@ public:
         const ReactorHandle& reactor,
         Milliseconds timeout,
         std::shared_ptr<SSLConnectionContext> sslContextOverride) = 0;
->>>>>>> master
 
     /**
      * Start the TransportLayer. After this point, the TransportLayer will begin accepting active
@@ -151,6 +148,17 @@ public:
     /** Rotate the in-use certificates for new connections. */
     virtual Status rotateCertificates(std::shared_ptr<SSLManagerInterface> manager,
                                       bool asyncOCSPStaple) = 0;
+
+    /**
+     * Creates a transient SSL context using targeted (non default) SSL params.
+     * @param transientSSLParams overrides any value in stored SSLConnectionContext.
+     * @param optionalManager provides an optional SSL manager, otherwise the default one will be
+     * used.
+     */
+    virtual StatusWith<transport::SSLConnectionContext> createTransientSSLContext(
+        const TransientSSLParams& transientSSLParams,
+        const SSLManagerInterface* optionalManager,
+        bool asyncOCSPStaple) = 0;
 #endif
 
 private:

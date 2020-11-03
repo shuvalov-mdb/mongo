@@ -36,6 +36,7 @@
 #include "mongo/executor/network_connection_hook.h"
 #include "mongo/executor/network_interface.h"
 #include "mongo/transport/ssl_connection_context.h"
+#include "mongo/transport/transport_layer.h"
 #include "mongo/util/future.h"
 #include "mongo/util/hierarchical_acquisition.h"
 
@@ -51,7 +52,7 @@ public:
     TLTypeFactory(transport::ReactorHandle reactor,
                   transport::TransportLayer* tl,
                   std::unique_ptr<NetworkConnectionHook> onConnectHook,
-                  std::shared_ptr<const ConnectionPool::Options> connPoolOptions)
+                  const ConnectionPool::Options& connPoolOptions)
         : _executor(std::move(reactor)),
           _tl(tl),
           _onConnectHook(std::move(onConnectHook)),
@@ -80,7 +81,7 @@ private:
     transport::TransportLayer* _tl;
     std::unique_ptr<NetworkConnectionHook> _onConnectHook;
     // Options originated from instance of NetworkInterfaceTL.
-    std::shared_ptr<const ConnectionPool::Options> _connPoolOptions;
+    ConnectionPool::Options _connPoolOptions;
 
     mutable Mutex _mutex =
         MONGO_MAKE_LATCH(HierarchicalAcquisitionLevel(0), "TLTypeFactory::_mutex");
@@ -153,13 +154,10 @@ public:
           _peer(std::move(peer)),
           _sslMode(sslMode),
           _onConnectHook(onConnectHook),
-<<<<<<< HEAD
           _sslContextOverride(sslContextOverride) {
         std::cerr << "!!!!!! created TLConnection" << std::endl;
     }
-=======
-          _sslContextOverride(sslContextOverride) {}
->>>>>>> master
+
     ~TLConnection() {
         // Release must be the first expression of this dtor
         release();

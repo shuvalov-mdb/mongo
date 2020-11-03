@@ -108,7 +108,7 @@ NetworkInterfaceTL::NetworkInterfaceTL(std::string instanceName,
                                        std::unique_ptr<rpc::EgressMetadataHook> metadataHook)
     : _instanceName(std::move(instanceName)),
       _svcCtx(svcCtx),
-      _connPoolOpts(std::make_shared<const ConnectionPool::Options>(std::move(connPoolOpts))),
+      _connPoolOpts(connPoolOpts),
       _onConnectHook(std::move(onConnectHook)),
       _metadataHook(std::move(metadataHook)),
       _state(kDefault) {
@@ -127,11 +127,11 @@ NetworkInterfaceTL::NetworkInterfaceTL(std::string instanceName,
         _tl = _ownedTransportLayer.get();
     }
 
-    TransportLayerASIO::SSLConnectionContext sslContext;
-    if (_connPoolOpts->transientSSLParams) {
-        auto statusOrContext = _tl->createTransientSSLContext(_connPoolOpts->transientSSLParams.get(), nullptr, true /* asyncOCSPStaple */);
+    transport::SSLConnectionContext sslContext;
+    if (_connPoolOpts.transientSSLParams) {
+        auto statusOrContext = _tl->createTransientSSLContext(_connPoolOpts.transientSSLParams.get(), nullptr, true /* asyncOCSPStaple */);
         uassertStatusOK(statusOrContext.getStatus());
-        sslContext = statusOrContext.getValue();
+        sslContext = std::move(statusOrContext.getValue());
     }
 
     _reactor = _tl->getReactor(transport::TransportLayer::kNewReactor);

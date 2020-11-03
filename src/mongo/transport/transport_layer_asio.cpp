@@ -578,17 +578,9 @@ StatusWith<TransportLayerASIO::ASIOSessionHandle> TransportLayerASIO::_doSyncCon
 Future<SessionHandle> TransportLayerASIO::asyncConnect(
     HostAndPort peer,
     ConnectSSLMode sslMode,
-<<<<<<< HEAD
-    const boost::optional<TransientSSLParams>& transientSSLParams,
-    const ReactorHandle& reactor,
-    Milliseconds timeout) {
-    std::cerr << "!!!! asyncConnect " << peer << std::endl;
-    printStackTrace();  // tmp
-=======
     const ReactorHandle& reactor,
     Milliseconds timeout,
     std::shared_ptr<SSLConnectionContext> sslContextOverride) {
->>>>>>> master
 
     struct AsyncConnectState {
         AsyncConnectState(HostAndPort peer,
@@ -1218,7 +1210,7 @@ Status TransportLayerASIO::rotateCertificates(std::shared_ptr<SSLManagerInterfac
     return Status::OK();
 }
 
-StatusWith<TransportLayerASIO::SSLConnectionContext> TransportLayerASIO::_createSSLContext(
+StatusWith<transport::SSLConnectionContext> TransportLayerASIO::_createSSLContext(
     std::shared_ptr<SSLManagerInterface>& manager,
     SSLParams::SSLModes sslMode,
     TransientSSLParams transientSSLParams,
@@ -1264,7 +1256,7 @@ StatusWith<TransportLayerASIO::SSLConnectionContext> TransportLayerASIO::_create
     return std::move(newSSLContext);
 }
 
-StatusWith<TransportLayerASIO::SSLConnectionContext> TransportLayerASIO::createTransientSSLContext(
+StatusWith<transport::SSLConnectionContext> TransportLayerASIO::createTransientSSLContext(
     const TransientSSLParams& transientSSLParams,
     const SSLManagerInterface* optionalManager,
     bool asyncOCSPStaple) {

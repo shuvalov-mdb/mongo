@@ -114,14 +114,6 @@ public:
         size_t maxConns = DEFAULT_MAX_CONN;       // maximum number of active connections
     };
 
-#ifdef MONGO_CONFIG_SSL
-    struct SSLConnectionContext {
-        std::unique_ptr<asio::ssl::context> ingress;
-        std::unique_ptr<asio::ssl::context> egress;
-        std::shared_ptr<SSLManagerInterface> manager;
-    };
-#endif
-
     TransportLayerASIO(const Options& opts,
                        ServiceEntryPoint* sep,
                        const WireSpec& wireSpec = WireSpec::instance());
@@ -130,21 +122,14 @@ public:
 
     StatusWith<SessionHandle> connect(HostAndPort peer,
                                       ConnectSSLMode sslMode,
-                                      const boost::optional<TransientSSLParams>& transientSSLParams,
                                       Milliseconds timeout) final;
 
     Future<SessionHandle> asyncConnect(
         HostAndPort peer,
         ConnectSSLMode sslMode,
-<<<<<<< HEAD
-        const boost::optional<TransientSSLParams>& transientSSLParams,
-        const ReactorHandle& reactor,
-        Milliseconds timeout) final;
-=======
         const ReactorHandle& reactor,
         Milliseconds timeout,
         std::shared_ptr<SSLConnectionContext> sslContextOverride = nullptr) final;
->>>>>>> master
 
     Status setup() final;
 
@@ -176,10 +161,10 @@ public:
      * @param optionalManager provides an optional SSL manager, otherwise the default one will be
      * used.
      */
-    StatusWith<TransportLayerASIO::SSLConnectionContext> createTransientSSLContext(
+    StatusWith<transport::SSLConnectionContext> createTransientSSLContext(
         const TransientSSLParams& transientSSLParams,
         const SSLManagerInterface* optionalManager,
-        bool asyncOCSPStaple);
+        bool asyncOCSPStaple) override;
 #endif
 
 private:
@@ -198,7 +183,7 @@ private:
                                                  const HostAndPort& peer,
                                                  const Milliseconds& timeout);
 
-    StatusWith<TransportLayerASIO::SSLConnectionContext> _createSSLContext(
+    StatusWith<transport::SSLConnectionContext> _createSSLContext(
         std::shared_ptr<SSLManagerInterface>& manager,
         SSLParams::SSLModes sslMode,
         TransientSSLParams transientSSLParams,

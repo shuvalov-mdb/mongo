@@ -45,6 +45,7 @@
 #include "mongo/transport/service_executor_synchronous.h"
 #include "mongo/transport/session.h"
 #include "mongo/transport/transport_layer_asio.h"
+#include "mongo/util/net/ssl/context.hpp"
 #include "mongo/util/net/ssl_types.h"
 #include "mongo/util/time_support.h"
 
@@ -64,25 +65,17 @@ void TransportLayerManager::_foreach(Callable&& cb) const {
 StatusWith<SessionHandle> TransportLayerManager::connect(
     HostAndPort peer,
     ConnectSSLMode sslMode,
-    const boost::optional<TransientSSLParams>& transientSSLParams,
     Milliseconds timeout) {
-    return _tls.front()->connect(peer, sslMode, transientSSLParams, timeout);
+    return _tls.front()->connect(peer, sslMode, timeout);
 }
 
 Future<SessionHandle> TransportLayerManager::asyncConnect(
     HostAndPort peer,
     ConnectSSLMode sslMode,
-<<<<<<< HEAD
-    const boost::optional<TransientSSLParams>& transientSSLParams,
-    const ReactorHandle& reactor,
-    Milliseconds timeout) {
-    return _tls.front()->asyncConnect(peer, sslMode, transientSSLParams, reactor, timeout);
-=======
     const ReactorHandle& reactor,
     Milliseconds timeout,
     std::shared_ptr<SSLConnectionContext> sslContextOverride) {
     return _tls.front()->asyncConnect(peer, sslMode, reactor, timeout, sslContextOverride);
->>>>>>> master
 }
 
 ReactorHandle TransportLayerManager::getReactor(WhichReactor which) {
@@ -165,6 +158,24 @@ Status TransportLayerManager::rotateCertificates(std::shared_ptr<SSLManagerInter
     }
     return Status::OK();
 }
+
+StatusWith<transport::SSLConnectionContext> TransportLayerManager::createTransientSSLContext(
+    const TransientSSLParams& transientSSLParams,
+    const SSLManagerInterface* optionalManager,
+    bool asyncOCSPStaple) {
+
+    Status firstError(ErrorCodes::InvalidSSLConfiguration,
+                      "Failure creating transient SSL context");
+    for (auto&& tl : _tls) {
+        auto status = tl->createTransientSSLContext(transientSSLParams, optionalManager, asyncOCSPStaple);
+        if (!status.isOK()) {
+            return status;
+        }
+        firstError = status.getStatus();
+    }
+    return firstError;
+}
+
 #endif
 
 }  // namespace transport

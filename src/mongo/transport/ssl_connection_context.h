@@ -50,8 +50,11 @@ namespace transport {
 
 #ifdef MONGO_CONFIG_SSL
 struct SSLConnectionContext {
-    std::unique_ptr<asio::ssl::context> ingress;
-    std::unique_ptr<asio::ssl::context> egress;
+    // Custom deleter is provided to make this class to compile even if
+    // asio::ssl::context is incomplete type.
+    using UniqueAsioSslContext = std::unique_ptr<asio::ssl::context, std::function<void(asio::ssl::context*)>>;
+    UniqueAsioSslContext ingress;
+    UniqueAsioSslContext egress;
     std::shared_ptr<SSLManagerInterface> manager;
 };
 #endif

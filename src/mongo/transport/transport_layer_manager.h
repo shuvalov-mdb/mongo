@@ -65,20 +65,13 @@ public:
 
     StatusWith<SessionHandle> connect(HostAndPort peer,
                                       ConnectSSLMode sslMode,
-                                      const boost::optional<TransientSSLParams>& transientSSLParams,
                                       Milliseconds timeout) override;
     Future<SessionHandle> asyncConnect(
         HostAndPort peer,
         ConnectSSLMode sslMode,
-<<<<<<< HEAD
-        const boost::optional<TransientSSLParams>& transientSSLParams,
-        const ReactorHandle& reactor,
-        Milliseconds timeout) override;
-=======
         const ReactorHandle& reactor,
         Milliseconds timeout,
         std::shared_ptr<SSLConnectionContext> sslContextOverride = nullptr) override;
->>>>>>> master
 
     Status start() override;
     void shutdown() override;
@@ -114,6 +107,11 @@ public:
 #ifdef MONGO_CONFIG_SSL
     Status rotateCertificates(std::shared_ptr<SSLManagerInterface> manager,
                               bool asyncOCSPStaple) override;
+
+    StatusWith<transport::SSLConnectionContext> createTransientSSLContext(
+        const TransientSSLParams& transientSSLParams,
+        const SSLManagerInterface* optionalManager,
+        bool asyncOCSPStaple) override;
 #endif
 private:
     template <typename Callable>
