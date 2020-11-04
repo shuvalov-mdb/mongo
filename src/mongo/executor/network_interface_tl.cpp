@@ -127,18 +127,22 @@ NetworkInterfaceTL::NetworkInterfaceTL(std::string instanceName,
         _tl = _ownedTransportLayer.get();
     }
 
-    transport::SSLConnectionContext sslContext;
+    std::shared_ptr<const transport::SSLConnectionContext> transientSslContext{};
     if (_connPoolOpts.transientSSLParams) {
-        auto statusOrContext = _tl->createTransientSSLContext(_connPoolOpts.transientSSLParams.get(), nullptr, true /* asyncOCSPStaple */);
+        auto statusOrContext = _tl->createTransientSSLContext(
+            _connPoolOpts.transientSSLParams.get(), nullptr, true /* asyncOCSPStaple */);
         uassertStatusOK(statusOrContext.getStatus());
-        sslContext = std::move(statusOrContext.getValue());
+        transientSslContext = std::make_shared<const transport::SSLConnectionContext>(
+            std::move(statusOrContext.getValue()));
     }
 
     _reactor = _tl->getReactor(transport::TransportLayer::kNewReactor);
     auto typeFactory = std::make_unique<connection_pool_tl::TLTypeFactory>(
         _reactor, _tl, std::move(_onConnectHook), _connPoolOpts);
-    _pool = std::make_shared<ConnectionPool>(
-        std::move(typeFactory), std::string("NetworkInterfaceTL-") + _instanceName, _connPoolOpts);
+    _pool = std::make_shared<ConnectionPool>(std::move(typeFactory),
+                                             std::string("NetworkInterfaceTL-") + _instanceName,
+                                             _connPoolOpts,
+                                             transientSslContext);
 
     if (TestingProctor::instance().isEnabled()) {
         _counters = std::make_unique<SynchronizedCounters>();
@@ -549,6 +553,7 @@ Status NetworkInterfaceTL::startCommand(const TaskExecutor::CallbackHandle& cbHa
 
     // Attempt to get a connection to every target host
     for (size_t idx = 0; idx < request.target.size(); ++idx) {
+        //???
         auto connFuture = _pool->get(request.target[idx], request.sslMode, request.timeout);
 
         // If connection future is ready or requests should be sent in order, send the request

@@ -411,7 +411,7 @@ Status DBClientConnection::connectSocketOnly(const HostAndPort& serverAddress) {
     auto sws = getGlobalServiceContext()->getTransportLayer()->connect(
         serverAddress,
         _uri.getSSLMode(),
-        //boost::optional<TransientSSLParams>(),
+        // boost::optional<TransientSSLParams>(),
         _socketTimeout.value_or(Milliseconds{5000}));
     if (!sws.isOK()) {
         return Status(ErrorCodes::HostUnreachable,

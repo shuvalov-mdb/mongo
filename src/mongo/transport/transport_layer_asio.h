@@ -129,7 +129,7 @@ public:
         ConnectSSLMode sslMode,
         const ReactorHandle& reactor,
         Milliseconds timeout,
-        std::shared_ptr<SSLConnectionContext> sslContextOverride = nullptr) final;
+        std::shared_ptr<const SSLConnectionContext> sslContextOverride = nullptr) final;
 
     Status setup() final;
 
@@ -186,7 +186,7 @@ private:
     StatusWith<transport::SSLConnectionContext> _createSSLContext(
         std::shared_ptr<SSLManagerInterface>& manager,
         SSLParams::SSLModes sslMode,
-        TransientSSLParams transientSSLParams,
+        TransientSSLParams transientEgressSSLParams,
         bool asyncOCSPStaple) const;
 
     void _runListener() noexcept;
@@ -224,7 +224,7 @@ private:
     std::shared_ptr<ASIOReactor> _acceptorReactor;
 
 #ifdef MONGO_CONFIG_SSL
-    synchronized_value<std::shared_ptr<SSLConnectionContext>> _sslContext;
+    std::shared_ptr<const SSLConnectionContext> _sslContext;
 #endif
 
     std::vector<std::pair<SockAddr, GenericAcceptor>> _acceptors;

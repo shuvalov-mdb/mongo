@@ -52,6 +52,7 @@ std::string LoadFile(const std::string& name) {
 class NetworkInterfaceSSLFixture : public NetworkInterfaceIntegrationFixture {
 public:
     void setUp() final {
+        std::cerr << "\n!!!!!!!!!!!!! -------- setup test \n" << std::endl;
         ConnectionPool::Options options;
         options.transientSSLParams.emplace([] {
             TransientSSLParams params;

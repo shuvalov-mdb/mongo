@@ -160,8 +160,8 @@ public:
         stdx::lock_guard lk(_mutex);
         auto& data = getOrInvariant(_poolData, id);
 
-        const auto minConns = getPool()->_options->minConnections;
-        const auto maxConns = getPool()->_options->maxConnections;
+        const auto minConns = getPool()->_options.minConnections;
+        const auto maxConns = getPool()->_options.maxConnections;
 
         data.target = stats.requests + stats.active;
         if (data.target < minConns) {
@@ -182,19 +182,19 @@ public:
         const auto& data = getOrInvariant(_poolData, id);
 
         return {
-            getPool()->_options->maxConnecting,
+            getPool()->_options.maxConnecting,
             data.target,
         };
     }
 
     Milliseconds hostTimeout() const override {
-        return getPool()->_options->hostTimeout;
+        return getPool()->_options.hostTimeout;
     }
     Milliseconds pendingTimeout() const override {
-        return getPool()->_options->refreshTimeout;
+        return getPool()->_options.refreshTimeout;
     }
     Milliseconds toRefreshTimeout() const override {
-        return getPool()->_options->refreshRequirement;
+        return getPool()->_options.refreshRequirement;
     }
 
     StringData name() const override {
@@ -453,14 +453,17 @@ auto ConnectionPool::SpecificPool::make(std::shared_ptr<ConnectionPool> parent,
 const Status ConnectionPool::kConnectionStateUnknown =
     Status(ErrorCodes::InternalError, "Connection is in an unknown state");
 
-ConnectionPool::ConnectionPool(std::shared_ptr<DependentTypeFactoryInterface> impl,
-                               std::string name,
-                               std::shared_ptr<const Options> options)
+ConnectionPool::ConnectionPool(
+    std::shared_ptr<DependentTypeFactoryInterface> impl,
+    std::string name,
+    Options options,
+    std::shared_ptr<const transport::SSLConnectionContext> transientSSLContext)
     : _name(std::move(name)),
       _factory(std::move(impl)),
-      _options(options),
-      _controller(_options->controllerFactory()),
-      _manager(options->egressTagCloserManager) {
+      _options(std::move(options)),
+      _transientSSLContext(std::move(transientSSLContext)),
+      _controller(_options.controllerFactory()),
+      _manager(options.egressTagCloserManager) {
     if (_manager) {
         _manager->add(this);
     }

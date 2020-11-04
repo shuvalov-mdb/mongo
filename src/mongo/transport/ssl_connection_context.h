@@ -52,7 +52,10 @@ namespace transport {
 struct SSLConnectionContext {
     // Custom deleter is provided to make this class to compile even if
     // asio::ssl::context is incomplete type.
-    using UniqueAsioSslContext = std::unique_ptr<asio::ssl::context, std::function<void(asio::ssl::context*)>>;
+    struct SslContextDeleter {
+        void operator()(asio::ssl::context*) const;
+    };
+    using UniqueAsioSslContext = std::unique_ptr<asio::ssl::context, SslContextDeleter>;
     UniqueAsioSslContext ingress;
     UniqueAsioSslContext egress;
     std::shared_ptr<SSLManagerInterface> manager;

@@ -235,15 +235,10 @@ public:
         bool canShutdown = false;
     };
 
-    explicit ConnectionPool(std::shared_ptr<DependentTypeFactoryInterface> impl,
-                            std::string name,
-                            std::shared_ptr<const Options> options = std::make_shared<Options>());
-
-    // Compatibility constructor for 'enterprise' module, to be removed.
-    explicit ConnectionPool(std::shared_ptr<DependentTypeFactoryInterface> impl,
-                            std::string name,
-                            Options options = Options{})
-        : ConnectionPool(impl, name, std::make_shared<const Options>(options)) {}
+    ConnectionPool(std::shared_ptr<DependentTypeFactoryInterface> impl,
+                   std::string name,
+                   Options options = Options{},
+                   std::shared_ptr<const transport::SSLConnectionContext> transientSSLContext = {});
 
     ~ConnectionPool();
 
@@ -272,7 +267,10 @@ private:
     std::string _name;
 
     const std::shared_ptr<DependentTypeFactoryInterface> _factory;
-    std::shared_ptr<const Options> _options;
+    const Options _options;
+
+    // SSL context for the connections that require non-default SSL paramaeters.
+    std::shared_ptr<const transport::SSLConnectionContext> _transientSSLContext;
 
     std::shared_ptr<ControllerInterface> _controller;
 

@@ -136,15 +136,16 @@ private:
 
 class TLConnection final : public ConnectionPool::ConnectionInterface, public TLTypeFactory::Type {
 public:
-    TLConnection(const std::shared_ptr<TLTypeFactory>& factory,
-                 transport::ReactorHandle reactor,
-                 ServiceContext* serviceContext,
-                 HostAndPort peer,
-                 transport::ConnectSSLMode sslMode,
-                 size_t generation,
-                 NetworkConnectionHook* onConnectHook,
-                 bool skipAuth,
-                 std::shared_ptr<transport::SSLConnectionContext> sslContextOverride = nullptr)
+    TLConnection(
+        const std::shared_ptr<TLTypeFactory>& factory,
+        transport::ReactorHandle reactor,
+        ServiceContext* serviceContext,
+        HostAndPort peer,
+        transport::ConnectSSLMode sslMode,
+        size_t generation,
+        NetworkConnectionHook* onConnectHook,
+        bool skipAuth,
+        std::shared_ptr<const transport::SSLConnectionContext> sslContextOverride = nullptr)
         : ConnectionInterface(generation),
           TLTypeFactory::Type(factory),
           _reactor(reactor),
@@ -195,7 +196,7 @@ private:
     HostAndPort _peer;
     transport::ConnectSSLMode _sslMode;
     NetworkConnectionHook* const _onConnectHook;
-    std::shared_ptr<transport::SSLConnectionContext> _sslContextOverride;
+    std::shared_ptr<const transport::SSLConnectionContext> _sslContextOverride;
     AsyncDBClient::Handle _client;
 };
 

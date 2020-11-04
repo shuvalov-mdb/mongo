@@ -101,6 +101,12 @@ boost::optional<Status> maybeTcpFastOpenStatus;
 
 MONGO_FAIL_POINT_DEFINE(transportLayerASIOasyncConnectTimesOut);
 
+// Custom deleter SslContextDeleter for asio::ssl::context has to be defined here because the
+// context is not visible in many sources the header for SSLConnectionContext is included.
+void SSLConnectionContext::SslContextDeleter::operator()(asio::ssl::context* ptr) const {
+    delete ptr;
+}
+
 class ASIOReactorTimer final : public ReactorTimer {
 public:
     explicit ASIOReactorTimer(asio::io_context& ctx)
@@ -454,11 +460,9 @@ Status makeConnectError(Status status, const HostAndPort& peer, const WrappedEnd
 }
 
 
-StatusWith<SessionHandle> TransportLayerASIO::connect(
-    HostAndPort peer,
-    ConnectSSLMode sslMode,
-    const boost::optional<TransientSSLParams>& transientSSLParams,
-    Milliseconds timeout) {
+StatusWith<SessionHandle> TransportLayerASIO::connect(HostAndPort peer,
+                                                      ConnectSSLMode sslMode,
+                                                      Milliseconds timeout) {
     std::cerr << "!!!! connect " << peer << std::endl;
     printStackTrace();  // tmp
     std::error_code ec;
@@ -569,7 +573,7 @@ StatusWith<TransportLayerASIO::ASIOSessionHandle> TransportLayerASIO::_doSyncCon
 
     sock.non_blocking(false);
     try {
-        return std::make_shared<ASIOSession>(this, std::move(sock), false, *endpoint);
+        return std::make_shared<ASIOSession>(this, std::move(sock), false, *endpoint, _sslContext);
     } catch (const DBException& e) {
         return e.toStatus();
     }
@@ -580,7 +584,7 @@ Future<SessionHandle> TransportLayerASIO::asyncConnect(
     ConnectSSLMode sslMode,
     const ReactorHandle& reactor,
     Milliseconds timeout,
-    std::shared_ptr<SSLConnectionContext> sslContextOverride) {
+    std::shared_ptr<const SSLConnectionContext> sslContextOverride) {
 
     struct AsyncConnectState {
         AsyncConnectState(HostAndPort peer,
@@ -1206,14 +1210,15 @@ Status TransportLayerASIO::rotateCertificates(std::shared_ptr<SSLManagerInterfac
     if (!contextOrStatus.isOK()) {
         return contextOrStatus.getStatus();
     }
-    _sslContext = std::make_shared<SSLConnectionContext>(std::move(contextOrStatus.getValue()));
+    _sslContext =
+        std::make_shared<const SSLConnectionContext>(std::move(contextOrStatus.getValue()));
     return Status::OK();
 }
 
 StatusWith<transport::SSLConnectionContext> TransportLayerASIO::_createSSLContext(
     std::shared_ptr<SSLManagerInterface>& manager,
     SSLParams::SSLModes sslMode,
-    TransientSSLParams transientSSLParams,
+    TransientSSLParams transientEgressSSLParams,
     bool asyncOCSPStaple) const {
 
     SSLConnectionContext newSSLContext;
@@ -1221,12 +1226,12 @@ StatusWith<transport::SSLConnectionContext> TransportLayerASIO::_createSSLContex
     const auto& sslParams = getSSLGlobalParams();
 
     if (sslMode != SSLParams::SSLMode_disabled && _listenerOptions.isIngress()) {
-        newSSLContext.ingress = std::make_unique<asio::ssl::context>(asio::ssl::context::sslv23);
+        newSSLContext.ingress.reset(new asio::ssl::context(asio::ssl::context::sslv23));
 
         Status status = newSSLContext.manager->initSSLContext(
             newSSLContext.ingress->native_handle(),
             sslParams,
-            TransientSSLParams(),
+            TransientSSLParams(),  // Ingress is not using transient params, they are egress.
             SSLManagerInterface::ConnectionDirection::kIncoming);
         if (!status.isOK()) {
             return status;
@@ -1243,11 +1248,11 @@ StatusWith<transport::SSLConnectionContext> TransportLayerASIO::_createSSLContex
     }
 
     if (_listenerOptions.isEgress() && newSSLContext.manager) {
-        newSSLContext.egress = std::make_unique<asio::ssl::context>(asio::ssl::context::sslv23);
+        newSSLContext.egress.reset(new asio::ssl::context(asio::ssl::context::sslv23));
         Status status = newSSLContext.manager->initSSLContext(
             newSSLContext.egress->native_handle(),
             sslParams,
-            TransientSSLParams(),
+            transientEgressSSLParams,
             SSLManagerInterface::ConnectionDirection::kOutgoing);
         if (!status.isOK()) {
             return status;
