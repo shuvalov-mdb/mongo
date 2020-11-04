@@ -108,7 +108,7 @@ NetworkInterfaceTL::NetworkInterfaceTL(std::string instanceName,
                                        std::unique_ptr<rpc::EgressMetadataHook> metadataHook)
     : _instanceName(std::move(instanceName)),
       _svcCtx(svcCtx),
-      _connPoolOpts(connPoolOpts),
+      _connPoolOpts(std::move(connPoolOpts)),
       _onConnectHook(std::move(onConnectHook)),
       _metadataHook(std::move(metadataHook)),
       _state(kDefault) {

@@ -50,14 +50,8 @@ namespace transport {
 
 #ifdef MONGO_CONFIG_SSL
 struct SSLConnectionContext {
-    // Custom deleter is provided to make this class to compile even if
-    // asio::ssl::context is incomplete type.
-    struct SslContextDeleter {
-        void operator()(asio::ssl::context*) const;
-    };
-    using UniqueAsioSslContext = std::unique_ptr<asio::ssl::context, SslContextDeleter>;
-    UniqueAsioSslContext ingress;
-    UniqueAsioSslContext egress;
+    std::unique_ptr<asio::ssl::context> ingress;
+    std::unique_ptr<asio::ssl::context> egress;
     std::shared_ptr<SSLManagerInterface> manager;
 };
 #endif

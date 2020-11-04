@@ -224,7 +224,7 @@ private:
     std::shared_ptr<ASIOReactor> _acceptorReactor;
 
 #ifdef MONGO_CONFIG_SSL
-    std::shared_ptr<const SSLConnectionContext> _sslContext;
+    synchronized_value<std::shared_ptr<const SSLConnectionContext>> _sslContext;
 #endif
 
     std::vector<std::pair<SockAddr, GenericAcceptor>> _acceptors;

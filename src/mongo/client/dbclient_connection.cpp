@@ -409,10 +409,7 @@ Status DBClientConnection::connectSocketOnly(const HostAndPort& serverAddress) {
     }
 
     auto sws = getGlobalServiceContext()->getTransportLayer()->connect(
-        serverAddress,
-        _uri.getSSLMode(),
-        // boost::optional<TransientSSLParams>(),
-        _socketTimeout.value_or(Milliseconds{5000}));
+        serverAddress, _uri.getSSLMode(), _socketTimeout.value_or(Milliseconds{5000}));
     if (!sws.isOK()) {
         return Status(ErrorCodes::HostUnreachable,
                       str::stream() << "couldn't connect to server " << _serverAddress.toString()
