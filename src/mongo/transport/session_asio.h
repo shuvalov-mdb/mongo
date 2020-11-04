@@ -113,7 +113,7 @@ public:
         _local = HostAndPort(_localAddr.toString(true));
         _remote = HostAndPort(_remoteAddr.toString(true));
 #ifdef MONGO_CONFIG_SSL
-        _sslContext = overrideSSLContext ? overrideSSLContext : tl->_sslContext;
+        _sslContext = overrideSSLContext ? overrideSSLContext : *tl->_sslContext;
 #endif
     } catch (const DBException&) {
         throw;
