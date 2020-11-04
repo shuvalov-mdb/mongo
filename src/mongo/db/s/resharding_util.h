@@ -102,27 +102,6 @@ UUID getCollectionUUIDFromChunkManger(const NamespaceString& nss, const ChunkMan
 NamespaceString constructTemporaryReshardingNss(StringData db, const UUID& sourceUuid);
 
 /**
- * Constructs a BatchedCommandRequest with batch type 'Insert'.
- */
-BatchedCommandRequest buildInsertOp(const NamespaceString& nss, std::vector<BSONObj> docs);
-
-/**
- * Constructs a BatchedCommandRequest with batch type 'Update'.
- */
-BatchedCommandRequest buildUpdateOp(const NamespaceString& nss,
-                                    const BSONObj& query,
-                                    const BSONObj& update,
-                                    bool upsert,
-                                    bool multi);
-
-/**
- * Constructs a BatchedCommandRequest with batch type 'Delete'.
- */
-BatchedCommandRequest buildDeleteOp(const NamespaceString& nss,
-                                    const BSONObj& query,
-                                    bool multiDelete);
-
-/**
  * Sends _flushRoutingTableCacheUpdatesWithWriteConcern to a list of shards. Throws if one of the
  * shards fails to refresh.
  */
@@ -212,7 +191,7 @@ boost::optional<ShardId> getDestinedRecipient(OperationContext* opCtx,
 std::unique_ptr<Pipeline, PipelineDeleter> createAggForCollectionCloning(
     const boost::intrusive_ptr<ExpressionContext>& expCtx,
     const ShardKeyPattern& newShardKeyPattern,
-    const NamespaceString& sourceNss,
+    const NamespaceString& tempNss,
     const ShardId& recipientShard);
 
 /**

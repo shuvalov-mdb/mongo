@@ -270,14 +270,6 @@ let viewsCommandTests = {
     fsync: {skip: isUnrelated},
     fsyncUnlock: {skip: isUnrelated},
     getDatabaseVersion: {skip: isUnrelated},
-    geoSearch: {
-        command: {
-            geoSearch: "view",
-            search: {},
-            near: [-50, 37],
-        },
-        expectFailure: true
-    },
     getCmdLineOpts: {skip: isUnrelated},
     getDefaultRWConcern: {skip: isUnrelated},
     getDiagnosticData: {skip: isUnrelated},
@@ -555,6 +547,7 @@ let viewsCommandTests = {
     testDeprecation: {skip: isAnInternalCommand},
     testDeprecationInVersion2: {skip: isAnInternalCommand},
     testRemoval: {skip: isAnInternalCommand},
+    testReshardCloneCollection: {skip: isAnInternalCommand},
     testVersion2: {skip: isAnInternalCommand},
     testVersions1And2: {skip: isAnInternalCommand},
     top: {skip: "tested in views/views_stats.js"},

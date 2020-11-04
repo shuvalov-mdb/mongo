@@ -705,7 +705,7 @@ void ReplicationCoordinatorImpl::_finishLoadLocalConfig(
     LOGV2_DEBUG(21320, 1, "Current term is now {term}", "Updated term", "term"_attr = term);
     _performPostMemberStateUpdateAction(action);
 
-    if (!isArbiter) {
+    if (!isArbiter && myIndex.getValue() != -1) {
         _externalState->startThreads();
         _startDataReplication(opCtx.get());
     }
@@ -742,6 +742,12 @@ void ReplicationCoordinatorImpl::_stopDataReplication(OperationContext* opCtx) {
 
 void ReplicationCoordinatorImpl::_startDataReplication(OperationContext* opCtx,
                                                        std::function<void()> startCompleted) {
+    if (_startedSteadyStateReplication.load()) {
+        return;
+    }
+
+    _startedSteadyStateReplication.store(true);
+
     // Check to see if we need to do an initial sync.
     const auto lastOpTime = getMyLastAppliedOpTime();
     const auto needsInitialSync =
@@ -2794,7 +2800,7 @@ bool ReplicationCoordinatorImpl::isMasterForReportingPurposes() {
 bool ReplicationCoordinatorImpl::canAcceptWritesForDatabase(OperationContext* opCtx,
                                                             StringData dbName) {
     // The answer isn't meaningful unless we hold the ReplicationStateTransitionLock.
-    invariant(opCtx->lockState()->isRSTLLocked());
+    invariant(opCtx->lockState()->isRSTLLocked() || opCtx->isLockFreeReadsOp());
     return canAcceptWritesForDatabase_UNSAFE(opCtx, dbName);
 }
 
@@ -2876,7 +2882,7 @@ bool ReplicationCoordinatorImpl::canAcceptWritesFor_UNSAFE(OperationContext* opC
 Status ReplicationCoordinatorImpl::checkCanServeReadsFor(OperationContext* opCtx,
                                                          const NamespaceString& ns,
                                                          bool slaveOk) {
-    invariant(opCtx->lockState()->isRSTLLocked());
+    invariant(opCtx->lockState()->isRSTLLocked() || opCtx->isLockFreeReadsOp());
     return checkCanServeReadsFor_UNSAFE(opCtx, ns, slaveOk);
 }
 
@@ -5616,7 +5622,7 @@ bool ReplicationCoordinatorImpl::ReadWriteAbility::canServeNonLocalReads(
     OperationContext* opCtx) const {
     // We must be holding the RSTL.
     invariant(opCtx);
-    invariant(opCtx->lockState()->isRSTLLocked());
+    invariant(opCtx->lockState()->isRSTLLocked() || opCtx->isLockFreeReadsOp());
     return _canServeNonLocalReads.loadRelaxed();
 }
 
