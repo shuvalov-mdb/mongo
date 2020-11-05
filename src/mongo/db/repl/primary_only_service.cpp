@@ -308,7 +308,6 @@ void PrimaryOnlyService::startup(OperationContext* opCtx) {
         return;
     }
 
-    std::cerr << "!!!!!!! Startup primary only service " << getServiceName() << std::endl;
     _executor = std::make_shared<executor::ThreadPoolTaskExecutor>(
         std::make_unique<ThreadPool>(threadPoolOptions),
         executor::makeNetworkInterface(getServiceName() + "Network", nullptr, std::move(hookList)));

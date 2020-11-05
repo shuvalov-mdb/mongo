@@ -271,15 +271,6 @@ void TLConnection::setup(Milliseconds timeout, SetupCallback cb) {
 
     auto isMasterHook = std::make_shared<TLConnectionSetupHook>(_onConnectHook);
 
-    // auto options = _connectionPoolOptions.lock();
-    // if (!options) {
-    //     std::string reason = str::stream() << "" << timeout;
-    //     handler->promise.setError(Status(ErrorCodes::Interrupted, std::move(reason)));
-    //     return;
-    // }
-
-    // AsyncDBClient::connect(
-    //     _peer, _sslMode, options->transientSSLParams, _serviceContext, _reactor, timeout)
     AsyncDBClient::connect(
         _peer, _sslMode, _serviceContext, _reactor, timeout, _transientSSLContext)
         .thenRunOn(_reactor)
@@ -401,7 +392,8 @@ auto TLTypeFactory::reactor() {
 }
 
 std::shared_ptr<ConnectionPool::ConnectionInterface> TLTypeFactory::makeConnection(
-    const HostAndPort& hostAndPort, transport::ConnectSSLMode sslMode, size_t generation) {
+    const HostAndPort& hostAndPort, transport::ConnectSSLMode sslMode, size_t generation,
+    std::shared_ptr<const transport::SSLConnectionContext> transientSSLContext) {
     auto conn = std::make_shared<TLConnection>(shared_from_this(),
                                                reactor(),
                                                getGlobalServiceContext(),
@@ -409,7 +401,8 @@ std::shared_ptr<ConnectionPool::ConnectionInterface> TLTypeFactory::makeConnecti
                                                sslMode,
                                                generation,
                                                _onConnectHook.get(),
-                                               _connPoolOptions.skipAuthentication);
+                                               _connPoolOptions.skipAuthentication,
+                                               transientSSLContext);
     fasten(conn.get());
     return conn;
 }

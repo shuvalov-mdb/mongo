@@ -567,7 +567,7 @@ StatusWith<TransportLayerASIO::ASIOSessionHandle> TransportLayerASIO::_doSyncCon
 
     sock.non_blocking(false);
     try {
-        return std::make_shared<ASIOSession>(this, std::move(sock), false, *endpoint, *_sslContext);
+        return std::make_shared<ASIOSession>(this, std::move(sock), false, *endpoint);
     } catch (const DBException& e) {
         return e.toStatus();
     }
@@ -1239,6 +1239,7 @@ StatusWith<transport::SSLConnectionContext> TransportLayerASIO::_createSSLContex
                           str::stream()
                               << "Can not staple OCSP Response. Reason: " << resp.reason());
         }
+        newSSLContext.description = "Default ingress ";
     }
 
     if (_listenerOptions.isEgress() && newSSLContext.manager) {
@@ -1251,8 +1252,10 @@ StatusWith<transport::SSLConnectionContext> TransportLayerASIO::_createSSLContex
         if (!status.isOK()) {
             return status;
         }
-        if () {
-            
+        if (!transientEgressSSLParams.sslClusterPEMPayload.empty()) {
+            newSSLContext.description = str::stream() << "Transient SSL Context for " << transientEgressSSLParams.targetedClusterConnectionString;
+        } else {
+            newSSLContext.description = str::stream() << newSSLContext.description << "egress";
         }
     }
     return std::move(newSSLContext);

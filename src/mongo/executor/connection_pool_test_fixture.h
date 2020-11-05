@@ -150,7 +150,8 @@ public:
     std::shared_ptr<ConnectionPool::ConnectionInterface> makeConnection(
         const HostAndPort& hostAndPort,
         transport::ConnectSSLMode sslMode,
-        size_t generation) override;
+        size_t generation,
+        std::shared_ptr<const transport::SSLConnectionContext> transientSSLContext) override;
 
     std::shared_ptr<ConnectionPool::TimerInterface> makeTimer() override;
 

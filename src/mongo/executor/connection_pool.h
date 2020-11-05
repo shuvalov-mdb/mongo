@@ -33,6 +33,7 @@
 #include <memory>
 #include <queue>
 
+#include "mongo/config.h"
 #include "mongo/executor/egress_tag_closer.h"
 #include "mongo/executor/egress_tag_closer_manager.h"
 #include "mongo/platform/mutex.h"
@@ -237,8 +238,8 @@ public:
 
     ConnectionPool(std::shared_ptr<DependentTypeFactoryInterface> impl,
                    std::string name,
-                   Options options = Options{},
-                   std::shared_ptr<const transport::SSLConnectionContext> transientSSLContext = {});
+                   Options options,
+                   std::shared_ptr<const transport::SSLConnectionContext> transientSSLContext);
 
     ~ConnectionPool();
 
@@ -519,7 +520,8 @@ public:
      */
     virtual std::shared_ptr<ConnectionInterface> makeConnection(const HostAndPort& hostAndPort,
                                                                 transport::ConnectSSLMode sslMode,
-                                                                size_t generation) = 0;
+                                                                size_t generation,
+                                                                std::shared_ptr<const transport::SSLConnectionContext> transientSSLContext = {}) = 0;
 
     /**
      *  Return the executor for use with this factory

@@ -36,7 +36,6 @@
 #include "mongo/executor/network_connection_hook.h"
 #include "mongo/executor/network_interface.h"
 #include "mongo/transport/ssl_connection_context.h"
-#include "mongo/transport/transport_layer.h"
 #include "mongo/util/future.h"
 #include "mongo/util/hierarchical_acquisition.h"
 
@@ -61,7 +60,8 @@ public:
     std::shared_ptr<ConnectionPool::ConnectionInterface> makeConnection(
         const HostAndPort& hostAndPort,
         transport::ConnectSSLMode sslMode,
-        size_t generation) override;
+        size_t generation,
+        std::shared_ptr<const transport::SSLConnectionContext> transientSSLContext) override;
     std::shared_ptr<ConnectionPool::TimerInterface> makeTimer() override;
     const std::shared_ptr<OutOfLineExecutor>& getExecutor() override {
         return _executor;
@@ -155,9 +155,7 @@ public:
           _peer(std::move(peer)),
           _sslMode(sslMode),
           _onConnectHook(onConnectHook),
-          _transientSSLContext(transientSSLContext) {
-        std::cerr << "!!!!!! created TLConnection" << std::endl;
-    }
+          _transientSSLContext(transientSSLContext) {}
 
     ~TLConnection() {
         // Release must be the first expression of this dtor

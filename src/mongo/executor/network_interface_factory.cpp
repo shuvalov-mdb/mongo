@@ -53,7 +53,6 @@ std::unique_ptr<NetworkInterface> makeNetworkInterface(
     std::unique_ptr<NetworkConnectionHook> hook,
     std::unique_ptr<rpc::EgressMetadataHook> metadataHook,
     ConnectionPool::Options connPoolOptions) {
-    std::cerr << "!!!!!! makeNetworkInterface " << instanceName << std::endl;
 
     if (!connPoolOptions.egressTagCloserManager && hasGlobalServiceContext()) {
         connPoolOptions.egressTagCloserManager =

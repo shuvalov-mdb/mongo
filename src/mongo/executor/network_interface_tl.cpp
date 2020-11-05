@@ -115,9 +115,6 @@ NetworkInterfaceTL::NetworkInterfaceTL(std::string instanceName,
       _onConnectHook(std::move(onConnectHook)),
       _metadataHook(std::move(metadataHook)),
       _state(kDefault) {
-    std::cerr << "!!!!!!! NetworkInterfaceTL " << instanceName
-              << " has _svcCtx: " << (_svcCtx != nullptr) << ", has transport: "
-              << (_svcCtx != nullptr && _svcCtx->getTransportLayer() != nullptr) << std::endl;
     if (_svcCtx) {
         _tl = _svcCtx->getTransportLayer();
     }
