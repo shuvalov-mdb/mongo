@@ -88,7 +88,7 @@ public:
                 GenericSocket socket,
                 bool isIngressSession,
                 Endpoint endpoint = Endpoint(),
-                std::shared_ptr<const SSLConnectionContext> overrideSSLContext = nullptr) try
+                std::shared_ptr<const SSLConnectionContext> transientSSLContext = nullptr) try
         : _socket(std::move(socket)),
           _tl(tl),
           _isIngressSession(isIngressSession) {
@@ -113,7 +113,7 @@ public:
         _local = HostAndPort(_localAddr.toString(true));
         _remote = HostAndPort(_remoteAddr.toString(true));
 #ifdef MONGO_CONFIG_SSL
-        _sslContext = overrideSSLContext ? overrideSSLContext : *tl->_sslContext;
+        _sslContext = transientSSLContext ? transientSSLContext : *tl->_sslContext;
 #endif
     } catch (const DBException&) {
         throw;

@@ -130,12 +130,12 @@ NetworkInterfaceTL::NetworkInterfaceTL(std::string instanceName,
         _tl = _ownedTransportLayer.get();
     }
 
-    std::shared_ptr<const transport::SSLConnectionContext> transientSslContext{};
+    std::shared_ptr<const transport::SSLConnectionContext> transientSSLContext;
     if (_connPoolOpts.transientSSLParams) {
         auto statusOrContext = _tl->createTransientSSLContext(
             _connPoolOpts.transientSSLParams.get(), nullptr, true /* asyncOCSPStaple */);
         uassertStatusOK(statusOrContext.getStatus());
-        transientSslContext = std::make_shared<const transport::SSLConnectionContext>(
+        transientSSLContext = std::make_shared<const transport::SSLConnectionContext>(
             std::move(statusOrContext.getValue()));
     }
 
@@ -145,7 +145,7 @@ NetworkInterfaceTL::NetworkInterfaceTL(std::string instanceName,
     _pool = std::make_shared<ConnectionPool>(std::move(typeFactory),
                                              std::string("NetworkInterfaceTL-") + _instanceName,
                                              _connPoolOpts,
-                                             transientSslContext);
+                                             transientSSLContext);
 
     if (TestingProctor::instance().isEnabled()) {
         _counters = std::make_unique<SynchronizedCounters>();

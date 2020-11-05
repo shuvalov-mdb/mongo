@@ -145,7 +145,7 @@ public:
         size_t generation,
         NetworkConnectionHook* onConnectHook,
         bool skipAuth,
-        std::shared_ptr<const transport::SSLConnectionContext> sslContextOverride = nullptr)
+        std::shared_ptr<const transport::SSLConnectionContext> transientSSLContext = nullptr)
         : ConnectionInterface(generation),
           TLTypeFactory::Type(factory),
           _reactor(reactor),
@@ -155,7 +155,7 @@ public:
           _peer(std::move(peer)),
           _sslMode(sslMode),
           _onConnectHook(onConnectHook),
-          _sslContextOverride(sslContextOverride) {
+          _transientSSLContext(transientSSLContext) {
         std::cerr << "!!!!!! created TLConnection" << std::endl;
     }
 
@@ -196,7 +196,8 @@ private:
     HostAndPort _peer;
     transport::ConnectSSLMode _sslMode;
     NetworkConnectionHook* const _onConnectHook;
-    std::shared_ptr<const transport::SSLConnectionContext> _sslContextOverride;
+    // SSL context to use intead of the default one for this pool.
+    const std::shared_ptr<const transport::SSLConnectionContext> _transientSSLContext;
     AsyncDBClient::Handle _client;
 };
 

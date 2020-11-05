@@ -280,7 +280,8 @@ void TLConnection::setup(Milliseconds timeout, SetupCallback cb) {
 
     // AsyncDBClient::connect(
     //     _peer, _sslMode, options->transientSSLParams, _serviceContext, _reactor, timeout)
-    AsyncDBClient::connect(_peer, _sslMode, _serviceContext, _reactor, timeout, _sslContextOverride)
+    AsyncDBClient::connect(
+        _peer, _sslMode, _serviceContext, _reactor, timeout, _transientSSLContext)
         .thenRunOn(_reactor)
         .onError([](StatusWith<AsyncDBClient::Handle> swc) -> StatusWith<AsyncDBClient::Handle> {
             return Status(ErrorCodes::HostUnreachable, swc.getStatus().reason());

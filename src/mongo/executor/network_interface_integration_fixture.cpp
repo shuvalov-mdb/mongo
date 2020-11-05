@@ -48,23 +48,17 @@ namespace mongo {
 namespace executor {
 
 void NetworkInterfaceIntegrationFixture::createNet(
-    std::unique_ptr<NetworkConnectionHook> connectHook,
-    std::optional<ConnectionPool::Options> optionsArg) {
+    std::unique_ptr<NetworkConnectionHook> connectHook, ConnectionPool::Options options) {
 
-    ConnectionPool::Options options;
-    if (!optionsArg) {
-        options.minConnections = 0u;
+    options.minConnections = 0u;
 
 #ifdef _WIN32
-        // Connections won't queue on widnows, so attempting to open too many connections
-        // concurrently will result in refused connections and test failure.
-        options.maxConnections = 16u;
+    // Connections won't queue on widnows, so attempting to open too many connections
+    // concurrently will result in refused connections and test failure.
+    options.maxConnections = 16u;
 #else
-        options.maxConnections = 256u;
+    options.maxConnections = 256u;
 #endif
-    } else {
-        options = std::move(optionsArg.value());
-    }
     _net = makeNetworkInterface(
         "NetworkInterfaceIntegrationFixture", std::move(connectHook), nullptr, std::move(options));
 }

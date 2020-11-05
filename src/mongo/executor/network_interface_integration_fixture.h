@@ -65,7 +65,7 @@ using StartCommandCB = std::function<void(const RemoteCommandResponse&)>;
 class NetworkInterfaceIntegrationFixture : public mongo::unittest::Test {
 public:
     void createNet(std::unique_ptr<NetworkConnectionHook> connectHook = nullptr,
-                   std::optional<ConnectionPool::Options> options = {});
+                   ConnectionPool::Options options = {});
     void startNet(std::unique_ptr<NetworkConnectionHook> connectHook = nullptr);
     void tearDown() override;
 

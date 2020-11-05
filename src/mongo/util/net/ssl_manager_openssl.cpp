@@ -2136,10 +2136,7 @@ Status SSLManagerOpenSSL::initSSLContext(SSL_CTX* context,
                                     << getSSLErrorMessage(ERR_get_error()));
     }
 
-    if (direction == ConnectionDirection::kOutgoing && params.tlsWithholdClientCertificate) {
-        // Do not send a client certificate if they have been suppressed.
-
-    } else if (direction == ConnectionDirection::kOutgoing &&
+    if (direction == ConnectionDirection::kOutgoing &&
                !transientParams.sslClusterPEMPayload.empty()) {
         // Transient params for outgoing connection have priority over global params.
         if (!_setupPEMFromMemoryPayload(context,
@@ -2152,6 +2149,9 @@ Status SSLManagerOpenSSL::initSSLContext(SSL_CTX* context,
                           str::stream() << "Can not set up transient ssl cluster certificate for "
                                         << transientParams.targetedClusterConnectionString);
         }
+
+    } else if (direction == ConnectionDirection::kOutgoing && params.tlsWithholdClientCertificate) {
+        // Do not send a client certificate if they have been suppressed.
 
     } else if (direction == ConnectionDirection::kOutgoing && !params.sslClusterFile.empty()) {
         // Use the configured clusterFile as our client certificate.

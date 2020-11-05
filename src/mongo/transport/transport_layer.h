@@ -110,7 +110,7 @@ public:
         ConnectSSLMode sslMode,
         const ReactorHandle& reactor,
         Milliseconds timeout,
-        std::shared_ptr<const SSLConnectionContext> sslContextOverride) = 0;
+        std::shared_ptr<const SSLConnectionContext> transientSSLContext) = 0;
 
     /**
      * Start the TransportLayer. After this point, the TransportLayer will begin accepting active

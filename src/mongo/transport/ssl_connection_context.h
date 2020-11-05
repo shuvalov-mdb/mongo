@@ -53,6 +53,9 @@ struct SSLConnectionContext {
     std::unique_ptr<asio::ssl::context> ingress;
     std::unique_ptr<asio::ssl::context> egress;
     std::shared_ptr<SSLManagerInterface> manager;
+    // Human readable label used in logging. Non goal is to use this as
+    // some sort of key to retrieve the context.
+    std::string description = "default";
 };
 #endif
 
