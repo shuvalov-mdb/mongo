@@ -150,7 +150,10 @@ env.Library(
     ],
 )
 
-env.Library(
+tlEnv = env.Clone()
+tlEnv.InjectThirdParty(libraries=['asio'])
+
+tlEnv.Library(
     target='network_interface_tl',
     source=[
         'connection_pool_tl.cpp',
@@ -164,6 +167,7 @@ env.Library(
     LIBDEPS_PRIVATE=[
         '$BUILD_DIR/mongo/db/auth/auth',
         '$BUILD_DIR/mongo/transport/transport_layer_manager',
+        '$BUILD_DIR/third_party/shim_asio',
         'connection_pool_executor',
         'network_interface',
     ]

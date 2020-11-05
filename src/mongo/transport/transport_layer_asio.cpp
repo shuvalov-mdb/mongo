@@ -101,12 +101,6 @@ boost::optional<Status> maybeTcpFastOpenStatus;
 
 MONGO_FAIL_POINT_DEFINE(transportLayerASIOasyncConnectTimesOut);
 
-// Custom deleter SslContextDeleter for asio::ssl::context has to be defined here because the
-// context is not visible in many sources the header for SSLConnectionContext is included.
-void SSLConnectionContext::SslContextDeleter::operator()(asio::ssl::context* ptr) const {
-    delete ptr;
-}
-
 class ASIOReactorTimer final : public ReactorTimer {
 public:
     explicit ASIOReactorTimer(asio::io_context& ctx)
@@ -573,7 +567,7 @@ StatusWith<TransportLayerASIO::ASIOSessionHandle> TransportLayerASIO::_doSyncCon
 
     sock.non_blocking(false);
     try {
-        return std::make_shared<ASIOSession>(this, std::move(sock), false, *endpoint, _sslContext);
+        return std::make_shared<ASIOSession>(this, std::move(sock), false, *endpoint, *_sslContext);
     } catch (const DBException& e) {
         return e.toStatus();
     }

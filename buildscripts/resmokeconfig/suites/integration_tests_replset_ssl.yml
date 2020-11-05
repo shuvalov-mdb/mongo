@@ -27,7 +27,7 @@ executor:
         logComponentVerbosity:
           command: 2
         enableTestCommands: 1
-      tlsMode: preferTLS
+      tlsMode: requireTLS
       tlsCAFile: jstests/libs/ca.pem
       tlsCertificateKeyFile: jstests/libs/server.pem
     num_nodes: 2

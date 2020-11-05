@@ -42,7 +42,10 @@
 #include "mongo/transport/transport_layer_manager.h"
 #include "mongo/util/concurrency/idle_thread_block.h"
 #include "mongo/util/net/socket_utils.h"
+#include "mongo/util/net/ssl/context_base.hpp"
+#include "mongo/util/net/ssl/context.hpp"
 #include "mongo/util/testing_proctor.h"
+
 
 namespace mongo {
 namespace executor {
