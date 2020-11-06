@@ -334,31 +334,15 @@ std::shared_ptr<SSLManagerInterface> SSLManagerCoordinator::getSSLManager() {
     return *_manager;
 }
 
-void logCert(const CertInformationToLog& cert,
-             StringData certType,
-             StringData certOriginDescription,
-             StringData certScopeDescription,
-             const int logNum) {
-    LOGV2(logNum,
-          "Certificate information",
-          "type"_attr = certType,
-          "origin"_attr = certOriginDescription,
-          "scope"_attr = certScopeDescription,
-          "subject"_attr = cert.subject.toString(),
-          "issuer"_attr = cert.issuer.toString(),
-          "thumbprint"_attr = hexblob::encode(cert.thumbprint.data(), cert.thumbprint.size()),
-          "notValidBefore"_attr = cert.validityNotBefore.toString(),
-          "notValidAfter"_attr = cert.validityNotAfter.toString());
+void logCert(const CertInformationToLog& cert, StringData certType, const int logNum) {
+    auto attrs = cert.getDynamicAttributes();
+    attrs.add("type", certType);
+    LOGV2(logNum, "Certificate information", attrs);
 }
 
-void logCRL(const CRLInformationToLog& crl,
-            StringData certOriginDescription,
-            StringData certScopeDescription,
-            const int logNum) {
+void logCRL(const CRLInformationToLog& crl, const int logNum) {
     LOGV2(logNum,
           "CRL information",
-          "origin"_attr = certOriginDescription,
-          "scope"_attr = certScopeDescription,
           "thumbprint"_attr = hexblob::encode(crl.thumbprint.data(), crl.thumbprint.size()),
           "notValidBefore"_attr = crl.validityNotBefore.toString(),
           "notValidAfter"_attr = crl.validityNotAfter.toString());
@@ -372,9 +356,7 @@ void logSSLInfo(const SSLInformationToLog& info,
         logCert(info.server, "Server", logNumPEM);
     }
     if (info.cluster.has_value()) {
-        logCert(info.cluster.get(),
-                "Cluster",
-                logNumCluster);
+        logCert(info.cluster.get(), "Cluster", logNumCluster);
     }
     if (info.crl.has_value()) {
         logCRL(info.crl.get(), logNumCrl);
@@ -405,14 +387,14 @@ void SSLManagerCoordinator::rotate() {
     _manager = manager;
 
     LOGV2(4913400, "Successfully rotated X509 certificates.");
-    logSSLInfo(_manager->get()->getSSLInformationToLog(), "file", "cluster");
+    logSSLInfo(_manager->get()->getSSLInformationToLog());
 
     originalManager->stopJobs();
 }
 
 SSLManagerCoordinator::SSLManagerCoordinator()
     : _manager(SSLManagerInterface::create(sslGlobalParams, isSSLServer)) {
-    logSSLInfo(_manager->get()->getSSLInformationToLog(), "file", "cluster");
+    logSSLInfo(_manager->get()->getSSLInformationToLog());
 }
 
 void ClusterMemberDNOverride::append(OperationContext* opCtx,

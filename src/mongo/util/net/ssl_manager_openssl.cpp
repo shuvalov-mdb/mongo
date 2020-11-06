@@ -1303,8 +1303,10 @@ private:
      * @param info as a pointer to the CertInformationToLog struct to populate
      * with the information.
      */
-    static void _getX509CertInfo(UniqueX509& x509, CertInformationToLog* info,
-        std::optional<StringData> keyFile, std::optional<StringData> targetClusterURI);
+    static void _getX509CertInfo(UniqueX509& x509,
+                                 CertInformationToLog* info,
+                                 std::optional<StringData> keyFile,
+                                 std::optional<StringData> targetClusterURI);
 
     /*
      * Retrieve and store CRL information from the provided CRL filename.
@@ -1339,8 +1341,8 @@ private:
      * 'BIO_free()'.
      * @param keyFile if the certificate was loaded from file, this is the file name. If empty,
      * it means the certificate came from memory payload.
-     * @param targetClusterURI If the certificate targets a particular cluster, this is cluster URI. If empty,
-     * it means the certificate is the default one for the local cluster.
+     * @param targetClusterURI If the certificate targets a particular cluster, this is cluster URI.
+     * If empty, it means the certificate is the default one for the local cluster.
      * @return true if was successful, otherwise false
      */
     bool _setupPEMFromBIO(SSL_CTX* context,
@@ -2185,10 +2187,11 @@ Status SSLManagerOpenSSL::initSSLContext(SSL_CTX* context,
         !transientParams.sslClusterPEMPayload.empty()) {
 
         // Transient params for outgoing connection have priority over global params.
-        if (!_setupPEMFromMemoryPayload(context,
-                                        transientParams.sslClusterPEMPayload,
-                                        &_clusterPEMPassword,
-                                        transientParams.targetedClusterConnectionString.toString())) {
+        if (!_setupPEMFromMemoryPayload(
+                context,
+                transientParams.sslClusterPEMPayload,
+                &_clusterPEMPassword,
+                transientParams.targetedClusterConnectionString.toString())) {
             return Status(ErrorCodes::InvalidSSLConfiguration,
                           str::stream() << "Can not set up transient ssl cluster certificate for "
                                         << transientParams.targetedClusterConnectionString);
@@ -2288,7 +2291,8 @@ Status SSLManagerOpenSSL::initSSLContext(SSL_CTX* context,
 
 namespace {
 std::string logOptional(std::optional<StringData> data) {
-    if (data) return (*data).toString();
+    if (data)
+        return (*data).toString();
     return "";
 }
 }  // namespace.
@@ -2367,10 +2371,11 @@ bool SSLManagerOpenSSL::_parseAndValidateCertificate(const std::string& keyFile,
 }
 
 // static
-bool SSLManagerOpenSSL::_readCertificateChainFromMemory(SSL_CTX* context,
-                                                        const std::string& payload,
-                                                        PasswordFetcher* password,
-                                                        std::optional<StringData> targetClusterURI) {
+bool SSLManagerOpenSSL::_readCertificateChainFromMemory(
+    SSL_CTX* context,
+    const std::string& payload,
+    PasswordFetcher* password,
+    std::optional<StringData> targetClusterURI) {
     ERR_clear_error();  // Clear error stack for SSL_CTX_use_certificate().
 
     UniqueBIO inBio(BIO_new_mem_buf(payload.c_str(), payload.length()));
@@ -2378,21 +2383,20 @@ bool SSLManagerOpenSSL::_readCertificateChainFromMemory(SSL_CTX* context,
     if (!inBio) {
         LOGV2_ERROR(5159906,
                     "Failed to allocate BIO from in memory payload",
-                    "origin"_attr = certOriginDescription,
-                    "scope"_attr = certScopeDescription,
+                    "targetClusterURI"_attr = logOptional(targetClusterURI),
                     "error"_attr = SSLManagerInterface::getSSLErrorMessage(ERR_get_error()));
         return false;
     }
 
-    auto password_cb = &SSLManagerOpenSSL::always_error_password_cb;  // We don't expect a password to be required.
+    auto password_cb =
+        &SSLManagerOpenSSL::always_error_password_cb;  // We don't expect a password to be required.
     void* userdata = static_cast<void*>(password);
     UniqueX509 x509cert(PEM_read_bio_X509_AUX(inBio.get(), NULL, password_cb, userdata));
 
     if (!x509cert) {
         LOGV2_ERROR(5159907,
                     "Failed to read the X509 certificate from memory",
-                    "origin"_attr = certOriginDescription,
-                    "scope"_attr = certScopeDescription,
+                    "targetClusterURI"_attr = logOptional(targetClusterURI),
                     "error"_attr = SSLManagerInterface::getSSLErrorMessage(ERR_get_error()));
         return false;
     }
@@ -2405,8 +2409,7 @@ bool SSLManagerOpenSSL::_readCertificateChainFromMemory(SSL_CTX* context,
     if (1 != SSL_CTX_use_certificate(context, x509cert.get())) {
         LOGV2_ERROR(5159907,
                     "Failed to use the X509 certificate loaded from memory",
-                    "origin"_attr = certOriginDescription,
-                    "scope"_attr = certScopeDescription,
+                    "targetClusterURI"_attr = logOptional(targetClusterURI),
                     "error"_attr = SSLManagerInterface::getSSLErrorMessage(ERR_get_error()));
         return false;
     }
@@ -2418,8 +2421,7 @@ bool SSLManagerOpenSSL::_readCertificateChainFromMemory(SSL_CTX* context,
         if (1 != SSL_CTX_add1_chain_cert(context, ca.get())) {
             LOGV2_ERROR(5159908,
                         "Failed to use the CA X509 certificate loaded from memory",
-                        "origin"_attr = certOriginDescription,
-                        "scope"_attr = certScopeDescription,
+                        "targetClusterURI"_attr = logOptional(targetClusterURI),
                         "error"_attr = getSSLErrorMessage(ERR_get_error()));
             return false;
         }
@@ -2433,8 +2435,7 @@ bool SSLManagerOpenSSL::_readCertificateChainFromMemory(SSL_CTX* context,
     } else {
         LOGV2_ERROR(5159909,
                     "Error remained after scanning all X509 certificates from memory",
-                    "origin"_attr = certOriginDescription,
-                    "scope"_attr = certScopeDescription,
+                    "targetClusterURI"_attr = logOptional(targetClusterURI),
                     "error"_attr = getSSLErrorMessage(ERR_get_error()));
         return false;  // Some real error.
     }
@@ -2450,7 +2451,7 @@ bool SSLManagerOpenSSL::_setupPEM(SSL_CTX* context,
         LOGV2_ERROR(23248,
                     "Cannot read certificate file",
                     "keyFile"_attr = keyFile,
-                    "scope"_attr = certScopeDescription,
+                    "targetClusterURI"_attr = logOptional(targetClusterURI),
                     "error"_attr = getSSLErrorMessage(ERR_get_error()));
         return false;
     }
@@ -2461,7 +2462,7 @@ bool SSLManagerOpenSSL::_setupPEM(SSL_CTX* context,
         LOGV2_ERROR(23249,
                     "Failed to allocate BIO object",
                     "keyFile"_attr = keyFile,
-                    "scope"_attr = certScopeDescription,
+                    "targetClusterURI"_attr = logOptional(targetClusterURI),
                     "error"_attr = getSSLErrorMessage(ERR_get_error()));
         return false;
     }
@@ -2470,23 +2471,18 @@ bool SSLManagerOpenSSL::_setupPEM(SSL_CTX* context,
         LOGV2_ERROR(23250,
                     "Cannot read PEM key file",
                     "keyFile"_attr = keyFile,
-                    "scope"_attr = certScopeDescription,
+                    "targetClusterURI"_attr = logOptional(targetClusterURI),
                     "error"_attr = getSSLErrorMessage(ERR_get_error()));
         return false;
     }
-    return _setupPEMFromBIO(context,
-                            std::move(inBio),
-                            password,
-                            str::stream() << "keyFile " << keyFile,
-                            certScopeDescription);
+    return _setupPEMFromBIO(context, std::move(inBio), password, keyFile, targetClusterURI);
 }
 
 bool SSLManagerOpenSSL::_setupPEMFromMemoryPayload(SSL_CTX* context,
                                                    const std::string& payload,
                                                    PasswordFetcher* password,
                                                    std::optional<StringData> targetClusterURI) {
-    if (!_readCertificateChainFromMemory(
-            context, payload, password, certOriginDescription, certScopeDescription)) {
+    if (!_readCertificateChainFromMemory(context, payload, password, targetClusterURI)) {
         return false;
     }
     UniqueBIO inBio(BIO_new_mem_buf(payload.c_str(), payload.length()));
@@ -2494,14 +2490,12 @@ bool SSLManagerOpenSSL::_setupPEMFromMemoryPayload(SSL_CTX* context,
     if (!inBio) {
         LOGV2_ERROR(5159901,
                     "Failed to allocate BIO object from in-memory payload",
-                    "origin"_attr = certOriginDescription,
-                    "scope"_attr = certScopeDescription,
+                    "targetClusterURI"_attr = logOptional(targetClusterURI),
                     "error"_attr = getSSLErrorMessage(ERR_get_error()));
         return false;
     }
 
-    return _setupPEMFromBIO(
-        context, std::move(inBio), password, certOriginDescription, certScopeDescription);
+    return _setupPEMFromBIO(context, std::move(inBio), password, std::nullopt, targetClusterURI);
 }
 
 bool SSLManagerOpenSSL::_setupPEMFromBIO(SSL_CTX* context,
@@ -2516,8 +2510,8 @@ bool SSLManagerOpenSSL::_setupPEMFromBIO(SSL_CTX* context,
     if (!privateKey) {
         LOGV2_ERROR(23251,
                     "Cannot read PEM key",
-                    "keyFile"_attr = certOriginDescription,
-                    "scope"_attr = certScopeDescription,
+                    "keyFile"_attr = logOptional(keyFile),
+                    "targetClusterURI"_attr = logOptional(targetClusterURI),
                     "error"_attr = getSSLErrorMessage(ERR_get_error()));
         return false;
     }
@@ -2526,8 +2520,8 @@ bool SSLManagerOpenSSL::_setupPEMFromBIO(SSL_CTX* context,
     if (SSL_CTX_use_PrivateKey(context, privateKey) != 1) {
         LOGV2_ERROR(23252,
                     "Cannot use PEM key",
-                    "origin"_attr = certOriginDescription,
-                    "scope"_attr = certScopeDescription,
+                    "keyFile"_attr = logOptional(keyFile),
+                    "targetClusterURI"_attr = logOptional(targetClusterURI),
                     "error"_attr = getSSLErrorMessage(ERR_get_error()));
         return false;
     }
@@ -2536,8 +2530,8 @@ bool SSLManagerOpenSSL::_setupPEMFromBIO(SSL_CTX* context,
     if (SSL_CTX_check_private_key(context) != 1) {
         LOGV2_ERROR(23253,
                     "SSL certificate validation failed",
-                    "origin"_attr = certOriginDescription,
-                    "scope"_attr = certScopeDescription,
+                    "keyFile"_attr = logOptional(keyFile),
+                    "targetClusterURI"_attr = logOptional(targetClusterURI),
                     "error"_attr = getSSLErrorMessage(ERR_get_error()));
         return false;
     }
@@ -3200,8 +3194,10 @@ UniqueX509 SSLManagerOpenSSL::_getX509Object(StringData keyFile,
 constexpr size_t kSHA1HashBytes = 20;
 
 // static
-void SSLManagerOpenSSL::_getX509CertInfo(UniqueX509& x509, CertInformationToLog* info,
-    std::optional<StringData> keyFile, std::optional<StringData> targetClusterURI) {
+void SSLManagerOpenSSL::_getX509CertInfo(UniqueX509& x509,
+                                         CertInformationToLog* info,
+                                         std::optional<StringData> keyFile,
+                                         std::optional<StringData> targetClusterURI) {
     info->subject = getCertificateSubjectX509Name(x509.get());
     info->issuer = convertX509ToSSLX509Name(X509_get_issuer_name(x509.get()));
 
@@ -3221,8 +3217,10 @@ void SSLManagerOpenSSL::_getX509CertInfo(UniqueX509& x509, CertInformationToLog*
 
     uassert(4913004, "date conversion failed", notAfterMillis != Date_t());
 
-    if (keyFile) info->keyFile = (*keyFile).toString();
-    if (targetClusterURI) info->targetClusterURI = (*targetClusterURI).toString();
+    if (keyFile)
+        info->keyFile = (*keyFile).toString();
+    if (targetClusterURI)
+        info->targetClusterURI = (*targetClusterURI).toString();
 }
 
 
@@ -3273,14 +3271,14 @@ SSLInformationToLog SSLManagerOpenSSL::getSSLInformationToLog() const {
     if (!(sslGlobalParams.sslPEMKeyFile.empty())) {
         UniqueX509 serverX509Cert =
             _getX509Object(sslGlobalParams.sslPEMKeyFile, &_serverPEMPassword);
-        _getX509CertInfo(serverX509Cert, &info.server);
+        _getX509CertInfo(serverX509Cert, &info.server, "default", std::nullopt);
     }
 
     if (!(sslGlobalParams.sslClusterFile.empty())) {
         CertInformationToLog clusterInfo;
         UniqueX509 clusterX509Cert =
             _getX509Object(sslGlobalParams.sslClusterFile, &_clusterPEMPassword);
-        _getX509CertInfo(clusterX509Cert, &clusterInfo);
+        _getX509CertInfo(clusterX509Cert, &clusterInfo, "default", std::nullopt);
         info.cluster = clusterInfo;
     } else {
         info.cluster = boost::none;

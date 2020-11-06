@@ -40,6 +40,7 @@
 #include "mongo/base/string_data.h"
 #include "mongo/bson/bsonobj.h"
 #include "mongo/db/service_context.h"
+#include "mongo/logv2/attribute_storage.h"
 #include "mongo/platform/atomic_word.h"
 #include "mongo/util/decorable.h"
 #include "mongo/util/net/sock.h"
@@ -171,6 +172,22 @@ struct CertInformationToLog {
     // If the certificate targets a particular cluster, this is cluster URI. If empty,
     // it means the certificate is the default one for the local cluster.
     std::optional<std::string> targetClusterURI;
+
+    logv2::DynamicAttributes getDynamicAttributes() const {
+        logv2::DynamicAttributes attrs;
+        attrs.add("subject", subject);
+        attrs.add("issuer", issuer);
+        attrs.add("thumbprint", StringData(hexblob::encode(thumbprint.data(), thumbprint.size())));
+        attrs.add("notValidBefore", validityNotBefore);
+        attrs.add("notValidAfter", validityNotAfter);
+        if (keyFile) {
+            attrs.add("keyFile", StringData(*keyFile));
+        }
+        if (targetClusterURI) {
+            attrs.add("targetClusterURI", StringData(*targetClusterURI));
+        }
+        return attrs;
+    }
 };
 
 struct CRLInformationToLog {
@@ -414,11 +431,8 @@ void logSSLInfo(const SSLInformationToLog& info,
  * Logs the certificate.
  * @param certType human-readable description of the certificate type.
  */
-void logCert(const CertInformationToLog& cert,
-             StringData certType,
-             const int logNum);
-void logCRL(const CRLInformationToLog& crl,
-            const int logNum);
+void logCert(const CertInformationToLog& cert, StringData certType, const int logNum);
+void logCRL(const CRLInformationToLog& crl, const int logNum);
 
 }  // namespace mongo
 #endif  // #ifdef MONGO_CONFIG_SSL
