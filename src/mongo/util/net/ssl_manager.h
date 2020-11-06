@@ -165,6 +165,12 @@ struct CertInformationToLog {
     std::vector<char> thumbprint;
     Date_t validityNotBefore;
     Date_t validityNotAfter;
+    // If the certificate was loaded from file, this is the file name. If empty,
+    // it means the certificate came from memory payload.
+    std::optional<std::string> keyFile;
+    // If the certificate targets a particular cluster, this is cluster URI. If empty,
+    // it means the certificate is the default one for the local cluster.
+    std::optional<std::string> targetClusterURI;
 };
 
 struct CRLInformationToLog {
@@ -398,14 +404,8 @@ void tlsEmitWarningExpiringClientCertificate(const SSLX509Name& peer, Days days)
 
 /**
  * Logs the SSL information by dispatching to either logCert() or logCRL().
- * @param certOriginDescription human-readable description of the certificate origin for
- *    logging, which could be a file or a memory payload coming from command.
- * @param certScopeDescription human-readable description of the certificate scope for
- *    logging, which could be local or remote cluster.
  */
 void logSSLInfo(const SSLInformationToLog& info,
-                StringData certOriginDescription,
-                StringData certScopeDescription,
                 const int logNumPEM = 4913010,
                 const int logNumCluster = 4913011,
                 const int logNumCrl = 4913012);
@@ -413,16 +413,11 @@ void logSSLInfo(const SSLInformationToLog& info,
 /**
  * Logs the certificate.
  * @param certType human-readable description of the certificate type.
- * @see logSSLInfo() for other params description.
  */
 void logCert(const CertInformationToLog& cert,
              StringData certType,
-             StringData certOriginDescription,
-             StringData certScopeDescription,
              const int logNum);
 void logCRL(const CRLInformationToLog& crl,
-            StringData certOriginDescription,
-            StringData certScopeDescription,
             const int logNum);
 
 }  // namespace mongo

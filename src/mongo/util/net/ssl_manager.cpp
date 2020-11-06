@@ -365,23 +365,19 @@ void logCRL(const CRLInformationToLog& crl,
 }
 
 void logSSLInfo(const SSLInformationToLog& info,
-                StringData certOriginDescription,
-                StringData certScopeDescription,
                 const int logNumPEM,
                 const int logNumCluster,
                 const int logNumCrl) {
     if (!(sslGlobalParams.sslPEMKeyFile.empty())) {
-        logCert(info.server, "Server", certOriginDescription, certScopeDescription, logNumPEM);
+        logCert(info.server, "Server", logNumPEM);
     }
     if (info.cluster.has_value()) {
         logCert(info.cluster.get(),
                 "Cluster",
-                certOriginDescription,
-                certScopeDescription,
                 logNumCluster);
     }
     if (info.crl.has_value()) {
-        logCRL(info.crl.get(), certOriginDescription, certScopeDescription, logNumCrl);
+        logCRL(info.crl.get(), logNumCrl);
     }
 }
 
