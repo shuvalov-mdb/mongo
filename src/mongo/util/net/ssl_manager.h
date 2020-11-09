@@ -260,6 +260,17 @@ public:
         ERR_error_string_n(code, msg, msglen);
         return msg;
     }
+
+    /**
+     * Utility class to capture a temporary string with SSL error message in DynamicAttributes.
+     */
+    struct CaptureSSLErrorInAttrs {
+        CaptureSSLErrorInAttrs(logv2::DynamicAttributes& attrs)
+            : _captured(getSSLErrorMessage(ERR_get_error())) {
+            attrs.add("error", _captured);
+        }
+        std::string _captured;
+    };
 #endif
 
     /**
