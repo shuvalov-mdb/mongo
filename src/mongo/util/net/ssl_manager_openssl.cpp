@@ -2198,14 +2198,14 @@ Status SSLManagerOpenSSL::initSSLContext(SSL_CTX* context,
 
     } else if (direction == ConnectionDirection::kOutgoing && !params.sslClusterFile.empty()) {
         // Use the configured clusterFile as our client certificate.
-        if (!_setupPEM(context, params.sslClusterFile, &_clusterPEMPassword)) {
+        if (!_setupPEM(context, params.sslClusterFile, &_clusterPEMPassword, "outgoing")) {
             return Status(ErrorCodes::InvalidSSLConfiguration, "Can not set up ssl clusterFile.");
         }
 
     } else if (!params.sslPEMKeyFile.empty()) {
         // Use the base pemKeyFile for any other outgoing connections,
         // as well as all incoming connections.
-        if (!_setupPEM(context, params.sslPEMKeyFile, &_serverPEMPassword)) {
+        if (!_setupPEM(context, params.sslPEMKeyFile, &_serverPEMPassword, "server")) {
             return Status(ErrorCodes::InvalidSSLConfiguration, "Can not set up PEM key file.");
         }
     }
