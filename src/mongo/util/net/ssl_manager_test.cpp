@@ -36,7 +36,6 @@
 #include "mongo/transport/service_entry_point.h"
 #include "mongo/transport/transport_layer_asio.h"
 #include "mongo/util/net/ssl/context_base.hpp"
-#include "mongo/util/net/ssl/context_openssl.hpp"
 #include "mongo/util/net/ssl_manager.h"
 #include "mongo/util/net/ssl_options.h"
 
@@ -45,12 +44,14 @@
 #include "mongo/unittest/unittest.h"
 
 #if MONGO_CONFIG_SSL_PROVIDER == MONGO_CONFIG_SSL_PROVIDER_OPENSSL
+#include "mongo/util/net/ssl/context_openssl.hpp"
 #include "mongo/util/net/dh_openssl.h"
 #endif
 
 
 namespace mongo {
 namespace {
+
 
 // Test implementation needed by ASIO transport.
 class ServiceEntryPointUtil : public ServiceEntryPoint {
@@ -543,6 +544,8 @@ TEST(SSLManager, RotateClusterCertificatesFromFile) {
     uassertStatusOK(tla.rotateCertificates(manager, false /* asyncOCSPStaple */));
 }
 
+#if MONGO_CONFIG_SSL_PROVIDER != MONGO_CONFIG_SSL_PROVIDER_APPLE
+
 TEST(SSLManager, InitContextFromFile) {
     SSLParams params;
     params.sslMode.store(::mongo::sslGlobalParams.SSLMode_requireSSL);
@@ -595,6 +598,8 @@ TEST(SSLManager, InitServerSideContextFromMemory) {
                                             transientParams,
                                             SSLManagerInterface::ConnectionDirection::kOutgoing));
 }
+
+#endif
 
 }  // namespace
 }  // namespace mongo
