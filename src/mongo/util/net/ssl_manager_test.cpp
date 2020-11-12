@@ -44,8 +44,8 @@
 #include "mongo/unittest/unittest.h"
 
 #if MONGO_CONFIG_SSL_PROVIDER == MONGO_CONFIG_SSL_PROVIDER_OPENSSL
-#include "mongo/util/net/ssl/context_openssl.hpp"
 #include "mongo/util/net/dh_openssl.h"
+#include "mongo/util/net/ssl/context_openssl.hpp"
 #endif
 
 

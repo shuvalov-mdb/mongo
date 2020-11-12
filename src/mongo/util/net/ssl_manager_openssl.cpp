@@ -2407,16 +2407,16 @@ bool SSLManagerOpenSSL::_readCertificateChainFromMemory(
 
     // If we could set up our certificate, now proceed to the CA certificates.
     UniqueX509 ca;
-#if OPENSSL_VERSION_NUMBER >= 0x1000000fL
+#if OPENSSL_VERSION_NUMBER >= 0x100010fFL
     SSL_CTX_clear_chain_certs(context);
 #else
     SSL_CTX_clear_extra_chain_certs(context);
 #endif
     while ((ca = UniqueX509(PEM_read_bio_X509(inBio.get(), NULL, password_cb, userdata)))) {
-#if OPENSSL_VERSION_NUMBER >= 0x1000000fL
+#if OPENSSL_VERSION_NUMBER >= 0x100010fFL
         if (1 != SSL_CTX_add1_chain_cert(context, ca.get())) {
 #else
-        if (1 != SSL_CTX_add_extra_chain_cert(context, ca.release()) {
+        if (1 != SSL_CTX_add_extra_chain_cert(context, ca.release())) {
 #endif
             CaptureSSLErrorInAttrs capture(errorAttrs);
             LOGV2_ERROR(
@@ -2478,7 +2478,11 @@ bool SSLManagerOpenSSL::_setupPEMFromMemoryPayload(SSL_CTX* context,
     if (!_readCertificateChainFromMemory(context, payload, password, targetClusterURI)) {
         return false;
     }
+#if OPENSSL_VERSION_NUMBER <= 0x1000114fL
+    UniqueBIO inBio(BIO_new_mem_buf(const_cast<char*>(payload.c_str()), payload.length()));
+#else
     UniqueBIO inBio(BIO_new_mem_buf(payload.c_str(), payload.length()));
+#endif
 
     if (!inBio) {
         CaptureSSLErrorInAttrs capture(errorAttrs);
