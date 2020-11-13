@@ -82,7 +82,7 @@ assert.eq(donorDoc.commitOrAbortOpTime.ts, commitOplogEntry.ts);
 let mtab;
 assert.soon(() => {
     mtab = donorPrimary.adminCommand({serverStatus: 1}).tenantMigrationAccessBlocker;
-    return mtab[kTenantId].access === TenantMigrationUtil.accessState.kReject;
+    return mtab[kTenantId].state === TenantMigrationUtil.accessState.kReject;
 });
 assert(mtab[kTenantId].commitOrAbortOpTime);
 
@@ -110,6 +110,7 @@ assert.soon(() => 0 ===
 const donorRecipientMonitorPoolStats = donorPrimary.adminCommand({connPoolStats: 1}).replicaSets;
 assert.eq(Object.keys(donorRecipientMonitorPoolStats).length, 0);
 
-donorRst.stopSet();
-recipientRst.stopSet();
+jsTest.log("Shutting down");
+//donorRst.stopSet();
+//recipientRst.stopSet();
 })();

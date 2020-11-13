@@ -517,9 +517,12 @@ TEST(SSLManager, InitContextFromFileShouldFail) {
     params.sslCAFile = "jstests/libs/ca.pem";
     params.sslClusterFile = "jstests/libs/client.pem";
 
+#if MONGO_CONFIG_SSL_PROVIDER != MONGO_CONFIG_SSL_PROVIDER_APPLE
+    // TODO SERVER-52858: there is no exception on Mac.
     ASSERT_THROWS_CODE([&params] { SSLManagerInterface::create(params, true /* isSSLServer */); }(),
                        DBException,
                        16942);
+#endif
 }
 
 TEST(SSLManager, RotateClusterCertificatesFromFile) {
