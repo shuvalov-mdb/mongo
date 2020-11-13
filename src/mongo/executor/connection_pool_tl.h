@@ -81,7 +81,7 @@ private:
     transport::TransportLayer* _tl;
     std::unique_ptr<NetworkConnectionHook> _onConnectHook;
     // Options originated from instance of NetworkInterfaceTL.
-    ConnectionPool::Options _connPoolOptions;
+    const ConnectionPool::Options _connPoolOptions;
 
     mutable Mutex _mutex =
         MONGO_MAKE_LATCH(HierarchicalAcquisitionLevel(0), "TLTypeFactory::_mutex");

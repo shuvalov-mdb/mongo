@@ -69,8 +69,6 @@
 
 #include "mongo/transport/session_asio.h"
 
-#include "mongo/util/stacktrace.h"  //tmp
-
 namespace mongo {
 namespace transport {
 
@@ -269,7 +267,6 @@ TransportLayerASIO::TransportLayerASIO(const TransportLayerASIO::Options& opts,
       _sep(sep),
       _listenerOptions(opts) {
     std::cerr << "!!!!!!! TransportLayerASIO created " << (void*)this << std::endl;
-    printStackTrace();
 }
 
 TransportLayerASIO::~TransportLayerASIO() = default;
@@ -458,7 +455,6 @@ StatusWith<SessionHandle> TransportLayerASIO::connect(HostAndPort peer,
                                                       ConnectSSLMode sslMode,
                                                       Milliseconds timeout) {
     std::cerr << "!!!! connect " << peer << std::endl;
-    printStackTrace();  // tmp
     std::error_code ec;
     GenericSocket sock(*_egressReactor);
     WrappedResolver resolver(*_egressReactor);
@@ -518,8 +514,6 @@ StatusWith<SessionHandle> TransportLayerASIO::connect(HostAndPort peer,
 template <typename Endpoint>
 StatusWith<TransportLayerASIO::ASIOSessionHandle> TransportLayerASIO::_doSyncConnect(
     Endpoint endpoint, const HostAndPort& peer, const Milliseconds& timeout) {
-    std::cerr << "!!!! doSyncConnect " << peer << std::endl;
-    printStackTrace();  // tmp
     GenericSocket sock(*_egressReactor);
     std::error_code ec;
 
