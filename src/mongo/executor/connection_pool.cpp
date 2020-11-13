@@ -1042,7 +1042,8 @@ void ConnectionPool::SpecificPool::spawnConnections() {
         OwnedConnection handle;
         try {
             // make a new connection and put it in processing
-            handle = _parent->_factory->makeConnection(_hostAndPort, _sslMode, _generation, _parent->_transientSSLContext);
+            handle = _parent->_factory->makeConnection(
+                _hostAndPort, _sslMode, _generation, _parent->_transientSSLContext);
         } catch (std::system_error& e) {
             LOGV2_FATAL(40336,
                         "Failed to construct a new connection object: {reason}",

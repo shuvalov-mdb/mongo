@@ -2137,7 +2137,7 @@ Status SSLManagerOpenSSL::initSSLContext(SSL_CTX* context,
     }
 
     if (direction == ConnectionDirection::kOutgoing &&
-               !transientParams.sslClusterPEMPayload.empty()) {
+        !transientParams.sslClusterPEMPayload.empty()) {
         // Transient params for outgoing connection have priority over global params.
         if (!_setupPEMFromMemoryPayload(context,
                                         transientParams.sslClusterPEMPayload,

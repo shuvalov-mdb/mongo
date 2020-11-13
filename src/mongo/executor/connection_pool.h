@@ -518,10 +518,11 @@ public:
     /**
      * Makes a new connection given a host and port
      */
-    virtual std::shared_ptr<ConnectionInterface> makeConnection(const HostAndPort& hostAndPort,
-                                                                transport::ConnectSSLMode sslMode,
-                                                                size_t generation,
-                                                                std::shared_ptr<const transport::SSLConnectionContext> transientSSLContext = {}) = 0;
+    virtual std::shared_ptr<ConnectionInterface> makeConnection(
+        const HostAndPort& hostAndPort,
+        transport::ConnectSSLMode sslMode,
+        size_t generation,
+        std::shared_ptr<const transport::SSLConnectionContext> transientSSLContext = {}) = 0;
 
     /**
      *  Return the executor for use with this factory

@@ -1253,7 +1253,9 @@ StatusWith<transport::SSLConnectionContext> TransportLayerASIO::_createSSLContex
             return status;
         }
         if (!transientEgressSSLParams.sslClusterPEMPayload.empty()) {
-            newSSLContext.description = str::stream() << "Transient SSL Context for " << transientEgressSSLParams.targetedClusterConnectionString;
+            newSSLContext.description = str::stream()
+                << "Transient SSL Context for "
+                << transientEgressSSLParams.targetedClusterConnectionString;
         } else {
             newSSLContext.description = str::stream() << newSSLContext.description << "egress";
         }

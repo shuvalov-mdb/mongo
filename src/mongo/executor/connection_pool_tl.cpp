@@ -392,7 +392,9 @@ auto TLTypeFactory::reactor() {
 }
 
 std::shared_ptr<ConnectionPool::ConnectionInterface> TLTypeFactory::makeConnection(
-    const HostAndPort& hostAndPort, transport::ConnectSSLMode sslMode, size_t generation,
+    const HostAndPort& hostAndPort,
+    transport::ConnectSSLMode sslMode,
+    size_t generation,
     std::shared_ptr<const transport::SSLConnectionContext> transientSSLContext) {
     auto conn = std::make_shared<TLConnection>(shared_from_this(),
                                                reactor(),
