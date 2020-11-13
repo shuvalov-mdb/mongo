@@ -3193,6 +3193,7 @@ void SSLManagerOpenSSL::_getX509CertInfo(UniqueX509& x509,
     info->thumbprint.resize(kSHA1HashBytes);
     X509_digest(
         x509.get(), EVP_sha1(), reinterpret_cast<unsigned char*>(info->thumbprint.data()), nullptr);
+    info->hexEncodedThumbprint = hexblob::encode(info->thumbprint.data(), info->thumbprint.size());
 
     auto notBeforeMillis = convertASN1ToMillis(X509_get_notBefore(x509.get()));
 

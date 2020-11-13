@@ -164,6 +164,8 @@ struct CertInformationToLog {
     SSLX509Name subject;
     SSLX509Name issuer;
     std::vector<char> thumbprint;
+    // The human readable 'thumbprint' encoded with 'hexblob::encode'.
+    std::string hexEncodedThumbprint;
     Date_t validityNotBefore;
     Date_t validityNotAfter;
     // If the certificate was loaded from file, this is the file name. If empty,
@@ -177,7 +179,7 @@ struct CertInformationToLog {
         logv2::DynamicAttributes attrs;
         attrs.add("subject", subject);
         attrs.add("issuer", issuer);
-        attrs.add("thumbprint", StringData(hexblob::encode(thumbprint.data(), thumbprint.size())));
+        attrs.add("thumbprint", StringData(hexEncodedThumbprint));
         attrs.add("notValidBefore", validityNotBefore);
         attrs.add("notValidAfter", validityNotAfter);
         if (keyFile) {
