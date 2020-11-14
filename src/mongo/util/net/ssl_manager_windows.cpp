@@ -2076,6 +2076,7 @@ Status getCertInfo(CertInformationToLog* info, PCCERT_CONTEXT cert) {
                       str::stream() << "getCertInfo failed to get certificate thumbprint: "
                                     << errnoWithDescription(gle));
     }
+    info->hexEncodedThumbprint = hexblob::encode(info->thumbprint.data(), info->thumbprint.size());
 
     info->validityNotBefore =
         Date_t::fromMillisSinceEpoch(FiletimeToEpocMillis(cert->pCertInfo->NotBefore));
