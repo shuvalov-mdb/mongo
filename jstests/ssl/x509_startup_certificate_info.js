@@ -15,9 +15,7 @@ const SERVER_CERT_INFO = {
     "type": "Server",
     "subject": "CN=server,OU=Kernel,O=MongoDB,L=New York City,ST=New York,C=US",
     "issuer": "CN=Kernel Test CA,OU=Kernel,O=MongoDB,L=New York City,ST=New York,C=US",
-    "thumbprint": "BF2E341D28D7CEAADA534A11D75189D4ECABB551",
-    "notValidBefore": {"$date": "2019-09-25T23:27:41.000Z"},
-    "notValidAfter": {"$date": "2039-09-27T23:27:41.000Z"},
+    "thumbprint": "BF2E341D28D7CEAADA534A11D75189D4ECABB551"
 };
 const CLUSTER_CERT_INFO = {
     "type": "Cluster",
