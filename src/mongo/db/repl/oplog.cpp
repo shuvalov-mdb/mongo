@@ -136,7 +136,7 @@ void abortIndexBuilds(OperationContext* opCtx,
                commandType == OplogEntry::CommandType::kDropIndexes ||
                commandType == OplogEntry::CommandType::kRenameCollection) {
         const boost::optional<UUID> collUUID =
-            CollectionCatalog::get(opCtx).lookupUUIDByNSS(opCtx, nss);
+            CollectionCatalog::get(opCtx)->lookupUUIDByNSS(opCtx, nss);
         invariant(collUUID);
 
         indexBuildsCoordinator->abortCollectionIndexBuilds(opCtx, nss, *collUUID, reason);
@@ -172,10 +172,6 @@ void registerApplyImportCollectionFn(ApplyImportCollectionFn func) {
     applyImportCollection = func;
 }
 
-void setOplogCollectionName(ServiceContext* service) {
-    LocalOplogInfo::get(service)->setOplogCollectionName(service);
-}
-
 void createIndexForApplyOps(OperationContext* opCtx,
                             const BSONObj& indexSpec,
                             const NamespaceString& indexNss,
@@ -186,7 +182,7 @@ void createIndexForApplyOps(OperationContext* opCtx,
     auto databaseHolder = DatabaseHolder::get(opCtx);
     auto db = databaseHolder->getDb(opCtx, indexNss.ns());
     auto indexCollection =
-        db ? CollectionCatalog::get(opCtx).lookupCollectionByNamespace(opCtx, indexNss) : nullptr;
+        db ? CollectionCatalog::get(opCtx)->lookupCollectionByNamespace(opCtx, indexNss) : nullptr;
     uassert(ErrorCodes::NamespaceNotFound,
             str::stream() << "Failed to create index due to missing collection: " << indexNss.ns(),
             indexCollection);
@@ -258,28 +254,25 @@ void _logOpsInner(OperationContext* opCtx,
         uasserted(ErrorCodes::NotWritablePrimary, ss);
     }
 
+    // Throw TenantMigrationConflict error if the database for 'nss' is being migrated. The oplog
+    // entry for renameCollection has 'nss' set to the fromCollection's ns. renameCollection can be
+    // across databases, but a tenant will never be able to rename into a database with a different
+    // prefix, so it is safe to use the fromCollection's db's prefix for this check.
     if (repl::enableTenantMigrations) {
-        // TODO (SERVER-50598): Not allow tenant migration donor to write "commitIndexBuild" and
-        // "abortIndexBuild" oplog entries in the blocking state.
-        // Allow that for now since if the donor doesn't write either a commit or abort oplog entry,
-        // some resources will not be released on the donor nodes, and this can lead to deadlocks.
-        auto isCommitOrAbortIndexBuild =
-            std::any_of(records->begin(), records->end(), [](Record record) {
-                auto oplogEntry = uassertStatusOK(OplogEntry::parse(record.data.toBson()));
-                return oplogEntry.getCommandType() == OplogEntry::CommandType::kCommitIndexBuild ||
-                    oplogEntry.getCommandType() == OplogEntry::CommandType::kAbortIndexBuild;
-            });
+        // Skip the check if this is an "abortIndexBuild" oplog entry since it is safe to the abort
+        // an index build on the donor after the blockTimestamp, plus if an index build fails to
+        // commit due to TenantMigrationConflict, we need to be able to abort the index build and
+        // clean up.
+        auto isAbortIndexBuild = std::any_of(records->begin(), records->end(), [](Record record) {
+            auto oplogEntry = uassertStatusOK(OplogEntry::parse(record.data.toBson()));
+            return oplogEntry.getCommandType() == OplogEntry::CommandType::kAbortIndexBuild;
+        });
 
-        if (!isCommitOrAbortIndexBuild) {
-            // Throw TenantMigrationConflict error if the database for 'nss' is being migrated.
-            // The oplog entry for renameCollection has 'nss' set to the fromCollection's ns.
-            // renameCollection can be across databases, but a tenant will never be able to rename
-            // into a database with a different prefix, so it is safe to use the fromCollection's
-            // db's prefix for this check.
+        if (!isAbortIndexBuild) {
             tenant_migration_donor::onWriteToDatabase(opCtx, nss.db());
         } else if (records->size() > 1) {
             str::stream ss;
-            ss << "commitIndexBuild or abortIndexBuild cannot be logged with other oplog entries ";
+            ss << "abortIndexBuild cannot be logged with other oplog entries ";
             ss << ": nss " << nss;
             ss << ": entries: " << records->size() << ": [ ";
             for (const auto& record : *records) {
@@ -591,7 +584,7 @@ void createOplog(OperationContext* opCtx,
 
     OldClientContext ctx(opCtx, oplogCollectionName.ns());
     CollectionPtr collection =
-        CollectionCatalog::get(opCtx).lookupCollectionByNamespace(opCtx, oplogCollectionName);
+        CollectionCatalog::get(opCtx)->lookupCollectionByNamespace(opCtx, oplogCollectionName);
 
     if (collection) {
         if (replSettings.getOplogSizeBytes() != 0) {
@@ -649,7 +642,7 @@ void createOplog(OperationContext* opCtx,
 void createOplog(OperationContext* opCtx) {
     const auto isReplSet = ReplicationCoordinator::get(opCtx)->getReplicationMode() ==
         ReplicationCoordinator::modeReplSet;
-    createOplog(opCtx, LocalOplogInfo::get(opCtx)->getOplogCollectionName(), isReplSet);
+    createOplog(opCtx, NamespaceString::kRsOplogNamespace, isReplSet);
 }
 
 std::vector<OplogSlot> getNextOpTimes(OperationContext* opCtx, std::size_t count) {
@@ -678,8 +671,8 @@ std::pair<OptionalCollectionUUID, NamespaceString> extractCollModUUIDAndNss(
         return std::pair<OptionalCollectionUUID, NamespaceString>(boost::none, extractNs(ns, cmd));
     }
     CollectionUUID uuid = ui.get();
-    auto& catalog = CollectionCatalog::get(opCtx);
-    const auto nsByUUID = catalog.lookupNSSByUUID(opCtx, uuid);
+    auto catalog = CollectionCatalog::get(opCtx);
+    const auto nsByUUID = catalog->lookupNSSByUUID(opCtx, uuid);
     uassert(ErrorCodes::NamespaceNotFound,
             str::stream() << "Failed to apply operation due to missing collection (" << uuid
                           << "): " << redact(cmd.toString()),
@@ -688,8 +681,8 @@ std::pair<OptionalCollectionUUID, NamespaceString> extractCollModUUIDAndNss(
 }
 
 NamespaceString extractNsFromUUID(OperationContext* opCtx, const UUID& uuid) {
-    auto& catalog = CollectionCatalog::get(opCtx);
-    auto nss = catalog.lookupNSSByUUID(opCtx, uuid);
+    auto catalog = CollectionCatalog::get(opCtx);
+    auto nss = catalog->lookupNSSByUUID(opCtx, uuid);
     uassert(ErrorCodes::NamespaceNotFound, "No namespace with UUID " + uuid.toString(), nss);
     return *nss;
 }
@@ -1053,8 +1046,8 @@ Status applyOperation_inlock(OperationContext* opCtx,
     NamespaceString requestNss;
     CollectionPtr collection = nullptr;
     if (auto uuid = op.getUuid()) {
-        CollectionCatalog& catalog = CollectionCatalog::get(opCtx);
-        collection = catalog.lookupCollectionByUUID(opCtx, uuid.get());
+        auto catalog = CollectionCatalog::get(opCtx);
+        collection = catalog->lookupCollectionByUUID(opCtx, uuid.get());
         uassert(ErrorCodes::NamespaceNotFound,
                 str::stream() << "Failed to apply operation due to missing collection ("
                               << uuid.get() << "): " << redact(opOrGroupedInserts.toBSON()),
@@ -1066,7 +1059,7 @@ Status applyOperation_inlock(OperationContext* opCtx,
         invariant(requestNss.coll().size());
         dassert(opCtx->lockState()->isCollectionLockedForMode(requestNss, MODE_IX),
                 requestNss.ns());
-        collection = CollectionCatalog::get(opCtx).lookupCollectionByNamespace(opCtx, requestNss);
+        collection = CollectionCatalog::get(opCtx)->lookupCollectionByNamespace(opCtx, requestNss);
     }
 
     BSONObj o = op.getObject();
@@ -1543,7 +1536,7 @@ Status applyCommand_inlock(OperationContext* opCtx,
         Lock::DBLock lock(opCtx, nss.db(), MODE_IS);
         auto databaseHolder = DatabaseHolder::get(opCtx);
         auto db = databaseHolder->getDb(opCtx, nss.ns());
-        if (db && !CollectionCatalog::get(opCtx).lookupCollectionByNamespace(opCtx, nss) &&
+        if (db && !CollectionCatalog::get(opCtx)->lookupCollectionByNamespace(opCtx, nss) &&
             ViewCatalog::get(db)->lookup(opCtx, nss.ns())) {
             return {ErrorCodes::CommandNotSupportedOnView,
                     str::stream() << "applyOps not supported on view:" << nss.ns()};
@@ -1790,12 +1783,8 @@ void clearLocalOplogPtr() {
 }
 
 void acquireOplogCollectionForLogging(OperationContext* opCtx) {
-    auto oplogInfo = LocalOplogInfo::get(opCtx);
-    const auto& nss = oplogInfo->getOplogCollectionName();
-    if (!nss.isEmpty()) {
-        AutoGetCollection autoColl(opCtx, nss, MODE_IX);
-        LocalOplogInfo::get(opCtx)->setCollection(autoColl.getCollection());
-    }
+    AutoGetCollection autoColl(opCtx, NamespaceString::kRsOplogNamespace, MODE_IX);
+    LocalOplogInfo::get(opCtx)->setCollection(autoColl.getCollection());
 }
 
 void establishOplogCollectionForLogging(OperationContext* opCtx, const CollectionPtr& oplog) {

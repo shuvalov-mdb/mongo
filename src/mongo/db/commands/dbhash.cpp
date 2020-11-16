@@ -318,7 +318,7 @@ private:
     std::string _hashCollection(OperationContext* opCtx, Database* db, const NamespaceString& nss) {
 
         CollectionPtr collection =
-            CollectionCatalog::get(opCtx).lookupCollectionByNamespace(opCtx, nss);
+            CollectionCatalog::get(opCtx)->lookupCollectionByNamespace(opCtx, nss);
         invariant(collection);
 
         boost::optional<Lock::CollectionLock> collLock;
@@ -331,7 +331,7 @@ private:
             invariant(opCtx->lockState()->isCollectionLockedForMode(nss, MODE_IS));
 
             auto minSnapshot = collection->getMinimumVisibleSnapshot();
-            auto mySnapshot = opCtx->recoveryUnit()->getPointInTimeReadTimestamp();
+            auto mySnapshot = opCtx->recoveryUnit()->getPointInTimeReadTimestamp(opCtx);
             invariant(mySnapshot);
 
             uassert(ErrorCodes::SnapshotUnavailable,

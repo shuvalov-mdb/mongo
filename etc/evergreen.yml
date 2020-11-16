@@ -1079,7 +1079,6 @@ functions:
   "bypass compile and fetch binaries":
     command: shell.exec
     params:
-      continue_on_err: true
       working_dir: src
       shell: bash
       script: |
@@ -1227,6 +1226,12 @@ functions:
           # Windows path separator
           toolchain_txt="$pip_dir/toolchain-requirements.txt"
           ${activate_virtualenv}
+          packager_arch="${packager_arch}"
+          if [[ $packager_arch != "arm64" ]]; then
+            # For now, skip upgrading pip on ARM variants due to setup tools
+            # issue.
+            python -m pip install --upgrade pip
+          fi
           python -m pip install -r "$toolchain_txt" -q
           python -m pip freeze > pip-requirements.txt
 
@@ -1365,6 +1370,10 @@ functions:
       working_dir: src
       shell: bash
       script: |
+        # Export these before verbose is set to avoid sharing sensitive info.
+        export CEDAR_USERNAME=${cedar_user}
+        export CEDAR_API_KEY=${cedar_api_key}
+
         set -o errexit
         set -o verbose
 
@@ -4171,6 +4180,29 @@ tasks:
       vars:
         targets: lint-errorcodes
 
+- name: test_api_version_compatibility
+  depends_on:
+    - name: compile
+  commands:
+    - command: manifest.load
+    - func: "git get project"
+    - func: "set task expansion macros"
+    - func: "set up virtualenv"
+    - func: "upload pip requirements"
+    - func: "do setup"
+    - command: shell.exec
+      type: test
+      params:
+        working_dir: src
+        shell: bash
+        script: |
+          set -o errexit
+          set -o verbose
+          ${activate_virtualenv}
+
+          $python buildscripts/idl/check_versioned_api_commands_have_idl_definitions.py -v --include src --installDir dist-test/bin 1
+          $python buildscripts/idl/checkout_idl_files_from_past_releases.py -v idls
+
 - name: burn_in_tests_gen
   commands:
   - command: manifest.load
@@ -5731,6 +5763,42 @@ tasks:
   - func: "run tests"
     vars:
       resmoke_args: --suites=core --storageEngine=wiredTiger
+
+- <<: *task_template
+  name: config_fuzzer_jsCore
+  tags: []
+  commands:
+  - func: "do setup"
+  - func: "run tests"
+    vars:
+      resmoke_args: --suites=core --storageEngine=wiredTiger --fuzzMongodConfigs
+
+- <<: *task_template
+  name: config_fuzzer_concurrency
+  tags: []
+  commands:
+  - func: "do setup"
+  - func: "run tests"
+    vars:
+      resmoke_args: --suites=concurrency --storageEngine=wiredTiger --fuzzMongodConfigs
+
+- <<: *task_template
+  name: config_fuzzer_concurrency_replication
+  tags: []
+  commands:
+  - func: "do setup"
+  - func: "run tests"
+    vars:
+      resmoke_args: --suites=concurrency_replication --storageEngine=wiredTiger --fuzzMongodConfigs
+
+- <<: *task_template
+  name: config_fuzzer_replica_sets_jscore_passthrough
+  tags: []
+  commands:
+  - func: "do setup"
+  - func: "run tests"
+    vars:
+      resmoke_args: --suites=replica_sets_jscore_passthrough --storageEngine=wiredTiger --fuzzMongodConfigs
 
 - <<: *task_template
   name: jsCore_ese
@@ -7594,6 +7662,8 @@ tasks:
   depends_on: []
   commands:
   - func: "do non-compile setup"
+  - func: "set up remote credentials"
+  - func: "configure evergreen api credentials"
   - func: "do multiversion setup"
   - func: "run tests"
     vars:
@@ -8703,24 +8773,24 @@ buildvariants:
     - rhel62-large
   - name: .integration !.audit
     distros:
-    - rhel62-large
+    - rhel62-medium
   - name: jsCore
   - name: jsCore_txns
   - name: .logical_session_cache
   - name: parallel_gen
   - name: .concurrency .common !.kill_terminate
     distros:
-      - rhel62-large
+      - rhel62-medium
   - name: concurrency_replication_causal_consistency
     distros:
-      - rhel62-large
+      - rhel62-medium
 
 - &linux-64-debug-template
   name: linux-64-debug
   display_name: "! Shared Library Linux DEBUG"
   batchtime: 240 # 4 hours
   run_on:
-  - rhel62-large
+  - rhel62-medium
   expansions:
     resmoke_jobs_factor: 0.5  # Avoid starting too many mongod's
     compile_flags: --dbg=on --opt=on -j$(grep -c ^processor /proc/cpuinfo) --variables-files=etc/scons/mongodbtoolchain_v3_gcc.vars --enable-free-mon=on --enable-http-client=on --link-model=dynamic
@@ -8732,8 +8802,14 @@ buildvariants:
     num_scons_link_jobs_available: 0.99
   tasks:
   - name: compile_parallel_TG
+    distros:
+      - rhel62-large
   - name: unittests_parallel_TG
+    distros:
+      - rhel62-large
   - name: dbtest_parallel_TG
+    distros:
+    - rhel62-large
   - name: .aggregation !.encrypt
   - name: .auth !.audit !.gle !.multiversion
   - name: bulk_gle_passthrough
@@ -8763,7 +8839,11 @@ buildvariants:
   - name: sharding_gen
   - name: .stitch
   - name: server_discovery_and_monitoring_json_test_TG
+    distros:
+    - rhel62-large
   - name: server_selection_json_test_TG
+    distros:
+    - rhel62-large
 
 - <<: *linux-64-debug-template
   name: linux-64-debug-wtdevelop
@@ -10212,7 +10292,7 @@ buildvariants:
     jstestfuzz_concurrent_num_files: 10
     target_resmoke_time: 10
     max_sub_suites: 3
-    large_distro_name: rhel62-large
+    large_distro_name: rhel62-medium
   tasks:
   - name: compile_all_run_unittests_TG
     distros:
@@ -10228,14 +10308,14 @@ buildvariants:
   - name: .concurrency !.large !.ubsan !.no_txns !.debug_only
   - name: .concurrency .large !.ubsan !.no_txns !.debug_only
     distros:
-    - rhel62-large
+    - rhel62-medium
   - name: disk_wiredtiger
   - name: .encrypt
   - name: idl_tests
   - name: initial_sync_fuzzer_gen
   - name: .integration
     distros:
-    - rhel62-large
+    - rhel62-medium
   - name: .jscore .common
   - name: jsCore_minimum_batch_size
   - name: jsCore_op_query
@@ -10251,22 +10331,22 @@ buildvariants:
   - name: .random_multiversion_ds
   - name: .read_write_concern .large
     distros:
-    - rhel62-large
+    - rhel62-medium
   - name: .read_write_concern !.large
   - name: .replica_sets !.encrypt !.auth
     distros:
-    - rhel62-large
+    - rhel62-medium
   - name: replica_sets_reconfig_jscore_passthrough_gen
   - name: replica_sets_reconfig_jscore_stepdown_passthrough
     distros:
-    - rhel62-large
+    - rhel62-medium
   - name: replica_sets_reconfig_kill_primary_jscore_passthrough
     distros:
-    - rhel62-large
+    - rhel62-medium
   - name: retryable_writes_jscore_passthrough_gen
   - name: retryable_writes_jscore_stepdown_passthrough
     distros:
-    - rhel62-large
+    - rhel62-medium
   - name: .read_only
   - name: .rollbackfuzzer
   - name: sasl
@@ -10282,7 +10362,11 @@ buildvariants:
   - name: .updatefuzzer
   - name: secondary_reads_passthrough_gen
   - name: server_discovery_and_monitoring_json_test_TG
+    distros:
+      - rhel62-large
   - name: server_selection_json_test_TG
+    distros:
+      - rhel62-large
   - name: test_packages
     distros:
     - ubuntu1604-packer
@@ -10308,7 +10392,7 @@ buildvariants:
     jstestfuzz_concurrent_num_files: 10
     target_resmoke_time: 10
     max_sub_suites: 5
-    large_distro_name: rhel62-large
+    large_distro_name: rhel62-medium
     burn_in_tag_buildvariants: enterprise-rhel-62-64-bit-majority-read-concern-off enterprise-rhel-62-64-bit-inmem linux-64-duroff enterprise-rhel-62-64-bit-multiversion
     num_scons_link_jobs_available: 0.99
   tasks:
@@ -10328,6 +10412,7 @@ buildvariants:
   - name: lint_fuzzer_sanity_patch
   - name: lint_yaml
   - name: lint_errorcodes
+  - name: test_api_version_compatibility
   - name: burn_in_tests_gen
   - name: burn_in_tests_multiversion_gen
   - name: .aggfuzzer
@@ -10344,14 +10429,14 @@ buildvariants:
   - name: .concurrency !.large !.ubsan !.no_txns !.debug_only
   - name: .concurrency .large !.ubsan !.no_txns !.debug_only
     distros:
-    - rhel62-large
+    - rhel62-medium
   - name: disk_wiredtiger
   - name: .encrypt
   - name: idl_tests
   - name: initial_sync_fuzzer_gen
   - name: .integration
     distros:
-    - rhel62-large
+    - rhel62-medium
   - name: .jscore .common
   - name: jsCore_minimum_batch_size
   - name: jsCore_op_query
@@ -10369,22 +10454,22 @@ buildvariants:
   - name: .random_multiversion_ds
   - name: .read_write_concern .large
     distros:
-    - rhel62-large
+    - rhel62-medium
   - name: .read_write_concern !.large
   - name: .replica_sets !.encrypt !.auth
     distros:
-    - rhel62-large
+    - rhel62-medium
   - name: replica_sets_reconfig_jscore_passthrough_gen
   - name: replica_sets_reconfig_jscore_stepdown_passthrough
     distros:
-    - rhel62-large
+    - rhel62-medium
   - name: replica_sets_reconfig_kill_primary_jscore_passthrough
     distros:
-    - rhel62-large
+    - rhel62-medium
   - name: retryable_writes_jscore_passthrough_gen
   - name: retryable_writes_jscore_stepdown_passthrough
     distros:
-    - rhel62-large
+    - rhel62-medium
   - name: .read_only
   - name: .rollbackfuzzer
   - name: sasl
@@ -10400,9 +10485,11 @@ buildvariants:
   - name: .updatefuzzer
   - name: secondary_reads_passthrough_gen
   - name: server_discovery_and_monitoring_json_test_TG
+    distros:
+      - rhel62-large
   - name: server_selection_json_test_TG
     distros:
-    - rhel62-large
+      - rhel62-large
   - name: cst_jscore_passthrough
 
 - name: enterprise-rhel-62-64-bit-dynamic-disabled-feature-flags
@@ -10425,7 +10512,7 @@ buildvariants:
     jstestfuzz_concurrent_num_files: 10
     target_resmoke_time: 10
     max_sub_suites: 5
-    large_distro_name: rhel62-large
+    large_distro_name: rhel62-medium
     burn_in_tag_buildvariants: enterprise-rhel-62-64-bit-majority-read-concern-off enterprise-rhel-62-64-bit-inmem linux-64-duroff enterprise-rhel-62-64-bit-multiversion
     num_scons_link_jobs_available: 0.99
     test_flags: >-
@@ -10439,7 +10526,7 @@ buildvariants:
       - rhel62-large
   - name: dbtest_parallel_TG
     distros:
-    - rhel62-large
+    - rhel62-medium
   - name: .aggfuzzer
   - name: .aggregation
   - name: audit
@@ -10451,7 +10538,7 @@ buildvariants:
   - name: .concurrency !.large !.ubsan !.no_txns !.debug_only
   - name: .concurrency .large !.ubsan !.no_txns !.debug_only
     distros:
-    - rhel62-large
+    - rhel62-medium
   - name: disk_wiredtiger
   - name: .encrypt
   - name: feature_flag_multiversion_gen
@@ -10459,7 +10546,7 @@ buildvariants:
   - name: initial_sync_fuzzer_gen
   - name: .integration
     distros:
-    - rhel62-large
+    - rhel62-medium
   - name: .jscore .common
   - name: jsCore_minimum_batch_size
   - name: jsCore_op_query
@@ -10476,22 +10563,22 @@ buildvariants:
   - name: .random_multiversion_ds
   - name: .read_write_concern .large
     distros:
-    - rhel62-large
+    - rhel62-medium
   - name: .read_write_concern !.large
   - name: .replica_sets !.encrypt !.auth
     distros:
-    - rhel62-large
+    - rhel62-medium
   - name: replica_sets_reconfig_jscore_passthrough_gen
   - name: replica_sets_reconfig_jscore_stepdown_passthrough
     distros:
-    - rhel62-large
+    - rhel62-medium
   - name: replica_sets_reconfig_kill_primary_jscore_passthrough
     distros:
-    - rhel62-large
+    - rhel62-medium
   - name: retryable_writes_jscore_passthrough_gen
   - name: retryable_writes_jscore_stepdown_passthrough
     distros:
-    - rhel62-large
+    - rhel62-medium
   - name: .read_only
   - name: .rollbackfuzzer
   - name: sasl
@@ -10507,9 +10594,11 @@ buildvariants:
   - name: .updatefuzzer
   - name: secondary_reads_passthrough_gen
   - name: server_discovery_and_monitoring_json_test_TG
+    distros:
+      - rhel62-large
   - name: server_selection_json_test_TG
     distros:
-    - rhel62-large
+      - rhel62-large
   - name: cst_jscore_passthrough
 
 - name: enterprise-rhel-62-64-bit-large-txns-format
@@ -10530,7 +10619,7 @@ buildvariants:
     multiversion_edition: enterprise
     repo_edition: enterprise
     scons_cache_scope: shared
-    large_distro_name: rhel62-large
+    large_distro_name: rhel62-medium
     test_flags: >-
         --mongodSetParameters="{maxNumberOfTransactionOperationsInSingleOplogEntry: 2}"
         --excludeWithAnyTags=exclude_from_large_txns
@@ -10548,34 +10637,34 @@ buildvariants:
   - name: concurrency_replication_multi_stmt_txn
   - name: concurrency_sharded_replication
     distros:
-    - rhel62-large
+    - rhel62-medium
   - name: concurrency_sharded_replication_with_balancer
     distros:
-    - rhel62-large
+    - rhel62-medium
   - name: concurrency_sharded_clusterwide_ops_add_remove_shards
     distros:
-    - rhel62-large
+    - rhel62-medium
   - name: concurrency_sharded_local_read_write_multi_stmt_txn
     distros:
-    - rhel62-large
+    - rhel62-medium
   - name: concurrency_sharded_local_read_write_multi_stmt_txn_with_balancer
     distros:
-    - rhel62-large
+    - rhel62-medium
   - name: concurrency_sharded_multi_stmt_txn
     distros:
-    - rhel62-large
+    - rhel62-medium
   - name: concurrency_sharded_multi_stmt_txn_with_balancer
     distros:
-    - rhel62-large
+    - rhel62-medium
   - name: concurrency_sharded_multi_stmt_txn_with_stepdowns
     distros:
-    - rhel62-large
+    - rhel62-medium
   - name: concurrency_sharded_with_stepdowns
     distros:
-    - rhel62-large
+    - rhel62-medium
   - name: concurrency_sharded_with_stepdowns_and_balancer
     distros:
-    - rhel62-large
+    - rhel62-medium
   - name: initial_sync_fuzzer_gen
   - name: jsCore
   - name: jsCore_txns
@@ -10588,7 +10677,7 @@ buildvariants:
   - name: .replica_sets !.multi_oplog !.large
   - name: .replica_sets !.multi_oplog .large
     distros:
-    - rhel62-large
+    - rhel62-medium
   - name: .rollbackfuzzer
   - name: .sharding .txns
   - name: sharding_gen
@@ -10599,7 +10688,7 @@ buildvariants:
   - name: sharding_csrs_continuous_config_stepdown_gen
   - name: sharded_multi_stmt_txn_jscore_passthrough
     distros:
-    - rhel62-large
+    - rhel62-medium
 
 - name: enterprise-rhel-62-64-bit-majority-read-concern-off
   display_name: "Enterprise RHEL 6.2 (majority read concern off)"
@@ -10629,7 +10718,7 @@ buildvariants:
     multiversion_edition: enterprise
     repo_edition: enterprise
     scons_cache_scope: shared
-    large_distro_name: rhel62-large
+    large_distro_name: rhel62-medium
   tasks:
   - name: compile_all_run_unittests_TG
     distros:
@@ -10648,15 +10737,15 @@ buildvariants:
   - name: concurrency_sharded_causal_consistency_gen
   - name: concurrency_sharded_causal_consistency_and_balancer
     distros:
-    - rhel62-large
+    - rhel62-medium
   - name: concurrency_replication_causal_consistency
     distros:
-    - rhel62-large
+    - rhel62-medium
   - name: disk_wiredtiger
   - name: .encrypt
   - name: .integration
     distros:
-    - rhel62-large
+    - rhel62-medium
   - name: .jscore .common
   - name: jsCore_minimum_batch_size
   - name: jsCore_op_query
@@ -10667,10 +10756,10 @@ buildvariants:
   - name: .random_multiversion_ds
   - name: .read_write_concern .large
     distros:
-    - rhel62-large
+    - rhel62-medium
   - name: .replica_sets !.auth !.encrypt !.non_maj_read
     distros:
-    - rhel62-large
+    - rhel62-medium
   - name: retryable_writes_jscore_passthrough_gen
   - name: .read_only
   - name: .rollbackfuzzer
@@ -10706,7 +10795,7 @@ buildvariants:
     multiversion_edition: enterprise
     repo_edition: enterprise
     scons_cache_scope: shared
-    large_distro_name: rhel62-large
+    large_distro_name: rhel62-medium
   tasks:
   - name: burn_in_tests_gen
   - name: compile_TG
@@ -10716,7 +10805,7 @@ buildvariants:
   - name: noPassthroughWithMongod_gen
   - name: replica_sets
     distros:
-    - rhel62-large
+    - rhel62-medium
   - name: .rollbackfuzzer
 
 # This build variant is used to run multiversion tests as part of burn_in_tags as these tests are
@@ -10741,7 +10830,7 @@ buildvariants:
     scons_cache_scope: shared
     tooltags: "ssl sasl gssapi"
     build_mongoreplay: true
-    large_distro_name: rhel62-large
+    large_distro_name: rhel62-medium
     resmoke_jobs_factor: 0.25
   tasks:
   - name: compile_all_run_unittests_TG
@@ -10772,7 +10861,7 @@ buildvariants:
     multiversion_edition: enterprise
     repo_edition: enterprise
     scons_cache_scope: shared
-    large_distro_name: rhel62-large
+    large_distro_name: rhel62-medium
   tasks:
   - name: compile_TG
     distros:
@@ -10790,13 +10879,13 @@ buildvariants:
   - name: .concurrency !.ubsan !.no_txns !.debug_only !.large
   - name: .concurrency !.ubsan !.no_txns !.debug_only .large
     distros:
-    - rhel62-large
+    - rhel62-medium
   - name: disk_wiredtiger
   - name: .encrypt
   - name: initial_sync_fuzzer_gen
   - name: .integration
     distros:
-    - rhel62-large
+    - rhel62-medium
   - name: .jscore .common
   - name: jsCore_minimum_batch_size
   - name: jsCore_op_query
@@ -10811,10 +10900,10 @@ buildvariants:
   - name: .read_write_concern !.large !.aggregation
   - name: .read_write_concern .large !.aggregation
     distros:
-    - rhel62-large
+    - rhel62-medium
   - name: .replica_sets !.encrypt !.auth
     distros:
-    - rhel62-large
+    - rhel62-medium
   - name: retryable_writes_jscore_passthrough_gen
   - name: .read_only
   - name: .retry
@@ -10838,7 +10927,7 @@ buildvariants:
   - rhel62-small
   expansions: &enterprise-rhel-62-64-bit-lock-free-reads-expansions
     test_flags: >-
-      --mongodSetParameters="{disableLockFreeReads: false}"
+      --mongodSetParameters="{disableLockFreeReads: false}" --excludeWithAnyTags=incompatible_with_lockfreereads
     compile_flags: >-
       -j$(grep -c ^processor /proc/cpuinfo)
       --ssl
@@ -10849,7 +10938,7 @@ buildvariants:
     repo_edition: enterprise
     scons_cache_scope: shared
     build_mongoreplay: false
-    large_distro_name: rhel62-large
+    large_distro_name: rhel62-medium
   tasks:
   - name: compile_TG
     distros:
@@ -10877,7 +10966,7 @@ buildvariants:
     repo_edition: enterprise
     scons_cache_scope: shared
     build_mongoreplay: false
-    large_distro_name: rhel62-large
+    large_distro_name: rhel62-medium
   tasks:
   - name: burn_in_tests_gen
   - name: compile_TG
@@ -10885,6 +10974,11 @@ buildvariants:
     - rhel62-large
   - name: jsCore
   - name: jsCore_txns
+  - name: noPassthrough_gen
+  - name: noPassthroughWithMongod_gen
+  - name: .replica_sets
+    distros:
+    - rhel62-medium
 
 - name: enterprise-rhel-62-64-bit-operation-resource-consumption-metrics
   display_name: "Enterprise RHEL 6.2 Shared Library (Operation Resource Consumption Metrics)"
@@ -10907,7 +11001,7 @@ buildvariants:
     repo_edition: enterprise
     scons_cache_scope: shared
     build_mongoreplay: false
-    large_distro_name: rhel62-large
+    large_distro_name: rhel62-medium
   tasks:
   - name: compile_all_run_unittests_TG
     distros:
@@ -10920,7 +11014,7 @@ buildvariants:
   - name: .concurrency .common .large
   - name: sharding_jscore_passthrough
     distros:
-    - rhel62-large
+    - rhel62-medium
 
 - name: rhel-62-64-bit-nossl
   display_name: "RHEL 6.2 Shared Library (No SSL)"
@@ -10938,7 +11032,7 @@ buildvariants:
     multiversion_edition: enterprise
     scons_cache_scope: shared
     build_mongoreplay: false
-    large_distro_name: rhel62-large
+    large_distro_name: rhel62-medium
   tasks:
   - name: compile_all_run_unittests_TG
     distros:
@@ -10951,7 +11045,7 @@ buildvariants:
   modules:
     - enterprise
   run_on:
-    - rhel62-large
+    - rhel62-medium
   batchtime: 10080 # 7 days
   stepback: false
   expansions:
@@ -11024,7 +11118,7 @@ buildvariants:
   tasks:
     - name: compile_all_run_unittests_TG
       distros:
-        - rhel62-large
+        - rhel62-medium
     - name: .aggregation
     - name: .auth
     - name: unittest_shell_hang_analyzer_gen
@@ -11039,11 +11133,11 @@ buildvariants:
     - name: multiversion_gen
     - name: .read_write_concern .large
       distros:
-        - rhel62-large
+        - rhel62-medium
     - name: .read_write_concern !.large
     - name: .replica_sets !.encrypt !.auth
       distros:
-        - rhel62-large
+        - rhel62-medium
     - name: retryable_writes_jscore_passthrough_gen
     - name: .read_only
     - name: .sharding .jscore !.wo_snapshot !.multi_stmt
@@ -11086,6 +11180,14 @@ buildvariants:
   - name: auth_audit_gen
   - name: auth_gen
   - name: causally_consistent_jscore_txns_passthrough
+  - name: config_fuzzer_concurrency
+  - name: config_fuzzer_concurrency_replication
+    distros:
+    - rhel70-large
+  - name: config_fuzzer_jsCore
+  - name: config_fuzzer_replica_sets_jscore_passthrough
+    distros:
+    - rhel70-large
   - name: .encrypt !.sharding !.replica_sets !.aggregation !.jscore
   - name: external_auth
   - name: external_auth_aws
@@ -11390,10 +11492,10 @@ buildvariants:
   - name: .concurrency .common !.large
   - name: .concurrency .common .large
     distros:
-      - rhel62-large
+      - rhel62-medium
   - name: concurrency_replication_causal_consistency
     distros:
-      - rhel62-large
+      - rhel62-medium
   - name: disk_wiredtiger
   - name: free_monitoring
   - name: .jscore .common
@@ -12462,7 +12564,7 @@ buildvariants:
   tasks:
   - name: compile_benchmarks
     distros:
-    - rhel62-large
+    - rhel62-medium
   - name: .benchmarks
     distros:
     - centos6-perf
@@ -12480,7 +12582,7 @@ buildvariants:
     multiversion_platform: rhel62
     multiversion_edition: enterprise
     scons_cache_scope: shared
-    large_distro_name: rhel62-large
+    large_distro_name: rhel62-medium
   tasks:
   - name: compile_all_run_unittests_TG
     distros:
@@ -12494,11 +12596,11 @@ buildvariants:
   - name: .misc_js
   - name: .concurrency !.ubsan !.no_txns !.debug_only !.kill_terminate
     distros:
-    - rhel62-large  # Some workloads require a lot of memory, use a bigger machine for this suite.
+    - rhel62-medium  # Some workloads require a lot of memory, use a bigger machine for this suite.
   - name: initial_sync_fuzzer_gen
   - name: .integration !.audit
     distros:
-    - rhel62-large
+    - rhel62-medium
   - name: .jscore .common !.decimal
   - name: jsCore_op_query
   - name: jsCore_txns_large_txns_format
@@ -12513,7 +12615,7 @@ buildvariants:
   - name: replica_sets_multi_stmt_txn_jscore_passthrough
   - name: replica_sets_multi_stmt_txn_stepdown_jscore_passthrough_gen
     distros:
-    - rhel62-large
+    - rhel62-medium
   - name: .retry
   - name: rollback_fuzzer_gen
   - name: sasl
@@ -12521,7 +12623,7 @@ buildvariants:
   - name: session_jscore_passthrough
   - name: sharded_multi_stmt_txn_jscore_passthrough
     distros:
-    - rhel62-large
+    - rhel62-medium
   - name: .sharding .jscore !.wo_snapshot !.multi_stmt
   - name: .sharding .common !.multiversion !.csrs
   - name: snmp
@@ -12531,7 +12633,7 @@ buildvariants:
 - name: linux-64-ephemeralForTest
   display_name: Linux (ephemeralForTest)
   run_on:
-  - rhel62-large
+  - rhel62-medium
   expansions:
     # Transactions are not explicitly supported on the ephemeralForTest storage engine.
     # Speculative majority reads are currently only allowed for change streams, which are only supported on WiredTiger.
@@ -13051,7 +13153,7 @@ buildvariants:
   modules:
   - enterprise
   run_on:
-  - rhel62-large
+  - rhel62-medium
   expansions:
     compile_flags: --ssl MONGO_DISTMOD=rhel62 -j$(grep -c ^processor /proc/cpuinfo) --variables-files=etc/scons/mongodbtoolchain_v3_gcc.vars --link-model=dynamic
     multiversion_platform: rhel62
@@ -13061,7 +13163,7 @@ buildvariants:
     scons_cache_mode: all
     target_resmoke_time: 10
     max_sub_suites: 3
-    large_distro_name: rhel62-large
+    large_distro_name: rhel62-medium
     num_scons_link_jobs_available: 0.99
     record_with: --recordWith /opt/undodb5/bin/live-record
     resmoke_jobs_factor: 0.3

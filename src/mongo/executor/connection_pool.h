@@ -236,10 +236,11 @@ public:
         bool canShutdown = false;
     };
 
-    ConnectionPool(std::shared_ptr<DependentTypeFactoryInterface> impl,
-                   std::string name,
-                   Options options,
-                   std::shared_ptr<const transport::SSLConnectionContext> transientSSLContext);
+    explicit ConnectionPool(
+        std::shared_ptr<DependentTypeFactoryInterface> impl,
+        std::string name,
+        Options options = Options{},
+        std::shared_ptr<const transport::SSLConnectionContext> transientSSLContext = {});
 
     ~ConnectionPool();
 

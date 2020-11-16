@@ -60,6 +60,7 @@ public:
             idxEntryUnitsRead += other.idxEntryUnitsRead;
             keysSorted += other.keysSorted;
             docUnitsReturned += other.docUnitsReturned;
+            cursorSeeks += other.cursorSeeks;
         }
 
         ReadMetrics& operator+=(const ReadMetrics& other) {
@@ -84,6 +85,8 @@ public:
         long long keysSorted = 0;
         // Number of document units returned by a query
         long long docUnitsReturned = 0;
+        // Number of cursor seeks
+        long long cursorSeeks = 0;
     };
 
     /* WriteMetrics maintains metrics for write operations. */
@@ -265,7 +268,9 @@ public:
 
         /**
          * This should be called once per document written with the number of bytes written for that
-         * document. This is a no-op when metrics collection is disabled on this operation.
+         * document. This is a no-op when metrics collection is disabled on this operation. This
+         * function should not be called when the operation is a write to the oplog. The metrics are
+         * only for operations that are not oplog writes.
          */
         void incrementOneDocWritten(size_t docBytesWritten);
 
@@ -274,6 +279,14 @@ public:
          * that entry. This is a no-op when metrics collection is disabled on this operation.
          */
         void incrementOneIdxEntryWritten(size_t idxEntryBytesWritten);
+
+        /**
+         * This should be called once every time the storage engine successfully does a cursor seek.
+         * Note that if it takes multiple attempts to do a successful seek, this function should
+         * only be called once. If the seek does not find anything, this function should not be
+         * called.
+         */
+        void incrementOneCursorSeek();
 
     private:
         /**
@@ -350,21 +363,31 @@ public:
     void merge(OperationContext* opCtx, const std::string& dbName, const OperationMetrics& metrics);
 
     /**
-     * Returns a copy of the Metrics map.
+     * Returns a copy of the per-database metrics map.
      */
     using MetricsMap = std::map<std::string, AggregatedMetrics>;
-    MetricsMap getMetrics() const;
+    MetricsMap getDbMetrics() const;
 
     /**
-     * Returns the Metrics map and then clears the contents. This attempts to swap and return the
-     * metrics map rather than making a full copy like getMetrics.
+     * Returns the per-database metrics map and then clears the contents. This attempts to swap and
+     * return the metrics map rather than making a full copy like getDbMetrics.
      */
-    MetricsMap getAndClearMetrics();
+    MetricsMap getAndClearDbMetrics();
+
+    /**
+     * Returns the globally-aggregated CPU time.
+     */
+    Nanoseconds getCpuTime() const;
+
+    /**
+     * Clears the existing CPU time.
+     */
+    Nanoseconds getAndClearCpuTime();
 
 private:
-    // Protects _metrics
+    // Protects _dbMetrics and _cpuTime
     mutable Mutex _mutex = MONGO_MAKE_LATCH("ResourceConsumption::_mutex");
-    MetricsMap _metrics;
+    MetricsMap _dbMetrics;
+    Nanoseconds _cpuTime;
 };
-
 }  // namespace mongo

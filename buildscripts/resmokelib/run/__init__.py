@@ -39,6 +39,7 @@ from buildscripts.resmokelib.plugin import PluginInterface, Subcommand
 _INTERNAL_OPTIONS_TITLE = "Internal Options"
 _BENCHMARK_ARGUMENT_TITLE = "Benchmark/Benchrun test options"
 _EVERGREEN_ARGUMENT_TITLE = "Evergreen options"
+_CEDAR_ARGUMENT_TITLE = "Cedar options"
 
 
 class TestRunner(Subcommand):  # pylint: disable=too-many-instance-attributes
@@ -167,7 +168,18 @@ class TestRunner(Subcommand):  # pylint: disable=too-many-instance-attributes
         self._resmoke_logger.info("verbatim resmoke.py invocation: %s",
                                   " ".join([shlex.quote(arg) for arg in sys.argv]))
 
-        if config.EVERGREEN_TASK_ID:
+        if config.FUZZ_MONGOD_CONFIGS:
+            local_args = to_local_args()
+            local_args = strip_fuzz_config_params(local_args)
+            self._resmoke_logger.info(
+                "resmoke.py invocation for local usage: %s %s %s",
+                os.path.join("buildscripts", "resmoke.py"), " ".join(local_args),
+                "--fuzzMongodConfigs --configFuzzSeed=" + str(config.CONFIG_FUZZ_SEED))
+            self._resmoke_logger.info("Fuzzed mongodSetParameters:\n%s",
+                                      config.MONGOD_SET_PARAMETERS)
+            self._resmoke_logger.info("Fuzzed wiredTigerConnectionString: %s",
+                                      config.WT_ENGINE_CONFIG)
+        elif config.EVERGREEN_TASK_ID:
             local_args = to_local_args()
             self._resmoke_logger.info("resmoke.py invocation for local usage: %s %s",
                                       os.path.join("buildscripts", "resmoke.py"),
@@ -384,18 +396,18 @@ class TestRunner(Subcommand):  # pylint: disable=too-many-instance-attributes
         from jasper import jasper_pb2
         from jasper import jasper_pb2_grpc
 
-        jasper_process.Process.jasper_pb2 = jasper_pb2
-        jasper_process.Process.jasper_pb2_grpc = jasper_pb2_grpc
+        jasper_process.Process.pb = jasper_pb2
+        jasper_process.Process.rpc = jasper_pb2_grpc
 
         jasper_port = config.BASE_PORT - 1
         jasper_conn_str = "localhost:%d" % jasper_port
-        jasper_process.Process.connection_str = jasper_conn_str
         jasper_command = [
             curator_path, "jasper", "service", "run", "rpc", "--port",
             str(jasper_port)
         ]
         self._jasper_server = process.Process(self._resmoke_logger, jasper_command)
         self._jasper_server.start()
+        config.JASPER_CONNECTION_STR = jasper_conn_str
 
         channel = grpc.insecure_channel(jasper_conn_str)
         grpc.channel_ready_future(channel).result()
@@ -671,6 +683,12 @@ class RunPlugin(PluginInterface):
 
         parser.add_argument("--mongod", dest="mongod_executable", metavar="PATH",
                             help="The path to the mongod executable for resmoke.py to use.")
+
+        parser.add_argument("--fuzzMongodConfigs", dest="fuzz_mongod_configs", action="store_true",
+                            help="Will randomly choose storage configs that were not specified.")
+
+        parser.add_argument("--configFuzzSeed", dest="config_fuzz_seed", metavar="PATH",
+                            help="Sets the seed used by storage config fuzzer")
 
         parser.add_argument(
             "--mongodSetParameters", dest="mongod_set_parameters", action="append",
@@ -974,6 +992,17 @@ class RunPlugin(PluginInterface):
         evergreen_options.add_argument("--versionId", dest="version_id", metavar="VERSION_ID",
                                        help="Sets the version ID of the task.")
 
+        cedar_options = parser.add_argument_group(
+            title=_CEDAR_ARGUMENT_TITLE,
+            description=("Options used to propagate Cedar service connection information."))
+
+        cedar_options.add_argument("--cedarURL", dest="cedar_url", metavar="CEDAR_URL",
+                                   help=("The URL of the Cedar service."))
+
+        cedar_options.add_argument("--cedarRPCPort", dest="cedar_rpc_port",
+                                   metavar="CEDAR_RPC_PORT",
+                                   help=("The RPC port of the Cedar service."))
+
         benchmark_options = parser.add_argument_group(
             title=_BENCHMARK_ARGUMENT_TITLE,
             description="Options for running Benchmark/Benchrun tests")
@@ -1131,3 +1160,13 @@ def to_local_args(input_args=None):  # pylint: disable=too-many-branches,too-man
 
     return ["run"] + [arg for arg in (suites_arg, storage_engine_arg) if arg is not None
                       ] + other_local_args + positional_args
+
+
+def strip_fuzz_config_params(input_args):
+    """Delete fuzz related command line args because we have to add the --fuzzSeed manually."""
+    ret = []
+    for arg in input_args:
+        if "--fuzzMongodConfigs" not in arg and "-fuzzSeed" not in arg:
+            ret.append(arg)
+
+    return ret

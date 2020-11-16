@@ -78,7 +78,7 @@ ValidateState::ValidateState(OperationContext* opCtx,
 
     _database = _databaseLock->getDb() ? _databaseLock->getDb() : nullptr;
     if (_database)
-        _collection = CollectionCatalog::get(opCtx).lookupCollectionByNamespace(opCtx, _nss);
+        _collection = CollectionCatalog::get(opCtx)->lookupCollectionByNamespace(opCtx, _nss);
 
     if (!_collection) {
         if (_database && ViewCatalog::get(_database)->lookup(opCtx, _nss.ns())) {
@@ -98,6 +98,26 @@ ValidateState::ValidateState(OperationContext* opCtx,
 
     _uuid = _collection->uuid();
     _catalogGeneration = opCtx->getServiceContext()->getCatalogGeneration();
+}
+
+bool ValidateState::shouldEnforceFastCount() const {
+    if (_mode == ValidateMode::kForegroundFullEnforceFastCount) {
+        if (_nss.isOplog()) {
+            // Oplog writers only take a global IX lock, so the oplog can still be written to even
+            // during full validation despite its collection X lock. This can cause validate to
+            // incorrectly report an incorrect fast count on the oplog when run in enforceFastCount
+            // mode.
+            return false;
+        } else if (_nss == NamespaceString::kIndexBuildEntryNamespace) {
+            // Do not enforce fast count on the 'config.system.indexBuilds' collection. This is an
+            // internal collection that should not be queried and is empty most of the time.
+            return false;
+        }
+
+        return true;
+    }
+
+    return false;
 }
 
 void ValidateState::yield(OperationContext* opCtx) {
@@ -216,7 +236,7 @@ void ValidateState::initializeCursors(OperationContext* opCtx) {
     if (rs != RecoveryUnit::ReadSource::kNoTimestamp) {
         invariant(rs == RecoveryUnit::ReadSource::kNoOverlap);
         invariant(isBackground());
-        _validateTs = opCtx->recoveryUnit()->getPointInTimeReadTimestamp();
+        _validateTs = opCtx->recoveryUnit()->getPointInTimeReadTimestamp(opCtx);
     }
 
     const IndexCatalog* indexCatalog = _collection->getIndexCatalog();
@@ -277,7 +297,7 @@ void ValidateState::_relockDatabaseAndCollection(OperationContext* opCtx) {
         uasserted(ErrorCodes::Interrupted, collErrMsg);
     }
 
-    _collection = CollectionCatalog::get(opCtx).lookupCollectionByUUID(opCtx, *_uuid);
+    _collection = CollectionCatalog::get(opCtx)->lookupCollectionByUUID(opCtx, *_uuid);
     uassert(ErrorCodes::Interrupted, collErrMsg, _collection);
 
     // The namespace of the collection can be changed during a same database collection rename.

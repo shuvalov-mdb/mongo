@@ -414,7 +414,6 @@ void MapReduceCommandTest::setUp() {
 
     // Transition to PRIMARY so that the server can accept writes.
     ASSERT_OK(_getReplCoord()->setFollowerMode(repl::MemberState::RS_PRIMARY));
-    repl::setOplogCollectionName(service);
     repl::createOplog(_opCtx.get());
 
     // Create collection with one document.
@@ -557,7 +556,7 @@ TEST_F(MapReduceCommandTest, ReplacingExistingOutputCollectionPreservesIndexes) 
 
     ASSERT_NOT_EQUALS(
         *options.uuid,
-        *CollectionCatalog::get(_opCtx.get()).lookupUUIDByNSS(_opCtx.get(), outputNss))
+        *CollectionCatalog::get(_opCtx.get())->lookupUUIDByNSS(_opCtx.get(), outputNss))
         << "Output collection " << outputNss << " was not replaced";
 
     _assertTemporaryCollectionsAreDropped();

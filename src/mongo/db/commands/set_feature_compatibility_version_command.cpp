@@ -35,6 +35,8 @@
 #include "mongo/db/catalog/coll_mod.h"
 #include "mongo/db/catalog/database.h"
 #include "mongo/db/catalog/database_holder.h"
+#include "mongo/db/catalog/drop_indexes.h"
+#include "mongo/db/catalog/index_catalog.h"
 #include "mongo/db/commands.h"
 #include "mongo/db/commands/feature_compatibility_version.h"
 #include "mongo/db/commands/feature_compatibility_version_documentation.h"
@@ -54,6 +56,7 @@
 #include "mongo/db/s/migration_util.h"
 #include "mongo/db/s/sharding_state.h"
 #include "mongo/db/server_options.h"
+#include "mongo/db/views/view_catalog.h"
 #include "mongo/logv2/log.h"
 #include "mongo/rpc/get_status_from_command_result.h"
 #include "mongo/s/database_version_helpers.h"
@@ -235,8 +238,26 @@ public:
                 }
             }
 
-            // Upgrade shards before config finishes its upgrade.
+            // Delete any haystack indexes if we're upgrading to an FCV of 4.9 or higher.
+            // TODO SERVER-51871: This block can removed once 5.0 becomes last-lts.
+            if (requestedVersion >= FeatureCompatibilityParams::Version::kVersion49) {
+                _deleteHaystackIndexesOnUpgrade(opCtx);
+            }
+
             if (serverGlobalParams.clusterRole == ClusterRole::ConfigServer) {
+                if (actualVersion ==
+                        ServerGlobalParams::FeatureCompatibility::Version::kFullyDowngradedTo44 ||
+                    actualVersion ==
+                        ServerGlobalParams::FeatureCompatibility::Version::kUpgradingFrom44To47 ||
+                    actualVersion ==
+                        ServerGlobalParams::FeatureCompatibility::Version::kUpgradingFrom44To48 ||
+                    actualVersion ==
+                        ServerGlobalParams::FeatureCompatibility::Version::kUpgradingFrom44To49) {
+                    // SERVER-52630: Remove once 5.0 becomes the LastLTS
+                    ShardingCatalogManager::get(opCtx)->removePre44LegacyMetadata(opCtx);
+                }
+
+                // Upgrade shards before config finishes its upgrade.
                 uassertStatusOK(
                     ShardingCatalogManager::get(opCtx)->setFeatureCompatibilityVersionOnShards(
                         opCtx, CommandHelpers::appendMajorityWriteConcern(request.toBSON({}))));
@@ -250,6 +271,25 @@ public:
                 requestedVersion,
                 isFromConfigServer);
         } else {
+            // Time-series collections are only supported in 5.0. If the user tries to downgrade the
+            // cluster to an earlier version, they must first remove all time-series collections.
+            // TODO(SERVER-52523): Use the bucket catalog to detect time-series collections.
+            for (const auto& dbName : DatabaseHolder::get(opCtx)->getNames()) {
+                auto viewCatalog = DatabaseHolder::get(opCtx)->getSharedViewCatalog(opCtx, dbName);
+                if (!viewCatalog) {
+                    continue;
+                }
+                viewCatalog->iterate(opCtx, [](const ViewDefinition& view) {
+                    uassert(ErrorCodes::CannotDowngrade,
+                            str::stream()
+                                << "Cannot downgrade the cluster when there are time-series "
+                                   "collections present; drop all time-series collections before "
+                                   "downgrading. First detected time-series collection: "
+                                << view.name(),
+                            !view.isTimeseries());
+                });
+            }
+
             auto replCoord = repl::ReplicationCoordinator::get(opCtx);
             const bool isReplSet =
                 replCoord->getReplicationMode() == repl::ReplicationCoordinator::modeReplSet;
@@ -335,6 +375,47 @@ private:
         LOGV2(4975602,
               "Downgrading on-disk format to reflect the last-continuous version.",
               "last_continuous_version"_attr = FCVP::kLastContinuous);
+    }
+
+    /**
+     * Removes all haystack indexes from the catalog.
+     *
+     * TODO SERVER-51871: This method can be removed once 5.0 becomes last-lts.
+     */
+    void _deleteHaystackIndexesOnUpgrade(OperationContext* opCtx) {
+        auto collCatalog = CollectionCatalog::get(opCtx);
+        for (const auto& db : collCatalog->getAllDbNames()) {
+            for (auto collIt = collCatalog->begin(opCtx, db); collIt != collCatalog->end(opCtx);
+                 ++collIt) {
+                NamespaceStringOrUUID collName(
+                    collCatalog->lookupNSSByUUID(opCtx, collIt.uuid().get()).get());
+                AutoGetCollectionForRead coll(opCtx, collName);
+                auto idxCatalog = coll->getIndexCatalog();
+                std::vector<const IndexDescriptor*> haystackIndexes;
+                idxCatalog->findIndexByType(opCtx, IndexNames::GEO_HAYSTACK, haystackIndexes);
+
+                // Continue if 'coll' has no haystack indexes.
+                if (haystackIndexes.empty()) {
+                    continue;
+                }
+
+                // Construct a dropIndexes command to drop the indexes in 'haystackIndexes'.
+                BSONObjBuilder dropIndexesCmd;
+                dropIndexesCmd.append("dropIndexes", collName.nss()->coll());
+                BSONArrayBuilder indexNames;
+                for (auto&& haystackIndex : haystackIndexes) {
+                    indexNames.append(haystackIndex->indexName());
+                }
+                dropIndexesCmd.append("index", indexNames.arr());
+
+                BSONObjBuilder response;  // This response is ignored.
+                uassertStatusOK(
+                    dropIndexes(opCtx,
+                                *collName.nss(),
+                                CommandHelpers::appendMajorityWriteConcern(dropIndexesCmd.obj()),
+                                &response));
+            }
+        }
     }
 
 } setFeatureCompatibilityVersionCommand;

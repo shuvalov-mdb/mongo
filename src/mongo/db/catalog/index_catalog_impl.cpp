@@ -120,11 +120,12 @@ Status IndexCatalogImpl::init(OperationContext* opCtx) {
             durableCatalog->getIndexSpec(opCtx, _collection->getCatalogId(), indexName).getOwned();
         BSONObj keyPattern = spec.getObjectField("key");
 
+        // TODO SERVER-51871: Delete this block once 5.0 becomes last-lts.
         if (spec.hasField(IndexDescriptor::kGeoHaystackBucketSize)) {
             LOGV2_OPTIONS(4670602,
                           {logv2::LogTag::kStartupWarnings},
                           "Found an existing geoHaystack index in the catalog. Support for "
-                          "geoHaystack indexes has been deprecated. Instead create a 2d index. See "
+                          "geoHaystack indexes has been removed. Instead create a 2d index. See "
                           "https://dochub.mongodb.org/core/4.4-deprecate-geoHaystack");
         }
         auto descriptor = std::make_unique<IndexDescriptor>(_getAccessMethodName(keyPattern), spec);
@@ -314,9 +315,6 @@ void IndexCatalogImpl::_logInternalState(OperationContext* opCtx,
     }
 }
 
-namespace {
-std::string lastHaystackIndexLogged = "";
-}
 StatusWith<BSONObj> IndexCatalogImpl::prepareSpecForCreate(
     OperationContext* opCtx,
     const BSONObj& original,
@@ -328,17 +326,14 @@ StatusWith<BSONObj> IndexCatalogImpl::prepareSpecForCreate(
     }
 
     auto validatedSpec = swValidatedAndFixed.getValue();
-    auto indexName = validatedSpec.getField("name").String();
-    // This gets hit twice per index, so we keep track of what we last logged to avoid logging the
-    // same line for the same index twice.
-    if (validatedSpec.hasField(IndexDescriptor::kGeoHaystackBucketSize) &&
-        lastHaystackIndexLogged.compare(indexName) != 0) {
+
+    // TODO SERVER-51871: Delete this block once 5.0 becomes last-lts.
+    if (validatedSpec.hasField(IndexDescriptor::kGeoHaystackBucketSize)) {
         LOGV2_OPTIONS(4670601,
                       {logv2::LogTag::kStartupWarnings},
                       "Support for "
-                      "geoHaystack indexes has been deprecated. Instead create a 2d index. See "
+                      "geoHaystack indexes has been removed. Instead create a 2d index. See "
                       "https://dochub.mongodb.org/core/4.4-deprecate-geoHaystack");
-        lastHaystackIndexLogged = indexName;
     }
 
     // Check whether this is a non-_id index and there are any settings disallowing this server
@@ -1071,32 +1066,26 @@ Status IndexCatalogImpl::dropIndexEntry(OperationContext* opCtx, IndexCatalogEnt
     }
 
     CollectionQueryInfo::get(_collection).droppedIndex(opCtx, _collection, indexName);
-    entry = nullptr;
-    deleteIndexFromDisk(opCtx, indexName);
+    _deleteIndexFromDisk(opCtx, indexName, entry->getSharedIdent());
 
     return Status::OK();
 }
 
 void IndexCatalogImpl::deleteIndexFromDisk(OperationContext* opCtx, const string& indexName) {
     invariant(opCtx->lockState()->isCollectionLockedForMode(_collection->ns(), MODE_X));
+    _deleteIndexFromDisk(opCtx, indexName, nullptr);
+}
 
-    // The index catalog entry may not exist in the catalog depending on how far an index build may
-    // have gotten before needing to abort. If the catalog entry cannot be found, then there are no
-    // concurrent operations still using the index.
-    auto ident = [&]() -> std::shared_ptr<Ident> {
-        auto indexDesc = findIndexByName(opCtx, indexName, true /* includeUnfinishedIndexes */);
-        if (!indexDesc) {
-            return nullptr;
-        }
-        return getEntry(indexDesc)->accessMethod()->getSharedIdent();
-    }();
-
+void IndexCatalogImpl::_deleteIndexFromDisk(OperationContext* opCtx,
+                                            const string& indexName,
+                                            std::shared_ptr<Ident> ident) {
+    invariant(!findIndexByName(opCtx, indexName, true /* includeUnfinishedIndexes*/));
     catalog::removeIndex(opCtx,
                          indexName,
                          _collection->getCatalogId(),
                          _collection->uuid(),
                          _collection->ns(),
-                         ident);
+                         std::move(ident));
 }
 
 void IndexCatalogImpl::setMultikeyPaths(OperationContext* const opCtx,

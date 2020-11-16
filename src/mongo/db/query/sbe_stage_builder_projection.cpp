@@ -329,7 +329,6 @@ public:
         // inclusion projection also add constant filter stage on top to filter out input values for
         // nested traversal if they're not documents.
         auto outputSlot = _context->slotIdGenerator->generate();
-        _context->relevantSlots.push_back(outputSlot);
         _context->evals.push(
             {{_context->topLevel().inputSlot,
               outputSlot,
@@ -408,7 +407,6 @@ std::pair<sbe::value::SlotId, PlanStageType> generateProjection(
                                               std::move(stage),
                                               inputVar,
                                               env};
-    context.relevantSlots.push_back(inputVar);
     ProjectionTraversalPreVisitor preVisitor{&context};
     ProjectionTraversalPostVisitor postVisitor{&context};
     ProjectionTraversalWalker walker{&preVisitor, &postVisitor};

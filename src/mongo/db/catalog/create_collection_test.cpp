@@ -71,7 +71,6 @@ void CreateCollectionTest::setUp() {
     auto replCoord = std::make_unique<repl::ReplicationCoordinatorMock>(service);
     ASSERT_OK(replCoord->setFollowerMode(repl::MemberState::RS_PRIMARY));
     repl::ReplicationCoordinator::set(service, std::move(replCoord));
-    repl::setOplogCollectionName(service);
 
     _storage = std::make_unique<repl::StorageInterfaceImpl>();
 }
@@ -215,8 +214,8 @@ TEST_F(CreateCollectionTest,
     ASSERT_EQUALS(uuid, getCollectionUuid(opCtx.get(), newNss));
 
     // Check that old collection that was renamed out of the way still exists.
-    auto& catalog = CollectionCatalog::get(opCtx.get());
-    auto renamedCollectionNss = catalog.lookupNSSByUUID(opCtx.get(), existingCollectionUuid);
+    auto catalog = CollectionCatalog::get(opCtx.get());
+    auto renamedCollectionNss = catalog->lookupNSSByUUID(opCtx.get(), existingCollectionUuid);
     ASSERT(renamedCollectionNss);
     ASSERT_TRUE(collectionExists(opCtx.get(), *renamedCollectionNss))
         << "old renamed collection with UUID " << existingCollectionUuid

@@ -426,7 +426,7 @@ Status CollectionImpl::checkValidation(OperationContext* opCtx, const BSONObj& d
     if (_validationLevel == ValidationLevel::OFF)
         return Status::OK();
 
-    if (documentValidationDisabled(opCtx))
+    if (DocumentValidationSettings::get(opCtx).isSchemaValidationDisabled())
         return Status::OK();
 
     if (ns().isTemporaryReshardingCollection()) {
@@ -779,6 +779,18 @@ void CollectionImpl::deleteDocument(OperationContext* opCtx,
                                     bool fromMigrate,
                                     bool noWarn,
                                     Collection::StoreDeletedDoc storeDeletedDoc) const {
+    Snapshotted<BSONObj> doc = docFor(opCtx, loc);
+    deleteDocument(opCtx, doc, stmtId, loc, opDebug, fromMigrate, noWarn, storeDeletedDoc);
+}
+
+void CollectionImpl::deleteDocument(OperationContext* opCtx,
+                                    Snapshotted<BSONObj> doc,
+                                    StmtId stmtId,
+                                    RecordId loc,
+                                    OpDebug* opDebug,
+                                    bool fromMigrate,
+                                    bool noWarn,
+                                    Collection::StoreDeletedDoc storeDeletedDoc) const {
     if (isCapped()) {
         LOGV2(20291,
               "failing remove on a capped ns {ns}",
@@ -788,7 +800,6 @@ void CollectionImpl::deleteDocument(OperationContext* opCtx,
         return;
     }
 
-    Snapshotted<BSONObj> doc = docFor(opCtx, loc);
     getGlobalServiceContext()->getOpObserver()->aboutToDelete(opCtx, ns(), doc.value());
 
     boost::optional<BSONObj> deletedDoc;

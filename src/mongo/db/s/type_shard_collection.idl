@@ -90,6 +90,19 @@ structs:
                 description: "Uniquely identifies this instance of the collection, in case of
                               drop/create or shard key refine."
                 optional: false
+            timestamp:
+                type: timestamp
+                description: "Uniquely identifies this incarnation of the collection. Only changes
+                              in case of drop and create, or shard key refine.
+                              This field will store the ClusterTime of the Config Server when the
+                              collection was created or it's shard key last refined. Because
+                              timestamps are comparable, we are able to define a total order in time
+                              in the collection. This field will replace Epoch, which are not
+                              comparable.
+
+                              It is optional for parsing purposes, because in versions of MongoDB
+                              prior to 5.0, this value wasn't being written."
+                optional: true
             uuid:
                 type: uuid
                 description: "The UUID that will be used to create the local collection on each of
@@ -133,4 +146,15 @@ structs:
                               original collection undergoing a resharding operation or this
                               collection is the temporary resharding collection."
                 type: TypeCollectionReshardingFields
+                optional: true
+            allowMigrations:    # TODO (SERVER-51880): This field must never be 'false' on downgrade
+                                # to FCV 4.4 and must be cleared
+                cpp_name: pre50CompatibleAllowMigrations
+                type: bool
+                description: "Whether this collection allows chunks to move. It is required by
+                              almost all DDL operations in order to guarantee that the set of
+                              shards, which comprise a collection will not change.
+
+                              It must be optional and not present when running in FCV 4.4, because
+                              binaries prior to 5.0 use strict parsing and will fail."
                 optional: true

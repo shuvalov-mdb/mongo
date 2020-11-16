@@ -36,7 +36,6 @@
 #include "mongo/bson/bsonobj.h"
 #include "mongo/db/catalog/collection_catalog.h"
 #include "mongo/db/catalog/database_holder.h"
-#include "mongo/db/command_generic_argument.h"
 #include "mongo/db/commands.h"
 #include "mongo/db/concurrency/write_conflict_exception.h"
 #include "mongo/db/curop.h"
@@ -48,14 +47,15 @@
 #include "mongo/db/ops/insert.h"
 #include "mongo/db/repl/replication_coordinator.h"
 #include "mongo/db/views/view_catalog.h"
+#include "mongo/idl/command_generic_argument.h"
 #include "mongo/logv2/log.h"
 
 namespace mongo {
 namespace {
 void _createSystemDotViewsIfNecessary(OperationContext* opCtx, const Database* db) {
     // Create 'system.views' in a separate WUOW if it does not exist.
-    if (!CollectionCatalog::get(opCtx).lookupCollectionByNamespace(opCtx,
-                                                                   db->getSystemViewsName())) {
+    if (!CollectionCatalog::get(opCtx)->lookupCollectionByNamespace(opCtx,
+                                                                    db->getSystemViewsName())) {
         WriteUnitOfWork wuow(opCtx);
         invariant(db->createCollection(opCtx, db->getSystemViewsName()));
         wuow.commit();
@@ -92,7 +92,7 @@ Status _createView(OperationContext* opCtx,
             nss,
             Top::LockType::NotLocked,
             AutoStatsTracker::LogMode::kUpdateTopAndCurOp,
-            CollectionCatalog::get(opCtx).getDatabaseProfileLevel(nss.db()));
+            CollectionCatalog::get(opCtx)->getDatabaseProfileLevel(nss.db()));
 
         // If the view creation rolls back, ensure that the Top entry created for the view is
         // deleted.
@@ -100,7 +100,9 @@ Status _createView(OperationContext* opCtx,
             Top::get(serviceContext).collectionDropped(nss);
         });
 
-        Status status = db->userCreateNS(opCtx, nss, std::move(collectionOptions), true, idIndex);
+        // Even though 'collectionOptions' is passed by rvalue reference, it is not safe to move
+        // because 'userCreateNS' may throw a WriteConflictException.
+        Status status = db->userCreateNS(opCtx, nss, collectionOptions, true, idIndex);
         if (!status.isOK()) {
             return status;
         }
@@ -113,14 +115,65 @@ Status _createView(OperationContext* opCtx,
 Status _createTimeseries(OperationContext* opCtx,
                          const NamespaceString& ns,
                          CollectionOptions&& options) {
+    auto bucketsNs = ns.makeTimeseriesBucketsNamespace();
+
+    options.viewOn = bucketsNs.coll().toString();
+
+    // The time field cannot be sparse, so we use it as the exit condition for the loop.
+    auto assembleData =
+        "function(dataArray) { \
+                const assembledData = []; \
+                if (dataArray.length === 0) { \
+                    return assembledData; \
+                } \
+                for (let i = 0;;i++) { \
+                    const assembledObj = {}; \
+                    for (const elem of dataArray) { \
+                        if (elem.v.hasOwnProperty(i)) { \
+                            assembledObj[elem.k] = elem.v[i]; \
+                        } else if (elem.k === '" +
+        options.timeseries->getTimeField() +
+        "') { \
+                            return assembledData; \
+                        } \
+                    } \
+                    assembledData.push(assembledObj); \
+                } \
+            }";
+    options.pipeline =
+        BSON_ARRAY(BSON("$project" << BSON("dataArray" << BSON("$objectToArray"
+                                                               << "$data")))
+                   << BSON("$project" << BSON(
+                               "assembledData" << BSON(
+                                   "$function" << BSON("body" << assembleData << "args"
+                                                              << BSON_ARRAY("$dataArray") << "lang"
+                                                              << "js"))))
+                   << BSON("$unwind"
+                           << "$assembledData")
+                   << BSON("$replaceWith"
+                           << "$assembledData"));
+
     return writeConflictRetry(opCtx, "create", ns.ns(), [&]() -> Status {
-        AutoGetCollection autoColl(opCtx, ns, MODE_IX);
-        auto bucketsNs = ns.makeTimeseriesBucketsNamespace();
+        AutoGetCollection autoColl(opCtx, ns, MODE_IX, AutoGetCollectionViewMode::kViewsPermitted);
         Lock::CollectionLock bucketsCollLock(opCtx, bucketsNs, MODE_IX);
         Lock::CollectionLock systemDotViewsLock(
             opCtx,
             NamespaceString(ns.db(), NamespaceString::kSystemDotViewsCollectionName),
             MODE_X);
+
+        // This is a top-level handler for time-series creation name conflicts. New commands coming
+        // in, or commands that generated a WriteConflict must return a NamespaceExists error here
+        // on conflict.
+        if (CollectionCatalog::get(opCtx)->lookupCollectionByNamespace(opCtx, ns)) {
+            return Status(ErrorCodes::NamespaceExists,
+                          str::stream() << "Collection already exists. NS: " << ns);
+        }
+
+        auto db = autoColl.ensureDbExists();
+        if (ViewCatalog::get(db)->lookup(opCtx, ns.ns())) {
+            return {ErrorCodes::NamespaceExists,
+                    str::stream() << "A view already exists. NS: " << ns};
+        }
 
         if (opCtx->writesAreReplicated() &&
             !repl::ReplicationCoordinator::get(opCtx)->canAcceptWritesFor(opCtx, ns)) {
@@ -128,24 +181,22 @@ Status _createTimeseries(OperationContext* opCtx,
                     str::stream() << "Not primary while creating collection " << ns};
         }
 
-        auto db = autoColl.ensureDbExists();
         _createSystemDotViewsIfNecessary(opCtx, db);
 
+        auto catalog = CollectionCatalog::get(opCtx);
         WriteUnitOfWork wuow(opCtx);
 
-        AutoStatsTracker statsTracker(
-            opCtx,
-            ns,
-            Top::LockType::NotLocked,
-            AutoStatsTracker::LogMode::kUpdateTopAndCurOp,
-            CollectionCatalog::get(opCtx).getDatabaseProfileLevel(ns.db()));
+        AutoStatsTracker statsTracker(opCtx,
+                                      ns,
+                                      Top::LockType::NotLocked,
+                                      AutoStatsTracker::LogMode::kUpdateTopAndCurOp,
+                                      catalog->getDatabaseProfileLevel(ns.db()));
 
-        AutoStatsTracker bucketsStatsTracker(
-            opCtx,
-            bucketsNs,
-            Top::LockType::NotLocked,
-            AutoStatsTracker::LogMode::kUpdateTopAndCurOp,
-            CollectionCatalog::get(opCtx).getDatabaseProfileLevel(ns.db()));
+        AutoStatsTracker bucketsStatsTracker(opCtx,
+                                             bucketsNs,
+                                             Top::LockType::NotLocked,
+                                             AutoStatsTracker::LogMode::kUpdateTopAndCurOp,
+                                             catalog->getDatabaseProfileLevel(ns.db()));
 
         // If the buckets collection and time-series view creation roll back, ensure that their Top
         // entries are deleted.
@@ -160,12 +211,13 @@ Status _createTimeseries(OperationContext* opCtx,
                   str::stream() << "Failed to create buckets collection " << bucketsNs
                                 << " for time-series collection " << ns);
 
-        // Create the time-series view.
-        options.viewOn = bucketsNs.coll().toString();
-        auto status = db->userCreateNS(opCtx, ns, std::move(options));
+        // Create the time-series view. Even though 'options' is passed by rvalue reference, it is
+        // not safe to move because 'userCreateNS' may throw a WriteConflictException.
+        auto status = db->userCreateNS(opCtx, ns, options);
         if (!status.isOK()) {
             return status.withContext(str::stream() << "Failed to create view on " << bucketsNs
-                                                    << " for time-series collection " << ns);
+                                                    << " for time-series collection " << ns
+                                                    << " with options " << options.toBSON());
         }
 
         wuow.commit();
@@ -184,7 +236,7 @@ Status _createCollection(OperationContext* opCtx,
         // This is a top-level handler for collection creation name conflicts. New commands coming
         // in, or commands that generated a WriteConflict must return a NamespaceExists error here
         // on conflict.
-        if (CollectionCatalog::get(opCtx).lookupCollectionByNamespace(opCtx, nss)) {
+        if (CollectionCatalog::get(opCtx)->lookupCollectionByNamespace(opCtx, nss)) {
             return Status(ErrorCodes::NamespaceExists,
                           str::stream() << "Collection already exists. NS: " << nss);
         }
@@ -206,7 +258,7 @@ Status _createCollection(OperationContext* opCtx,
             nss,
             Top::LockType::NotLocked,
             AutoStatsTracker::LogMode::kUpdateTopAndCurOp,
-            CollectionCatalog::get(opCtx).getDatabaseProfileLevel(nss.db()));
+            CollectionCatalog::get(opCtx)->getDatabaseProfileLevel(nss.db()));
 
         // If the collection creation rolls back, ensure that the Top entry created for the
         // collection is deleted.
@@ -214,8 +266,9 @@ Status _createCollection(OperationContext* opCtx,
             Top::get(serviceContext).collectionDropped(nss);
         });
 
-        Status status =
-            autoDb.getDb()->userCreateNS(opCtx, nss, std::move(collectionOptions), true, idIndex);
+        // Even though 'collectionOptions' is passed by rvalue reference, it is not safe to move
+        // because 'userCreateNS' may throw a WriteConflictException.
+        Status status = autoDb.getDb()->userCreateNS(opCtx, nss, collectionOptions, true, idIndex);
         if (!status.isOK()) {
             return status;
         }
@@ -349,8 +402,8 @@ Status createCollectionForApplyOps(OperationContext* opCtx,
                 "Invalid UUID in applyOps create command: " + uuid.toString(),
                 uuid.isRFC4122v4());
 
-        auto& catalog = CollectionCatalog::get(opCtx);
-        const auto currentName = catalog.lookupNSSByUUID(opCtx, uuid);
+        auto catalog = CollectionCatalog::get(opCtx);
+        const auto currentName = catalog->lookupNSSByUUID(opCtx, uuid);
         auto serviceContext = opCtx->getServiceContext();
         auto opObserver = serviceContext->getOpObserver();
         if (currentName && *currentName == newCollName)
@@ -374,9 +427,7 @@ Status createCollectionForApplyOps(OperationContext* opCtx,
         // a random temporary name is correct: once all entries are replayed no temporary
         // names will remain.
         const bool stayTemp = true;
-        auto futureColl = db
-            ? CollectionCatalog::get(opCtx).lookupCollectionByNamespace(opCtx, newCollName)
-            : nullptr;
+        auto futureColl = db ? catalog->lookupCollectionByNamespace(opCtx, newCollName) : nullptr;
         bool needsRenaming = static_cast<bool>(futureColl);
         invariant(!needsRenaming || allowRenameOutOfTheWay);
 
@@ -421,7 +472,7 @@ Status createCollectionForApplyOps(OperationContext* opCtx,
 
                     wuow.commit();
                     // Re-fetch collection after commit to get a valid pointer
-                    futureColl = CollectionCatalog::get(opCtx).lookupCollectionByUUID(opCtx, uuid);
+                    futureColl = CollectionCatalog::get(opCtx)->lookupCollectionByUUID(opCtx, uuid);
                     return Status::OK();
                 });
 
@@ -449,7 +500,7 @@ Status createCollectionForApplyOps(OperationContext* opCtx,
 
         // If the collection with the requested UUID already exists, but with a different
         // name, just rename it to 'newCollName'.
-        if (catalog.lookupCollectionByUUID(opCtx, uuid)) {
+        if (catalog->lookupCollectionByUUID(opCtx, uuid)) {
             invariant(currentName);
             uassert(40655,
                     str::stream() << "Invalid name " << newCollName << " for UUID " << uuid,

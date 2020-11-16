@@ -43,6 +43,7 @@
 #include "mongo/executor/network_interface_factory.h"
 #include "mongo/executor/thread_pool_task_executor.h"
 #include "mongo/logv2/log.h"
+#include "mongo/util/assert_util.h"
 #include "mongo/util/concurrency/thread_pool.h"
 #include "mongo/util/fail_point.h"
 
@@ -222,6 +223,14 @@ void recoverTenantMigrationAccessBlockers(OperationContext* opCtx) {
         }
         return true;
     });
+}
+
+void handleTenantMigrationConflict(OperationContext* opCtx, Status status) {
+    auto migrationConflictInfo = status.extraInfo<TenantMigrationConflictInfo>();
+    invariant(migrationConflictInfo);
+    auto mtab = migrationConflictInfo->getTenantMigrationAccessBlocker();
+    invariant(mtab);
+    uassertStatusOK(mtab->waitUntilCommittedOrAborted(opCtx));
 }
 
 }  // namespace tenant_migration_donor

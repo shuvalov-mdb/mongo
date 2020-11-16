@@ -40,6 +40,7 @@
 #include "mongo/base/string_data.h"
 #include "mongo/bson/bsonobj.h"
 #include "mongo/db/service_context.h"
+#include "mongo/logv2/attribute_storage.h"
 #include "mongo/platform/atomic_word.h"
 #include "mongo/util/decorable.h"
 #include "mongo/util/net/sock.h"
@@ -163,8 +164,32 @@ struct CertInformationToLog {
     SSLX509Name subject;
     SSLX509Name issuer;
     std::vector<char> thumbprint;
+    // The human readable 'thumbprint' encoded with 'hexblob::encode'.
+    std::string hexEncodedThumbprint;
     Date_t validityNotBefore;
     Date_t validityNotAfter;
+    // If the certificate was loaded from file, this is the file name. If empty,
+    // it means the certificate came from memory payload.
+    std::optional<std::string> keyFile;
+    // If the certificate targets a particular cluster, this is cluster URI. If empty,
+    // it means the certificate is the default one for the local cluster.
+    std::optional<std::string> targetClusterURI;
+
+    logv2::DynamicAttributes getDynamicAttributes() const {
+        logv2::DynamicAttributes attrs;
+        attrs.add("subject", subject);
+        attrs.add("issuer", issuer);
+        attrs.add("thumbprint", StringData(hexEncodedThumbprint));
+        attrs.add("notValidBefore", validityNotBefore);
+        attrs.add("notValidAfter", validityNotAfter);
+        if (keyFile) {
+            attrs.add("keyFile", StringData(*keyFile));
+        }
+        if (targetClusterURI) {
+            attrs.add("targetClusterURI", StringData(*targetClusterURI));
+        }
+        return attrs;
+    }
 };
 
 struct CRLInformationToLog {
@@ -237,6 +262,17 @@ public:
         ERR_error_string_n(code, msg, msglen);
         return msg;
     }
+
+    /**
+     * Utility class to capture a temporary string with SSL error message in DynamicAttributes.
+     */
+    struct CaptureSSLErrorInAttrs {
+        CaptureSSLErrorInAttrs(logv2::DynamicAttributes& attrs)
+            : _captured(getSSLErrorMessage(ERR_get_error())) {
+            attrs.add("error", _captured);
+        }
+        std::string _captured;
+    };
 #endif
 
     /**
@@ -406,6 +442,7 @@ void logSSLInfo(const SSLInformationToLog& info,
 
 /**
  * Logs the certificate.
+ * @param certType human-readable description of the certificate type.
  */
 void logCert(const CertInformationToLog& cert, StringData certType, const int logNum);
 void logCRL(const CRLInformationToLog& crl, const int logNum);

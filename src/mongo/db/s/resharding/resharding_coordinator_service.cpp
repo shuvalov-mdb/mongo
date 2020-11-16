@@ -139,10 +139,7 @@ void writeToCoordinatorStateNss(OperationContext* opCtx,
         ? boost::none
         : boost::make_optional(1);
     auto res = ShardingCatalogManager::get(opCtx)->writeToConfigDocumentInTxn(
-        opCtx,
-        NamespaceString::kConfigReshardingOperationsNamespace,
-        std::move(request),
-        txnNumber);
+        opCtx, NamespaceString::kConfigReshardingOperationsNamespace, request, txnNumber);
 
     if (expectedNumModified) {
         assertNumDocsModifiedMatchesExpected(request, res, *expectedNumModified);
@@ -162,10 +159,11 @@ BSONObj createReshardingFieldsUpdateForOriginalNss(
             TypeCollectionDonorFields donorField(coordinatorDoc.getReshardingKey());
             originalEntryReshardingFields.setDonorFields(donorField);
 
-            return BSON(
-                "$set" << BSON("reshardingFields"
-                               << originalEntryReshardingFields.toBSON() << "lastmod"
-                               << opCtx->getServiceContext()->getPreciseClockSource()->now()));
+            return BSON("$set" << BSON(CollectionType::kReshardingFieldsFieldName
+                                       << originalEntryReshardingFields.toBSON()
+                                       << CollectionType::kUpdatedAtFieldName
+                                       << opCtx->getServiceContext()->getPreciseClockSource()->now()
+                                       << CollectionType::kAllowMigrationsFieldName << false));
         }
         case CoordinatorStateEnum::kCommitted:
             // Update the config.collections entry for the original nss to reflect
@@ -182,10 +180,10 @@ BSONObj createReshardingFieldsUpdateForOriginalNss(
         case mongo::CoordinatorStateEnum::kDone:
             // Remove 'reshardingFields' from the config.collections entry
             return BSON(
-                "$unset" << BSON("reshardingFields"
-                                 << "")
+                "$unset" << BSON(CollectionType::kReshardingFieldsFieldName
+                                 << "" << CollectionType::kAllowMigrationsFieldName << "")
                          << "$set"
-                         << BSON("lastmod"
+                         << BSON(CollectionType::kUpdatedAtFieldName
                                  << opCtx->getServiceContext()->getPreciseClockSource()->now()));
         default:
             // Update the 'state' field in the 'reshardingFields' section
@@ -276,7 +274,7 @@ void writeToConfigCollectionsForTempNss(OperationContext* opCtx,
         : boost::make_optional(1);
 
     auto res = ShardingCatalogManager::get(opCtx)->writeToConfigDocumentInTxn(
-        opCtx, CollectionType::ConfigNS, std::move(request), txnNumber);
+        opCtx, CollectionType::ConfigNS, request, txnNumber);
 
     if (expectedNumModified) {
         assertNumDocsModifiedMatchesExpected(request, res, *expectedNumModified);
@@ -410,6 +408,7 @@ stdx::unordered_map<CoordinatorStateEnum, ParticipantsToNofityEnum> notifyForSta
     {CoordinatorStateEnum::kInitializing, ParticipantsToNofityEnum::kNone},
     {CoordinatorStateEnum::kPreparingToDonate, ParticipantsToNofityEnum::kDonors},
     {CoordinatorStateEnum::kCloning, ParticipantsToNofityEnum::kRecipients},
+    {CoordinatorStateEnum::kApplying, ParticipantsToNofityEnum::kDonors},
     {CoordinatorStateEnum::kMirroring, ParticipantsToNofityEnum::kDonors},
     {CoordinatorStateEnum::kCommitted, ParticipantsToNofityEnum::kNone},
     {CoordinatorStateEnum::kRenaming, ParticipantsToNofityEnum::kRecipients},
@@ -492,7 +491,6 @@ CollectionType createTempReshardingCollectionType(
     collType.setKeyPattern(coordinatorDoc.getReshardingKey());
     collType.setDefaultCollation(collation);
     collType.setUnique(false);
-    collType.setDistributionMode(CollectionType::DistributionMode::kSharded);
 
     TypeCollectionReshardingFields tempEntryReshardingFields(coordinatorDoc.get_id());
     tempEntryReshardingFields.setState(coordinatorDoc.getState());
@@ -769,9 +767,6 @@ ReshardingCoordinatorService::ReshardingCoordinator::_awaitAllDonorsReadyToDonat
     if (_coordinatorDoc.getState() > CoordinatorStateEnum::kPreparingToDonate) {
         return ExecutorFuture<void>(**executor, Status::OK());
     }
-
-    // TODO SERVER-51398 Remove this call.
-    interrupt({ErrorCodes::InternalError, "Early exit to support jsTesting"});
 
     return _reshardingCoordinatorObserver->awaitAllDonorsReadyToDonate()
         .thenRunOn(**executor)

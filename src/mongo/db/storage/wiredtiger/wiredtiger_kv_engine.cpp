@@ -1477,7 +1477,7 @@ Status WiredTigerKVEngine::createGroupedSortedDataInterface(OperationContext* op
     }
     // Some unittests use a OperationContextNoop that can't support such lookups.
     auto ns = collOptions.uuid
-        ? *CollectionCatalog::get(opCtx).lookupNSSByUUID(opCtx, *collOptions.uuid)
+        ? *CollectionCatalog::get(opCtx)->lookupNSSByUUID(opCtx, *collOptions.uuid)
         : NamespaceString();
 
     StatusWith<std::string> result = WiredTigerIndex::generateCreateString(
@@ -1917,6 +1917,18 @@ void WiredTigerKVEngine::setStableTimestamp(Timestamp stableTimestamp, bool forc
         return;
     }
 
+    Timestamp allDurableTimestamp = getAllDurableTimestamp();
+
+    // When 'force' is set, the all durable timestamp will be advanced to the stable timestamp.
+    // TODO SERVER-52623: to remove this enable majority read concern check.
+    if (serverGlobalParams.enableMajorityReadConcern && !force && !allDurableTimestamp.isNull() &&
+        stableTimestamp > allDurableTimestamp) {
+        LOGV2_FATAL(5138700,
+                    "The stable timestamp was greater than the all durable timestamp",
+                    "stableTimestamp"_attr = stableTimestamp,
+                    "allDurableTimestamp"_attr = allDurableTimestamp);
+    }
+
     // Communicate to WiredTiger what the "stable timestamp" is. Timestamp-aware checkpoints will
     // only persist to disk transactions committed with a timestamp earlier than the "stable
     // timestamp".
@@ -2108,6 +2120,12 @@ StatusWith<Timestamp> WiredTigerKVEngine::recoverToStableTimestamp(OperationCont
                 str::stream() << "Error rolling back to stable. Err: " << wiredtiger_strerror(ret)};
     }
 
+    {
+        // Rollback the highest seen durable timestamp to the stable timestamp.
+        stdx::lock_guard<Latch> lk(_highestDurableTimestampMutex);
+        _highestSeenDurableTimestamp = stableTimestamp.asULL();
+    }
+
     _sizeStorer = std::make_unique<WiredTigerSizeStorer>(_conn, _sizeStorerUri, _readOnly);
 
     return {stableTimestamp};
@@ -2143,21 +2161,6 @@ Timestamp WiredTigerKVEngine::getAllDurableTimestamp() const {
         _highestSeenDurableTimestamp = ret;
     }
     return Timestamp(ret);
-}
-
-Timestamp WiredTigerKVEngine::getOldestOpenReadTimestamp() const {
-    // Return the minimum read timestamp of all open transactions.
-    char buf[(2 * 8 /*bytes in hex*/) + 1 /*null terminator*/];
-    auto wtstatus = _conn->query_timestamp(_conn, buf, "get=oldest_reader");
-    if (wtstatus == WT_NOTFOUND) {
-        return Timestamp();
-    } else {
-        invariantWTOK(wtstatus);
-    }
-
-    uint64_t tmp;
-    fassert(38802, NumberParser().base(16)(buf, &tmp));
-    return Timestamp(tmp);
 }
 
 boost::optional<Timestamp> WiredTigerKVEngine::getRecoveryTimestamp() const {

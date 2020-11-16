@@ -62,6 +62,8 @@ public:
               LockMode mode,
               Date_t deadline = Date_t::max());
 
+    AutoGetDb(AutoGetDb&&) = default;
+
     /**
      * Returns the database, or nullptr if it didn't exist.
      */
@@ -76,9 +78,9 @@ public:
 
 private:
     OperationContext* _opCtx;
-    const std::string _dbName;
+    std::string _dbName;
 
-    const Lock::DBLock _dbLock;
+    Lock::DBLock _dbLock;
     Database* _db;
 };
 
@@ -401,35 +403,6 @@ private:
     AutoGetDb _autoDb;
 
     Database* _db;
-};
-
-/**
- * RAII-style class. Hides changes to the CollectionCatalog for the life of the object, so that
- * calls to CollectionCatalog::lookupNSSByUUID will return results as before the RAII object was
- * instantiated.
- *
- * The caller must hold the global exclusive lock for the life of the instance.
- */
-class ConcealCollectionCatalogChangesBlock {
-    ConcealCollectionCatalogChangesBlock(const ConcealCollectionCatalogChangesBlock&) = delete;
-    ConcealCollectionCatalogChangesBlock& operator=(const ConcealCollectionCatalogChangesBlock&) =
-        delete;
-
-public:
-    /**
-     * Conceals future CollectionCatalog changes and stashes a pointer to the opCtx for the
-     * destructor to use.
-     */
-    ConcealCollectionCatalogChangesBlock(OperationContext* opCtx);
-
-    /**
-     * Reveals CollectionCatalog changes.
-     */
-    ~ConcealCollectionCatalogChangesBlock();
-
-private:
-    // Needed for the destructor to access the CollectionCatalog in order to call onOpenCatalog.
-    OperationContext* _opCtx;
 };
 
 /**

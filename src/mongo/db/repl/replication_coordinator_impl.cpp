@@ -66,7 +66,7 @@
 #include "mongo/db/repl/always_allow_non_local_writes.h"
 #include "mongo/db/repl/check_quorum_for_config_change.h"
 #include "mongo/db/repl/data_replicator_external_state_initial_sync.h"
-#include "mongo/db/repl/is_master_response.h"
+#include "mongo/db/repl/hello_response.h"
 #include "mongo/db/repl/isself.h"
 #include "mongo/db/repl/last_vote.h"
 #include "mongo/db/repl/local_oplog_info.h"
@@ -102,7 +102,7 @@
 #include "mongo/platform/mutex.h"
 #include "mongo/rpc/metadata/oplog_query_metadata.h"
 #include "mongo/rpc/metadata/repl_set_metadata.h"
-#include "mongo/transport/ismaster_metrics.h"
+#include "mongo/transport/hello_metrics.h"
 #include "mongo/util/assert_util.h"
 #include "mongo/util/fail_point.h"
 #include "mongo/util/scopeguard.h"
@@ -541,7 +541,7 @@ void ReplicationCoordinatorImpl::_createHorizonTopologyChangePromiseMapping(With
     _horizonToTopologyChangePromiseMap.clear();
     for (auto const& [horizon, hostAndPort] : horizonMappings) {
         _horizonToTopologyChangePromiseMap.emplace(
-            horizon, std::make_shared<SharedPromise<std::shared_ptr<const IsMasterResponse>>>());
+            horizon, std::make_shared<SharedPromise<std::shared_ptr<const HelloResponse>>>());
     }
 }
 
@@ -946,7 +946,7 @@ bool ReplicationCoordinatorImpl::enterQuiesceModeIfSecondary(Milliseconds quiesc
     _inQuiesceMode = true;
     _quiesceDeadline = _replExecutor->now() + quiesceTime;
 
-    // Increment the topology version and respond to all waiting isMaster requests with an error.
+    // Increment the topology version and respond to all waiting hello requests with an error.
     _fulfillTopologyChangePromise(lk);
 
     return true;
@@ -2136,7 +2136,7 @@ long long ReplicationCoordinatorImpl::_calculateRemainingQuiesceTimeMillis() con
     return remainingQuiesceTimeLong;
 }
 
-std::shared_ptr<IsMasterResponse> ReplicationCoordinatorImpl::_makeIsMasterResponse(
+std::shared_ptr<HelloResponse> ReplicationCoordinatorImpl::_makeHelloResponse(
     boost::optional<StringData> horizonString, WithLock lock, const bool hasValidConfig) const {
 
     uassert(ShutdownInProgressQuiesceInfo(_calculateRemainingQuiesceTimeMillis()),
@@ -2144,7 +2144,7 @@ std::shared_ptr<IsMasterResponse> ReplicationCoordinatorImpl::_makeIsMasterRespo
             !_inQuiesceMode);
 
     if (!hasValidConfig) {
-        auto response = std::make_shared<IsMasterResponse>();
+        auto response = std::make_shared<HelloResponse>();
         response->setTopologyVersion(_topCoord->getTopologyVersion());
         response->markAsNoConfig();
         return response;
@@ -2152,7 +2152,7 @@ std::shared_ptr<IsMasterResponse> ReplicationCoordinatorImpl::_makeIsMasterRespo
 
     // horizonString must be passed in if we are a valid member of the config.
     invariant(horizonString);
-    auto response = std::make_shared<IsMasterResponse>();
+    auto response = std::make_shared<HelloResponse>();
     invariant(getSettings().usingReplSets());
     _topCoord->fillIsMasterForReplSet(response, *horizonString);
 
@@ -2164,21 +2164,21 @@ std::shared_ptr<IsMasterResponse> ReplicationCoordinatorImpl::_makeIsMasterRespo
                                        _currentCommittedSnapshot->getTimestamp().getSecs());
     }
 
-    if (response->isMaster() && !_readWriteAbility->canAcceptNonLocalWrites(lock)) {
-        // Report that we are secondary to ismaster callers until drain completes.
-        response->setIsMaster(false);
+    if (response->isWritablePrimary() && !_readWriteAbility->canAcceptNonLocalWrites(lock)) {
+        // Report that we are secondary and not accepting writes until drain completes.
+        response->setIsWritablePrimary(false);
         response->setIsSecondary(true);
     }
 
     if (_inShutdown) {
-        response->setIsMaster(false);
+        response->setIsWritablePrimary(false);
         response->setIsSecondary(false);
     }
     return response;
 }
 
-SharedSemiFuture<ReplicationCoordinatorImpl::SharedIsMasterResponse>
-ReplicationCoordinatorImpl::_getIsMasterResponseFuture(
+SharedSemiFuture<ReplicationCoordinatorImpl::SharedHelloResponse>
+ReplicationCoordinatorImpl::_getHelloResponseFuture(
     WithLock lk,
     const SplitHorizon::Parameters& horizonParams,
     boost::optional<StringData> horizonString,
@@ -2191,17 +2191,17 @@ ReplicationCoordinatorImpl::_getIsMasterResponseFuture(
     const bool hasValidConfig = horizonString != boost::none;
 
     if (!clientTopologyVersion) {
-        // The client is not using awaitable isMaster so we respond immediately.
-        return SharedSemiFuture<SharedIsMasterResponse>(
-            SharedIsMasterResponse(_makeIsMasterResponse(horizonString, lk, hasValidConfig)));
+        // The client is not using awaitable hello so we respond immediately.
+        return SharedSemiFuture<SharedHelloResponse>(
+            SharedHelloResponse(_makeHelloResponse(horizonString, lk, hasValidConfig)));
     }
 
     const TopologyVersion topologyVersion = _topCoord->getTopologyVersion();
     if (clientTopologyVersion->getProcessId() != topologyVersion.getProcessId()) {
         // Getting a different process id indicates that the server has restarted so we return
         // immediately with the updated process id.
-        return SharedSemiFuture<SharedIsMasterResponse>(
-            SharedIsMasterResponse(_makeIsMasterResponse(horizonString, lk, hasValidConfig)));
+        return SharedSemiFuture<SharedHelloResponse>(
+            SharedHelloResponse(_makeHelloResponse(horizonString, lk, hasValidConfig)));
     }
 
     auto prevCounter = clientTopologyVersion->getCounter();
@@ -2213,10 +2213,10 @@ ReplicationCoordinatorImpl::_getIsMasterResponseFuture(
             prevCounter <= topologyVersionCounter);
 
     if (prevCounter < topologyVersionCounter) {
-        // The received isMaster command contains a stale topology version so we respond
+        // The received hello command contains a stale topology version so we respond
         // immediately with a more current topology version.
-        return SharedSemiFuture<SharedIsMasterResponse>(
-            SharedIsMasterResponse(_makeIsMasterResponse(horizonString, lk, hasValidConfig)));
+        return SharedSemiFuture<SharedHelloResponse>(
+            SharedHelloResponse(_makeHelloResponse(horizonString, lk, hasValidConfig)));
     }
 
     if (!hasValidConfig) {
@@ -2225,24 +2225,24 @@ ReplicationCoordinatorImpl::_getIsMasterResponseFuture(
         auto sniIter =
             _sniToValidConfigPromiseMap
                 .emplace(sni,
-                         std::make_shared<SharedPromise<std::shared_ptr<const IsMasterResponse>>>())
+                         std::make_shared<SharedPromise<std::shared_ptr<const HelloResponse>>>())
                 .first;
         return sniIter->second->getFuture();
     }
-    // Each awaitable isMaster will wait on their specific horizon. We always expect horizonString
+    // Each awaitable hello will wait on their specific horizon. We always expect horizonString
     // to exist in _horizonToTopologyChangePromiseMap.
     auto horizonIter = _horizonToTopologyChangePromiseMap.find(*horizonString);
     invariant(horizonIter != end(_horizonToTopologyChangePromiseMap));
     return horizonIter->second->getFuture();
 }
 
-SharedSemiFuture<ReplicationCoordinatorImpl::SharedIsMasterResponse>
-ReplicationCoordinatorImpl::getIsMasterResponseFuture(
+SharedSemiFuture<ReplicationCoordinatorImpl::SharedHelloResponse>
+ReplicationCoordinatorImpl::getHelloResponseFuture(
     const SplitHorizon::Parameters& horizonParams,
     boost::optional<TopologyVersion> clientTopologyVersion) {
     stdx::lock_guard lk(_mutex);
     const auto horizonString = _getHorizonString(lk, horizonParams);
-    return _getIsMasterResponseFuture(lk, horizonParams, horizonString, clientTopologyVersion);
+    return _getHelloResponseFuture(lk, horizonParams, horizonString, clientTopologyVersion);
 }
 
 boost::optional<StringData> ReplicationCoordinatorImpl::_getHorizonString(
@@ -2258,7 +2258,7 @@ boost::optional<StringData> ReplicationCoordinatorImpl::_getHorizonString(
     return horizonString;
 }
 
-std::shared_ptr<const IsMasterResponse> ReplicationCoordinatorImpl::awaitIsMasterResponse(
+std::shared_ptr<const HelloResponse> ReplicationCoordinatorImpl::awaitHelloResponse(
     OperationContext* opCtx,
     const SplitHorizon::Parameters& horizonParams,
     boost::optional<TopologyVersion> clientTopologyVersion,
@@ -2266,8 +2266,7 @@ std::shared_ptr<const IsMasterResponse> ReplicationCoordinatorImpl::awaitIsMaste
     stdx::unique_lock lk(_mutex);
 
     const auto horizonString = _getHorizonString(lk, horizonParams);
-    auto future =
-        _getIsMasterResponseFuture(lk, horizonParams, horizonString, clientTopologyVersion);
+    auto future = _getHelloResponseFuture(lk, horizonParams, horizonString, clientTopologyVersion);
     if (future.isReady()) {
         return future.get();
     }
@@ -2292,9 +2291,9 @@ std::shared_ptr<const IsMasterResponse> ReplicationCoordinatorImpl::awaitIsMaste
     // Wait for a topology change with timeout set to deadline.
     LOGV2_DEBUG(21342,
                 1,
-                "Waiting for an isMaster response from a topology change or until deadline: "
+                "Waiting for a hello response from a topology change or until deadline: "
                 "{deadline}. Current TopologyVersion counter is {currentTopologyVersionCounter}",
-                "Waiting for an isMaster response from a topology change or until deadline",
+                "Waiting for a hello response from a topology change or until deadline",
                 "deadline"_attr = deadline.get(),
                 "currentTopologyVersionCounter"_attr = topologyVersion.getCounter());
     auto statusWithIsMaster =
@@ -2307,17 +2306,17 @@ std::shared_ptr<const IsMasterResponse> ReplicationCoordinatorImpl::awaitIsMaste
     }
 
     if (status == ErrorCodes::ExceededTimeLimit) {
-        // Return an IsMasterResponse with the current topology version on timeout when waiting for
+        // Return a HelloResponse with the current topology version on timeout when waiting for
         // a topology change.
         stdx::lock_guard lk(_mutex);
         HelloMetrics::get(opCtx)->decrementNumAwaitingTopologyChanges();
         // A topology change has not occured within the deadline so horizonString is still a good
         // indicator of whether we have a valid config.
         const bool hasValidConfig = horizonString != boost::none;
-        return _makeIsMasterResponse(horizonString, lk, hasValidConfig);
+        return _makeHelloResponse(horizonString, lk, hasValidConfig);
     }
 
-    // A topology change has happened so we return an IsMasterResponse with the updated
+    // A topology change has happened so we return a HelloResponse with the updated
     // topology version.
     uassertStatusOK(status);
     return statusWithIsMaster.getValue();
@@ -2843,7 +2842,7 @@ bool ReplicationCoordinatorImpl::canAcceptWritesFor_UNSAFE(OperationContext* opC
         } else {
             auto uuid = nsOrUUID.uuid();
             invariant(uuid, nsOrUUID.toString());
-            if (auto ns = CollectionCatalog::get(opCtx).lookupNSSByUUID(opCtx, *uuid)) {
+            if (auto ns = CollectionCatalog::get(opCtx)->lookupNSSByUUID(opCtx, *uuid)) {
                 if (!ns->isSystemDotProfile()) {
                     return false;
                 }
@@ -3001,6 +3000,10 @@ Status ReplicationCoordinatorImpl::processReplSetGetStatus(
         ReplicationMetrics::get(getServiceContext()).getElectionParticipantMetricsBSON();
 
     stdx::lock_guard<Latch> lk(_mutex);
+    if (_inShutdown) {
+        return Status(ErrorCodes::ShutdownInProgress, "shutdown in progress");
+    }
+
     Status result(ErrorCodes::InternalError, "didn't set status in prepareStatusResponse");
     _topCoord->prepareStatusResponse(
         TopologyCoordinator::ReplSetStatusArgs{
@@ -3939,14 +3942,14 @@ void ReplicationCoordinatorImpl::_errorOnPromisesIfHorizonChanged(WithLock lk,
                                                                   int oldIndex,
                                                                   int newIndex) {
     if (newIndex < 0) {
-        // When a node is removed, always return an isMaster response indicating the server has no
+        // When a node is removed, always return a hello response indicating the server has no
         // config set.
         return;
     }
 
     // We were previously removed but are now rejoining the replica set.
     if (_memberState.removed()) {
-        // Reply with an error to isMaster requests received while the node had an invalid config.
+        // Reply with an error to hello requests received while the node had an invalid config.
         invariant(_horizonToTopologyChangePromiseMap.empty());
 
         for (const auto& [sni, promise] : _sniToValidConfigPromiseMap) {
@@ -3978,7 +3981,7 @@ void ReplicationCoordinatorImpl::_fulfillTopologyChangePromise(WithLock lock) {
     _cachedTopologyVersionCounter.store(_topCoord->getTopologyVersion().getCounter());
     const auto myState = _topCoord->getMemberState();
     const bool hasValidConfig = _rsConfig.isInitialized() && !myState.removed();
-    // Create an isMaster response for each horizon the server is knowledgeable about.
+    // Create a hello response for each horizon the server is knowledgeable about.
     for (auto iter = _horizonToTopologyChangePromiseMap.begin();
          iter != _horizonToTopologyChangePromiseMap.end();
          iter++) {
@@ -3988,17 +3991,16 @@ void ReplicationCoordinatorImpl::_fulfillTopologyChangePromise(WithLock lock) {
                        kQuiesceModeShutdownMessage));
         } else {
             StringData horizonString = iter->first;
-            auto response = _makeIsMasterResponse(horizonString, lock, hasValidConfig);
+            auto response = _makeHelloResponse(horizonString, lock, hasValidConfig);
             // Fulfill the promise and replace with a new one for future waiters.
             iter->second->emplaceValue(response);
-            iter->second =
-                std::make_shared<SharedPromise<std::shared_ptr<const IsMasterResponse>>>();
+            iter->second = std::make_shared<SharedPromise<std::shared_ptr<const HelloResponse>>>();
         }
     }
     if (_selfIndex >= 0 && !_sniToValidConfigPromiseMap.empty()) {
-        // We are joining the replica set for the first time. Send back an error to isMaster
+        // We are joining the replica set for the first time. Send back an error to hello
         // requests that are waiting on a horizon that does not exist in the new config. Otherwise,
-        // reply with an updated isMaster response.
+        // reply with an updated hello response.
         const auto& reverseHostMappings =
             _rsConfig.getMemberAt(_selfIndex).getHorizonReverseHostMappings();
         for (const auto& [sni, promise] : _sniToValidConfigPromiseMap) {
@@ -4009,7 +4011,7 @@ void ReplicationCoordinatorImpl::_fulfillTopologyChangePromise(WithLock lock) {
                                    "current replica set config"});
             } else {
                 const auto horizon = sni.empty() ? SplitHorizon::kDefaultHorizon : iter->second;
-                const auto response = _makeIsMasterResponse(horizon, lock, hasValidConfig);
+                const auto response = _makeHelloResponse(horizon, lock, hasValidConfig);
                 promise->emplaceValue(response);
             }
         }
@@ -4018,7 +4020,7 @@ void ReplicationCoordinatorImpl::_fulfillTopologyChangePromise(WithLock lock) {
     HelloMetrics::get(getGlobalServiceContext())->resetNumAwaitingTopologyChanges();
 
     if (_inQuiesceMode) {
-        // No more isMaster requests will wait for a topology change, so clear _horizonToPromiseMap.
+        // No more hello requests will wait for a topology change, so clear _horizonToPromiseMap.
         _horizonToTopologyChangePromiseMap.clear();
     }
 }
@@ -4036,7 +4038,7 @@ void ReplicationCoordinatorImpl::_updateWriteAbilityFromTopologyCoordinator(
 
 ReplicationCoordinatorImpl::PostMemberStateUpdateAction
 ReplicationCoordinatorImpl::_updateMemberStateFromTopologyCoordinator(WithLock lk) {
-    // We want to respond to any waiting isMasters even if our current and target state are the
+    // We want to respond to any waiting hellos even if our current and target state are the
     // same as it is possible writes have been disabled during a stepDown but the primary has yet
     // to transition to SECONDARY state.
     ON_BLOCK_EXIT([&] {
@@ -4164,8 +4166,13 @@ void ReplicationCoordinatorImpl::_postWonElectionUpdateMemberState(WithLock lk) 
     invariant(_getMemberState_inlock().primary());
     // Clear the sync source.
     _onFollowerModeStateChange();
-    // Notify all secondaries of the election win.
-    _restartHeartbeats_inlock();
+
+    // Notify all secondaries of the election win by cancelling all current heartbeats and sending
+    // new heartbeat requests to all nodes. We must cancel and start instead of restarting scheduled
+    // heartbeats because all heartbeats must be restarted upon election succeeding.
+    _cancelHeartbeats_inlock();
+    _startHeartbeats_inlock();
+
     invariant(!_catchupState);
     _catchupState = std::make_unique<CatchupState>(this);
     _catchupState->start_inlock();
@@ -4496,7 +4503,7 @@ ReplicationCoordinatorImpl::_setCurrentRSConfig(WithLock lk,
                               "offendingConfigs"_attr = offendingConfigs);
     }
 
-    // If the SplitHorizon has changed, reply to all waiting isMasters with an error.
+    // If the SplitHorizon has changed, reply to all waiting hellos with an error.
     _errorOnPromisesIfHorizonChanged(lk, opCtx, oldConfig, newConfig, _selfIndex, myIndex);
 
     LOGV2(21392,
@@ -4734,7 +4741,7 @@ HostAndPort ReplicationCoordinatorImpl::chooseNewSyncSource(const OpTime& lastOp
     // of other members's state, allowing us to make informed sync source decisions.
     if (newSyncSource.empty() && !oldSyncSource.empty() && _selfIndex >= 0 &&
         !_getMemberState_inlock().primary()) {
-        _restartHeartbeats_inlock();
+        _restartScheduledHeartbeats_inlock();
     }
 
     return newSyncSource;
@@ -4933,6 +4940,10 @@ void ReplicationCoordinatorImpl::_setStableTimestampForStorage(WithLock lk) {
                 "Setting replication's stable optime",
                 "stableOpTime"_attr = stableOpTime);
 
+    // As arbiters aren't data bearing nodes, the all durable timestamp does not get advanced. To
+    // advance the all durable timestamp when setting the stable timestamp we use 'force=true'.
+    const bool force = _getMemberState_inlock().arbiter();
+
     // Update committed snapshot and wake up any threads waiting on read concern or
     // write concern.
     if (serverGlobalParams.enableMajorityReadConcern) {
@@ -4941,7 +4952,7 @@ void ReplicationCoordinatorImpl::_setStableTimestampForStorage(WithLock lk) {
         // create a fake one.
         if (_updateCommittedSnapshot(lk, stableOpTime)) {
             // Update the stable timestamp for the storage engine.
-            _storage->setStableTimestamp(getServiceContext(), stableOpTime.getTimestamp());
+            _storage->setStableTimestamp(getServiceContext(), stableOpTime.getTimestamp(), force);
         }
     } else {
         const auto lastCommittedOpTime = _topCoord->getLastCommittedOpTime();
@@ -4961,7 +4972,7 @@ void ReplicationCoordinatorImpl::_setStableTimestampForStorage(WithLock lk) {
         // forward. If we are in rollback state, however, do not alter the stable timestamp,
         // since it may be moved backwards explicitly by the rollback-via-refetch process.
         if (!MONGO_unlikely(disableSnapshotting.shouldFail()) && !_memberState.rollback()) {
-            _storage->setStableTimestamp(getServiceContext(), stableOpTime.getTimestamp());
+            _storage->setStableTimestamp(getServiceContext(), stableOpTime.getTimestamp(), force);
         }
     }
 }
@@ -5228,7 +5239,7 @@ Status ReplicationCoordinatorImpl::processHeartbeatV1(const ReplSetHeartbeatArgs
                   "Scheduling heartbeat to fetch a new config since we are not "
                   "a member of our current config",
                   "senderHost"_attr = senderHost);
-            _scheduleHeartbeatToTarget_inlock(senderHost, -1, now);
+            _scheduleHeartbeatToTarget_inlock(senderHost, now);
         }
     } else if (result.isOK() &&
                response->getConfigVersionAndTerm() < args.getConfigVersionAndTerm()) {
@@ -5253,8 +5264,7 @@ Status ReplicationCoordinatorImpl::processHeartbeatV1(const ReplSetHeartbeatArgs
         // will trigger reconfig, which cancels and reschedules all heartbeats.
         else if (args.hasSender()) {
             LOGV2(21401, "Scheduling heartbeat to fetch a newer config", attr);
-            int senderIndex = _rsConfig.findMemberIndexByHostAndPort(senderHost);
-            _scheduleHeartbeatToTarget_inlock(senderHost, senderIndex, now);
+            _scheduleHeartbeatToTarget_inlock(senderHost, now);
         }
     } else if (result.isOK() && args.getPrimaryId() >= 0 &&
                (!response->hasPrimaryId() || response->getPrimaryId() != args.getPrimaryId())) {
@@ -5273,7 +5283,7 @@ Status ReplicationCoordinatorImpl::processHeartbeatV1(const ReplSetHeartbeatArgs
                   "myPrimaryId"_attr = myPrimaryId,
                   "senderAndPrimaryId"_attr = args.getPrimaryId(),
                   "senderTerm"_attr = args.getTerm());
-            _restartHeartbeats_inlock();
+            _restartScheduledHeartbeats_inlock();
         }
     }
     return result;

@@ -32,6 +32,7 @@
 #include <limits>
 
 #include "mongo/bson/bsonmisc.h"
+#include "mongo/bson/bsonobj.h"
 #include "mongo/bson/bsonobjbuilder.h"
 #include "mongo/idl/unittest_gen.h"
 #include "mongo/rpc/op_msg.h"
@@ -549,6 +550,15 @@ TEST(IDLStructTests, TestNonStrictStruct) {
             BSON("field4" << 1234 << "1" << 12 << "2" << 123 << "3" << 1234 << "field4" << 1234);
         ASSERT_THROWS(RequiredNonStrictField3::parse(ctxt, testDoc), AssertionException);
     }
+}
+
+// Test some basic properties of the OkReply struct. TODO SERVER-51380 replace with a more
+// thorough/integration-oriented test once some basic OkReplying-commands like ping get implemented.
+TEST(IDLStructTests, TestOkReplyStruct) {
+    OkReply okReply;
+
+    // Ensure that the serialized OkReply struct is the empty BSON object.
+    ASSERT_BSONOBJ_EQ(okReply.toBSON(), BSONObj());
 }
 
 /// Struct default comparison tests
@@ -2827,6 +2837,14 @@ TEST(IDLTypeCommand, TestStruct) {
     assert_same_types<decltype(testStruct.getCommandParameter()),
                       mongo::idl::import::One_string&>();
 
+    // Negative: Command with struct parameter should disallow 'undefined' input.
+    {
+        auto invalidDoc = BSON(CommandTypeStructCommand::kCommandName << BSONUndefined << "$db"
+                                                                      << "db");
+        ASSERT_THROWS(CommandTypeStructCommand::parse(ctxt, makeOMR(invalidDoc)),
+                      AssertionException);
+    }
+
     // Positive: Test we can roundtrip from the just parsed document
     {
         BSONObjBuilder builder;
@@ -2932,6 +2950,61 @@ TEST(IDLTypeCommand, TestUnderscoreCommand) {
         OpMsgRequest reply = one_new.serialize(BSONObj());
 
         ASSERT_BSONOBJ_EQ(testDoc, reply.body);
+    }
+}
+
+TEST(IDLTypeCommand, TestErrorReplyStruct) {
+    // Correctly parse all required fields.
+    {
+        IDLParserErrorContext ctxt("root");
+
+        auto errorDoc = BSON("ok" << 0.0 << "code" << 123456 << "codeName"
+                                  << "blah blah"
+                                  << "errmsg"
+                                  << "This is an error Message"
+                                  << "errorLabels"
+                                  << BSON_ARRAY("label1"
+                                                << "label2"));
+        auto errorReply = ErrorReply::parse(ctxt, errorDoc);
+        ASSERT_BSONOBJ_EQ(errorReply.toBSON(), errorDoc);
+    }
+    // Non-strictness: ensure we parse even if input has extra fields.
+    {
+        IDLParserErrorContext ctxt("root");
+
+        auto errorDoc = BSON("a"
+                             << "b"
+                             << "ok" << 0.0 << "code" << 123456 << "codeName"
+                             << "blah blah"
+                             << "errmsg"
+                             << "This is an error Message");
+        auto errorReply = ErrorReply::parse(ctxt, errorDoc);
+        ASSERT_BSONOBJ_EQ(errorReply.toBSON(),
+                          BSON("ok" << 0.0 << "code" << 123456 << "codeName"
+                                    << "blah blah"
+                                    << "errmsg"
+                                    << "This is an error Message"));
+    }
+    // Ensure that we fail to parse if any required fields are missing.
+    {
+        IDLParserErrorContext ctxt("root");
+
+        auto missingOk = BSON("code" << 123456 << "codeName"
+                                     << "blah blah"
+                                     << "errmsg"
+                                     << "This is an error Message");
+        auto missingCode = BSON("ok" << 0.0 << "codeName"
+                                     << "blah blah"
+                                     << "errmsg"
+                                     << "This is an error Message");
+        auto missingCodeName = BSON("ok" << 0.0 << "code" << 123456 << "errmsg"
+                                         << "This is an error Message");
+        auto missingErrmsg = BSON("ok" << 0.0 << "code" << 123456 << "codeName"
+                                       << "blah blah");
+        ASSERT_THROWS(ErrorReply::parse(ctxt, missingOk), AssertionException);
+        ASSERT_THROWS(ErrorReply::parse(ctxt, missingCode), AssertionException);
+        ASSERT_THROWS(ErrorReply::parse(ctxt, missingCodeName), AssertionException);
+        ASSERT_THROWS(ErrorReply::parse(ctxt, missingErrmsg), AssertionException);
     }
 }
 

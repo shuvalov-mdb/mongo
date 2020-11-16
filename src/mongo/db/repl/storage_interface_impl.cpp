@@ -221,7 +221,12 @@ StorageInterfaceImpl::createCollectionForBulkLoading(
         getGlobalServiceContext()->makeClient(str::stream() << nss.ns() << " loader"));
     auto opCtx = cc().makeOperationContext();
 
-    documentValidationDisabled(opCtx.get()) = true;
+    // DocumentValidationSettings::kDisableInternalValidation is currently inert.
+    // But, it's logically ok to disable internal validation as this function gets called
+    // only during initial sync.
+    DocumentValidationSettings::get(opCtx.get())
+        .setFlags(DocumentValidationSettings::kDisableSchemaValidation |
+                  DocumentValidationSettings::kDisableInternalValidation);
 
     std::unique_ptr<AutoGetCollection> autoColl;
     // Retry if WCE.
@@ -475,7 +480,7 @@ Status StorageInterfaceImpl::createCollection(OperationContext* opCtx,
         AutoGetOrCreateDb databaseWriteGuard(opCtx, nss.db(), MODE_IX);
         auto db = databaseWriteGuard.getDb();
         invariant(db);
-        if (CollectionCatalog::get(opCtx).lookupCollectionByNamespace(opCtx, nss)) {
+        if (CollectionCatalog::get(opCtx)->lookupCollectionByNamespace(opCtx, nss)) {
             return Status(ErrorCodes::NamespaceExists,
                           str::stream() << "Collection " << nss.ns() << " already exists.");
         }
@@ -1266,7 +1271,9 @@ StatusWith<OptionalCollectionUUID> StorageInterfaceImpl::getCollectionUUID(
     return collection->uuid();
 }
 
-void StorageInterfaceImpl::setStableTimestamp(ServiceContext* serviceCtx, Timestamp snapshotName) {
+void StorageInterfaceImpl::setStableTimestamp(ServiceContext* serviceCtx,
+                                              Timestamp snapshotName,
+                                              bool force) {
     auto newStableTimestamp = snapshotName;
     // Hold the stable timestamp back if this failpoint is enabled.
     holdStableTimestampAtSpecificTimestamp.execute([&](const BSONObj& dataObj) {
@@ -1282,7 +1289,7 @@ void StorageInterfaceImpl::setStableTimestamp(ServiceContext* serviceCtx, Timest
     StorageEngine* storageEngine = serviceCtx->getStorageEngine();
     Timestamp prevStableTimestamp = storageEngine->getStableTimestamp();
 
-    storageEngine->setStableTimestamp(newStableTimestamp);
+    storageEngine->setStableTimestamp(newStableTimestamp, force);
 
     Checkpointer* checkpointer = Checkpointer::get(serviceCtx);
     if (checkpointer && !checkpointer->hasTriggeredFirstStableCheckpoint()) {
@@ -1303,7 +1310,7 @@ Timestamp StorageInterfaceImpl::recoverToStableTimestamp(OperationContext* opCtx
     // Pass an InterruptedDueToReplStateChange error to async callers waiting on the JournalFlusher
     // thread for durability.
     Status reason = Status(ErrorCodes::InterruptedDueToReplStateChange, "Rollback in progress.");
-    StorageControl::stopStorageControls(serviceContext, reason);
+    StorageControl::stopStorageControls(serviceContext, reason, /*forRestart=*/true);
 
     auto swStableTimestamp = serviceContext->getStorageEngine()->recoverToStableTimestamp(opCtx);
     fassert(31049, swStableTimestamp);
@@ -1345,13 +1352,13 @@ Status StorageInterfaceImpl::isAdminDbValid(OperationContext* opCtx) {
         return Status::OK();
     }
 
-    CollectionPtr usersCollection = CollectionCatalog::get(opCtx).lookupCollectionByNamespace(
-        opCtx, AuthorizationManager::usersCollectionNamespace);
+    auto catalog = CollectionCatalog::get(opCtx);
+    CollectionPtr usersCollection =
+        catalog->lookupCollectionByNamespace(opCtx, AuthorizationManager::usersCollectionNamespace);
     const bool hasUsers =
         usersCollection && !Helpers::findOne(opCtx, usersCollection, BSONObj(), false).isNull();
-    CollectionPtr adminVersionCollection =
-        CollectionCatalog::get(opCtx).lookupCollectionByNamespace(
-            opCtx, AuthorizationManager::versionCollectionNamespace);
+    CollectionPtr adminVersionCollection = catalog->lookupCollectionByNamespace(
+        opCtx, AuthorizationManager::versionCollectionNamespace);
     BSONObj authSchemaVersionDocument;
     if (!adminVersionCollection ||
         !Helpers::findOne(opCtx,
@@ -1434,12 +1441,8 @@ Timestamp StorageInterfaceImpl::getAllDurableTimestamp(ServiceContext* serviceCt
     return serviceCtx->getStorageEngine()->getAllDurableTimestamp();
 }
 
-Timestamp StorageInterfaceImpl::getOldestOpenReadTimestamp(ServiceContext* serviceCtx) const {
-    return serviceCtx->getStorageEngine()->getOldestOpenReadTimestamp();
-}
-
 Timestamp StorageInterfaceImpl::getPointInTimeReadTimestamp(OperationContext* opCtx) const {
-    auto readTimestamp = opCtx->recoveryUnit()->getPointInTimeReadTimestamp();
+    auto readTimestamp = opCtx->recoveryUnit()->getPointInTimeReadTimestamp(opCtx);
     invariant(readTimestamp);
     return *readTimestamp;
 }

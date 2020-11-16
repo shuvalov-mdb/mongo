@@ -35,7 +35,7 @@
 #include <string>
 
 #include "mongo/client/read_preference.h"
-#include "mongo/db/repl/is_master_response.h"
+#include "mongo/db/repl/hello_response.h"
 #include "mongo/db/repl/last_vote.h"
 #include "mongo/db/repl/repl_set_heartbeat_args_v1.h"
 #include "mongo/db/repl/repl_set_heartbeat_response.h"
@@ -386,7 +386,7 @@ public:
     // Produce a reply to an ismaster request.  It is only valid to call this if we are a
     // replset.  Drivers interpret the isMaster fields according to the Server Discovery and
     // Monitoring Spec, see the "Parsing an isMaster response" section.
-    void fillIsMasterForReplSet(std::shared_ptr<IsMasterResponse> response,
+    void fillIsMasterForReplSet(std::shared_ptr<HelloResponse> response,
                                 const StringData& horizonString) const;
 
     // Produce member data for the serverStatus command and diagnostic logging.
@@ -522,11 +522,6 @@ public:
      * will be StepDownSelf if we can no longer see a majority of the nodes, otherwise NoAction.
      */
     HeartbeatResponseAction checkMemberTimeouts(Date_t now);
-
-    /**
-     * Set all nodes in memberData to not stale with a lastUpdate of "now".
-     */
-    void resetAllMemberTimeouts(Date_t now);
 
     /**
      * Set all nodes in memberData that are present in member_set
@@ -752,9 +747,9 @@ public:
     void setStorageEngineSupportsReadCommitted(bool supported);
 
     /**
-     * Reset the booleans to record the last heartbeat restart.
+     * Reset the booleans to record the last heartbeat restart for the target node.
      */
-    void restartHeartbeats();
+    void restartHeartbeat(const Date_t now, const HostAndPort& target);
 
     /**
      * Increments the counter field of the current TopologyVersion.

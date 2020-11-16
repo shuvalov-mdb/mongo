@@ -93,20 +93,11 @@ void checkAuthForTypedCommand(Client*, const DropUserCommand&);
 void checkAuthForTypedCommand(Client*, const DropRoleCommand&);
 void checkAuthForTypedCommand(Client*, const RevokePrivilegesFromRoleCommand&);
 void checkAuthForTypedCommand(Client*, const DropAllRolesFromDatabaseCommand&);
-
-Status checkAuthForUsersInfoCommand(Client* client,
-                                    const std::string& dbname,
-                                    const BSONObj& cmdObj);
-
-Status checkAuthForRolesInfoCommand(Client* client,
-                                    const std::string& dbname,
-                                    const BSONObj& cmdObj);
-
-Status checkAuthForInvalidateUserCacheCommand(Client* client);
-
-Status checkAuthForGetUserCacheGenerationCommand(Client* client);
-
-Status checkAuthForMergeAuthzCollectionsCommand(Client* client, const BSONObj& cmdObj);
+void checkAuthForTypedCommand(Client*, const UsersInfoCommand&);
+void checkAuthForTypedCommand(Client*, const RolesInfoCommand&);
+void checkAuthForTypedCommand(Client*, const InvalidateUserCacheCommand&);
+void checkAuthForTypedCommand(Client*, const GetUserCacheGenerationCommand&);
+void checkAuthForTypedCommand(Client*, const MergeAuthzCollectionsCommand&);
 
 }  // namespace auth
 }  // namespace mongo

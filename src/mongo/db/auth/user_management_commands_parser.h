@@ -45,39 +45,6 @@
 namespace mongo {
 namespace auth {
 
-struct UsersInfoArgs {
-    enum class Target { kExplicitUsers, kDB, kGlobal };
-
-    std::vector<UserName> userNames;
-    Target target;
-    bool showPrivileges = false;
-    AuthenticationRestrictionsFormat authenticationRestrictionsFormat =
-        AuthenticationRestrictionsFormat::kOmit;
-    bool showCredentials = false;
-    boost::optional<BSONObj> filter;
-};
-
-/**
- * Takes a command object describing an invocation of the "usersInfo" command  and parses out
- * all the arguments into the "parsedArgs" output param.
- */
-Status parseUsersInfoCommand(const BSONObj& cmdObj, StringData dbname, UsersInfoArgs* parsedArgs);
-
-struct RolesInfoArgs {
-    std::vector<RoleName> roleNames;
-    bool allForDB = false;
-    PrivilegeFormat privilegeFormat = PrivilegeFormat::kOmit;
-    AuthenticationRestrictionsFormat authenticationRestrictionsFormat =
-        AuthenticationRestrictionsFormat::kOmit;
-    bool showBuiltinRoles = false;
-};
-
-/**
- * Takes a command object describing an invocation of the "rolesInfo" command  and parses out
- * the arguments into the "parsedArgs" output param.
- */
-Status parseRolesInfoCommand(const BSONObj& cmdObj, StringData dbname, RolesInfoArgs* parsedArgs);
-
 /**
  * Parses the privileges described in "privileges" into a vector of Privilege objects.
  * Returns Status::OK() upon successfully parsing all the elements of "privileges".
@@ -102,26 +69,6 @@ Status parseRoleNamesFromBSONArray(const BSONArray& rolesArray,
 Status parseUserNamesFromBSONArray(const BSONArray& usersArray,
                                    StringData dbname,
                                    std::vector<UserName>* parsedUserNames);
-
-struct MergeAuthzCollectionsArgs {
-    std::string usersCollName;
-    std::string rolesCollName;
-    std::string db;
-    bool drop;
-
-    MergeAuthzCollectionsArgs() : drop(false) {}
-};
-
-/**
- * Takes a command object describing an invocation of the "_mergeAuthzCollections" command and
- * parses out the name of the temporary collections to use for user and role data, whether or
- * not to drop the existing users/roles, the database if this is a for a db-specific restore.
- * Returns ErrorCodes::OutdatedClient if the "db" field is missing, as that likely indicates
- * the command was sent by an outdated (pre 2.6.4) version of mongorestore.
- * Returns other codes indicating missing or incorrectly typed fields.
- */
-Status parseMergeAuthzCollectionsCommand(const BSONObj& cmdObj,
-                                         MergeAuthzCollectionsArgs* parsedArgs);
 
 }  // namespace auth
 }  // namespace mongo

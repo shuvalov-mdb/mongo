@@ -38,6 +38,7 @@
 #include "mongo/bson/oid.h"
 #include "mongo/db/exec/sbe/values/bson.h"
 #include "mongo/db/exec/sbe/values/value.h"
+#include "mongo/db/exec/sbe/vm/datetime.h"
 #include "mongo/db/query/datetime/date_time_support.h"
 #include "mongo/db/storage/key_string.h"
 #include "mongo/util/fail_point.h"
@@ -100,6 +101,7 @@ int Instruction::stackOffset[Instruction::Tags::lastInstruction] = {
     0,  // isBinData
     0,  // isDate
     0,  // isNaN
+    0,  // isRecordId
     0,  // typeMatch
 
     0,  // function is special, the stack offset is encoded in the instruction itself
@@ -324,6 +326,10 @@ void CodeFragment::appendIsDate() {
 
 void CodeFragment::appendIsNaN() {
     appendSimpleInstruction(Instruction::isNaN);
+}
+
+void CodeFragment::appendIsRecordId() {
+    appendSimpleInstruction(Instruction::isRecordId);
 }
 
 void CodeFragment::appendTypeMatch(uint32_t typeMask) {
@@ -1188,41 +1194,6 @@ std::tuple<bool, value::TypeTags, value::Value> ByteCode::builtinDateWeekYear(ui
         timezoneTuple);
 }
 
-TimeZone getTimezone(value::TypeTags timezoneTag,
-                     value::Value timezoneVal,
-                     TimeZoneDatabase* timezoneDB) {
-    auto timezoneStr = value::getStringView(timezoneTag, timezoneVal);
-    if (timezoneStr == "") {
-        return timezoneDB->utcZone();
-    } else {
-        return timezoneDB->getTimeZone(StringData{timezoneStr.data(), timezoneStr.size()});
-    }
-}
-
-Date_t getDate(value::TypeTags dateTag, value::Value dateVal) {
-    switch (dateTag) {
-        case value::TypeTags::Date: {
-            return Date_t::fromMillisSinceEpoch(value::bitcastTo<int64_t>(dateVal));
-        }
-        case value::TypeTags::Timestamp: {
-            return Date_t::fromMillisSinceEpoch(
-                Timestamp(value::bitcastTo<uint64_t>(dateVal)).getSecs() * 1000LL);
-        }
-        case value::TypeTags::ObjectId: {
-            auto objIdBuf = value::getObjectIdView(dateVal);
-            auto objId = OID::from(objIdBuf);
-            return objId.asDateT();
-        }
-        case value::TypeTags::bsonObjectId: {
-            auto objIdBuf = value::getRawPointerView(dateVal);
-            auto objId = OID::from(objIdBuf);
-            return objId.asDateT();
-        }
-        default:
-            MONGO_UNREACHABLE;
-    }
-}
-
 std::tuple<bool, value::TypeTags, value::Value> ByteCode::builtinDateToParts(uint8_t arity) {
     auto [timezoneDBOwn, timezoneDBTag, timezoneDBVal] = getFromStack(0);
     if (timezoneDBTag != value::TypeTags::timeZoneDB) {
@@ -1297,6 +1268,36 @@ std::tuple<bool, value::TypeTags, value::Value> ByteCode::builtinIsoDateToParts(
     dateObj->push_back("millisecond", value::TypeTags::NumberInt32, dateParts.millisecond);
     guard.reset();
     return {true, dateObjTag, dateObjVal};
+}
+
+std::tuple<bool, value::TypeTags, value::Value> ByteCode::builtinDayOfYear(uint8_t arity) {
+    invariant(arity == 3);
+
+    auto [timezoneDBOwn, timezoneDBTag, timezoneDBValue] = getFromStack(0);
+    auto [dateOwn, dateTag, dateValue] = getFromStack(1);
+    auto [timezoneOwn, timezoneTag, timezoneValue] = getFromStack(2);
+    return genericDayOfYear(
+        timezoneDBTag, timezoneDBValue, dateTag, dateValue, timezoneTag, timezoneValue);
+}
+
+std::tuple<bool, value::TypeTags, value::Value> ByteCode::builtinDayOfMonth(uint8_t arity) {
+    invariant(arity == 3);
+
+    auto [timezoneDBOwn, timezoneDBTag, timezoneDBValue] = getFromStack(0);
+    auto [dateOwn, dateTag, dateValue] = getFromStack(1);
+    auto [timezoneOwn, timezoneTag, timezoneValue] = getFromStack(2);
+    return genericDayOfMonth(
+        timezoneDBTag, timezoneDBValue, dateTag, dateValue, timezoneTag, timezoneValue);
+}
+
+std::tuple<bool, value::TypeTags, value::Value> ByteCode::builtinDayOfWeek(uint8_t arity) {
+    invariant(arity == 3);
+
+    auto [timezoneDBOwn, timezoneDBTag, timezoneDBValue] = getFromStack(0);
+    auto [dateOwn, dateTag, dateValue] = getFromStack(1);
+    auto [timezoneOwn, timezoneTag, timezoneValue] = getFromStack(2);
+    return genericDayOfWeek(
+        timezoneDBTag, timezoneDBValue, dateTag, dateValue, timezoneTag, timezoneValue);
 }
 
 std::tuple<bool, value::TypeTags, value::Value> ByteCode::builtinBitTestPosition(uint8_t arity) {
@@ -1856,6 +1857,39 @@ std::tuple<bool, value::TypeTags, value::Value> ByteCode::builtinSetIntersection
     return {true, resTag, resVal};
 }
 
+std::tuple<bool, value::TypeTags, value::Value> ByteCode::builtinSetDifference(uint8_t arity) {
+    auto [lhsOwned, lhsTag, lhsVal] = getFromStack(0);
+    auto [rhsOwned, rhsTag, rhsVal] = getFromStack(1);
+
+    if (!value::isArray(lhsTag) || !value::isArray(rhsTag)) {
+        return {false, value::TypeTags::Nothing, 0};
+    }
+
+    auto [resTag, resVal] = value::makeNewArraySet();
+    value::ValueGuard resGuard{resTag, resVal};
+    auto resView = value::getArraySetView(resVal);
+
+    value::ValueSetType setValuesSecondArg;
+    auto rhsIter = value::ArrayEnumerator(rhsTag, rhsVal);
+    while (!rhsIter.atEnd()) {
+        auto [elTag, elVal] = rhsIter.getViewOfValue();
+        setValuesSecondArg.insert({elTag, elVal});
+        rhsIter.advance();
+    }
+
+    auto lhsIter = value::ArrayEnumerator(lhsTag, lhsVal);
+    while (!lhsIter.atEnd()) {
+        auto [elTag, elVal] = lhsIter.getViewOfValue();
+        if (setValuesSecondArg.count({elTag, elVal}) == 0) {
+            auto [copyTag, copyVal] = value::copyValue(elTag, elVal);
+            resView->push_back(copyTag, copyVal);
+        }
+        lhsIter.advance();
+    }
+
+    resGuard.reset();
+    return {true, resTag, resVal};
+}
 
 std::tuple<bool, value::TypeTags, value::Value> ByteCode::dispatchBuiltin(Builtin f,
                                                                           uint8_t arity) {
@@ -1868,6 +1902,12 @@ std::tuple<bool, value::TypeTags, value::Value> ByteCode::dispatchBuiltin(Builti
             return builtinDateToParts(arity);
         case Builtin::isoDateToParts:
             return builtinIsoDateToParts(arity);
+        case Builtin::dayOfYear:
+            return builtinDayOfYear(arity);
+        case Builtin::dayOfMonth:
+            return builtinDayOfMonth(arity);
+        case Builtin::dayOfWeek:
+            return builtinDayOfWeek(arity);
         case Builtin::split:
             return builtinSplit(arity);
         case Builtin::regexMatch:
@@ -1958,6 +1998,8 @@ std::tuple<bool, value::TypeTags, value::Value> ByteCode::dispatchBuiltin(Builti
             return builtinSetUnion(arity);
         case Builtin::setIntersection:
             return builtinSetIntersection(arity);
+        case Builtin::setDifference:
+            return builtinSetDifference(arity);
     }
 
     MONGO_UNREACHABLE;
@@ -2560,6 +2602,20 @@ std::tuple<uint8_t, value::TypeTags, value::Value> ByteCode::run(const CodeFragm
                         topStack(false,
                                  value::TypeTags::Boolean,
                                  value::bitcastFrom<bool>(value::isNaN(tag, val)));
+                    }
+
+                    if (owned) {
+                        value::releaseValue(tag, val);
+                    }
+                    break;
+                }
+                case Instruction::isRecordId: {
+                    auto [owned, tag, val] = getFromStack(0);
+
+                    if (tag != value::TypeTags::Nothing) {
+                        topStack(false,
+                                 value::TypeTags::Boolean,
+                                 value::bitcastFrom<bool>(value::isRecordId(tag)));
                     }
 
                     if (owned) {

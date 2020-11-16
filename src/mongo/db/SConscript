@@ -568,31 +568,21 @@ env.Library(
     target="commands",
     source=[
         'commands.cpp',
+        'drop_database.idl',
     ],
     LIBDEPS=[
         '$BUILD_DIR/mongo/base',
     ],
     LIBDEPS_PRIVATE=[
         '$BUILD_DIR/mongo/bson/mutable/mutable_bson',
+        '$BUILD_DIR/mongo/idl/idl_parser',
         '$BUILD_DIR/mongo/rpc/command_status',
         '$BUILD_DIR/mongo/rpc/rpc',
         'audit',
         'auth/auth',
-        'command_generic_argument',
         'commands/server_status_core',
         'commands/test_commands_enabled',
         'namespace_string',
-    ],
-)
-
-env.Library(
-    target='command_generic_argument',
-    source=[
-        'command_generic_argument.cpp',
-    ],
-    LIBDEPS=[
-        '$BUILD_DIR/mongo/base',
-        '$BUILD_DIR/mongo/db/commands/server_status_core',
     ],
 )
 
@@ -1208,7 +1198,6 @@ env.Library(
         'query/sbe_stage_builder_filter.cpp',
         'query/sbe_stage_builder_index_scan.cpp',
         'query/sbe_stage_builder_projection.cpp',
-        'query/sbe_stage_builder_helpers.cpp',
         'query/sbe_sub_planner.cpp',
         'query/stage_builder_util.cpp',
         'query/wildcard_multikey_paths.cpp',
@@ -1217,6 +1206,7 @@ env.Library(
     LIBDEPS=[
         '$BUILD_DIR/mongo/base',
         '$BUILD_DIR/mongo/db/index/index_access_methods',
+        '$BUILD_DIR/mongo/db/s/resharding_util',
         '$BUILD_DIR/mongo/s/common_s',
         '$BUILD_DIR/mongo/scripting/scripting',
         '$BUILD_DIR/mongo/util/background_job',
@@ -1251,6 +1241,7 @@ env.Library(
         'query/plan_yield_policy',
         'query/query_common',
         'query/query_planner',
+        'query/sbe_stage_builder_helpers',
         'repl/repl_coordinator_interface',
         's/sharding_api_d',
         'shared_request_handling',

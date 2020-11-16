@@ -62,18 +62,20 @@ PlanExecutorSBE::PlanExecutorSBE(OperationContext* opCtx,
     invariant(_root);
     _solution = std::move(winner.solution);
 
-    if (winner.data.resultSlot) {
-        _result = _root->getAccessor(winner.data.ctx, *winner.data.resultSlot);
+    if (auto slot = winner.data.outputs.getIfExists(stage_builder::PlanStageSlots::kResult); slot) {
+        _result = _root->getAccessor(_ctx, *slot);
         uassert(4822865, "Query does not have result slot.", _result);
     }
 
-    if (winner.data.recordIdSlot) {
-        _resultRecordId = _root->getAccessor(winner.data.ctx, *winner.data.recordIdSlot);
+    if (auto slot = winner.data.outputs.getIfExists(stage_builder::PlanStageSlots::kRecordId);
+        slot) {
+        _resultRecordId = _root->getAccessor(_ctx, *slot);
         uassert(4822866, "Query does not have recordId slot.", _resultRecordId);
     }
 
-    if (winner.data.oplogTsSlot) {
-        _oplogTs = _root->getAccessor(winner.data.ctx, *winner.data.oplogTsSlot);
+    if (auto slot = winner.data.outputs.getIfExists(stage_builder::PlanStageSlots::kOplogTs);
+        slot) {
+        _oplogTs = _root->getAccessor(_ctx, *slot);
         uassert(4822867, "Query does not have oplogTs slot.", _oplogTs);
     }
 
@@ -217,7 +219,7 @@ PlanExecutor::ExecState PlanExecutorSBE::getNext(BSONObj* out, RecordId* dlOut) 
                 uassert(4946306,
                         "Collection scan was asked to track resume token, but found a result "
                         "without a valid RecordId",
-                        tag == sbe::value::TypeTags::NumberInt64 ||
+                        tag == sbe::value::TypeTags::RecordId ||
                             tag == sbe::value::TypeTags::Nothing);
                 _env->resetSlot(*_resumeRecordIdSlot, tag, val, false);
             }
@@ -276,7 +278,7 @@ BSONObj PlanExecutorSBE::getPostBatchResumeToken() const {
                     str::stream() << "Collection scan was asked to track resume token, "
                                      "but found a result without a valid RecordId: "
                                   << msgTag,
-                    tag == sbe::value::TypeTags::NumberInt64);
+                    tag == sbe::value::TypeTags::RecordId);
             return BSON("$recordId" << sbe::value::bitcastTo<int64_t>(val));
         }
     }
@@ -313,7 +315,7 @@ sbe::PlanState fetchNext(sbe::PlanStage* root,
     if (dlOut) {
         invariant(recordIdSlot);
         auto [tag, val] = recordIdSlot->getViewOfValue();
-        if (tag == sbe::value::TypeTags::NumberInt64) {
+        if (tag == sbe::value::TypeTags::RecordId) {
             *dlOut = RecordId{sbe::value::bitcastTo<int64_t>(val)};
         }
     }

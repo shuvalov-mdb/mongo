@@ -31,21 +31,21 @@
 
 #include <fstream>
 
+#include "mongo/config.h"
 #include "mongo/platform/basic.h"
 
 #include "mongo/transport/service_entry_point.h"
 #include "mongo/transport/transport_layer_asio.h"
 #include "mongo/util/net/ssl/context_base.hpp"
-#include "mongo/util/net/ssl/context_openssl.hpp"
 #include "mongo/util/net/ssl_manager.h"
 #include "mongo/util/net/ssl_options.h"
 
-#include "mongo/config.h"
 #include "mongo/logv2/log.h"
 #include "mongo/unittest/unittest.h"
 
 #if MONGO_CONFIG_SSL_PROVIDER == MONGO_CONFIG_SSL_PROVIDER_OPENSSL
 #include "mongo/util/net/dh_openssl.h"
+#include "mongo/util/net/ssl/context_openssl.hpp"
 #endif
 
 
@@ -58,12 +58,12 @@ public:
     void startSession(transport::SessionHandle session) override {
         stdx::unique_lock<Latch> lk(_mutex);
         _sessions.push_back(std::move(session));
-        LOGV2(23032, "started session");
+        LOGV2(2303202, "started session");
         _cv.notify_one();
     }
 
     void endAllSessions(transport::Session::TagMask tags) override {
-        LOGV2(23033, "end all sessions");
+        LOGV2(2303302, "end all sessions");
         std::vector<transport::SessionHandle> old_sessions;
         {
             stdx::unique_lock<Latch> lock(_mutex);
@@ -516,9 +516,12 @@ TEST(SSLManager, InitContextFromFileShouldFail) {
     params.sslCAFile = "jstests/libs/ca.pem";
     params.sslClusterFile = "jstests/libs/client.pem";
 
+#if MONGO_CONFIG_SSL_PROVIDER == MONGO_CONFIG_SSL_PROVIDER_OPENSSL
+    // TODO SERVER-52858: there is no exception on Mac & Windows.
     ASSERT_THROWS_CODE([&params] { SSLManagerInterface::create(params, true /* isSSLServer */); }(),
                        DBException,
                        16942);
+#endif
 }
 
 TEST(SSLManager, RotateClusterCertificatesFromFile) {
@@ -542,6 +545,8 @@ TEST(SSLManager, RotateClusterCertificatesFromFile) {
     transport::TransportLayerASIO tla(options, &sepu);
     uassertStatusOK(tla.rotateCertificates(manager, false /* asyncOCSPStaple */));
 }
+
+#if MONGO_CONFIG_SSL_PROVIDER == MONGO_CONFIG_SSL_PROVIDER_OPENSSL
 
 TEST(SSLManager, InitContextFromFile) {
     SSLParams params;
@@ -616,6 +621,7 @@ TEST(SSLManager, TransientSSLParams) {
     transport::TransportLayerASIO tla(options, &sepu);
     uassertStatusOK(tla.rotateCertificates(manager, false /* asyncOCSPStaple */));
 }
+#endif
 
 }  // namespace
 }  // namespace mongo

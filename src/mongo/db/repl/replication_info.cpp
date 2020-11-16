@@ -49,7 +49,7 @@
 #include "mongo/db/namespace_string.h"
 #include "mongo/db/ops/write_ops.h"
 #include "mongo/db/query/internal_plans.h"
-#include "mongo/db/repl/is_master_response.h"
+#include "mongo/db/repl/hello_response.h"
 #include "mongo/db/repl/primary_only_service.h"
 #include "mongo/db/repl/replication_auth.h"
 #include "mongo/db/repl/replication_coordinator.h"
@@ -61,7 +61,7 @@
 #include "mongo/executor/network_interface.h"
 #include "mongo/logv2/log.h"
 #include "mongo/rpc/metadata/client_metadata.h"
-#include "mongo/transport/ismaster_metrics.h"
+#include "mongo/transport/hello_metrics.h"
 #include "mongo/util/decimal_counter.h"
 #include "mongo/util/fail_point.h"
 
@@ -110,14 +110,14 @@ TopologyVersion appendReplicationInfo(OperationContext* opCtx,
             deadline = opCtx->getServiceContext()->getPreciseClockSource()->now() +
                 Milliseconds(*maxAwaitTimeMS);
         }
-        auto isMasterResponse =
-            replCoord->awaitIsMasterResponse(opCtx, horizonParams, clientTopologyVersion, deadline);
-        result->appendElements(isMasterResponse->toBSON(useLegacyResponseFields));
+        auto helloResponse =
+            replCoord->awaitHelloResponse(opCtx, horizonParams, clientTopologyVersion, deadline);
+        result->appendElements(helloResponse->toBSON(useLegacyResponseFields));
         if (appendReplicationProcess) {
             replCoord->appendSlaveInfoData(result);
         }
-        invariant(isMasterResponse->getTopologyVersion());
-        return isMasterResponse->getTopologyVersion().get();
+        invariant(helloResponse->getTopologyVersion());
+        return helloResponse->getTopologyVersion().get();
     }
 
     auto currentTopologyVersion = replCoord->getTopologyVersion();

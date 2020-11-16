@@ -124,6 +124,9 @@ struct ActiveTransactionHistory {
 
 ActiveTransactionHistory fetchActiveTransactionHistory(OperationContext* opCtx,
                                                        const LogicalSessionId& lsid) {
+    // Storage engine operations require at least Global IS.
+    Lock::GlobalLock lk(opCtx, MODE_IS);
+
     // Restore the current timestamp read source after fetching transaction history using
     // DBDirectClient, which may change our ReadSource.
     ReadSourceScope readSourceScope(opCtx, RecoveryUnit::ReadSource::kNoTimestamp);
@@ -371,7 +374,7 @@ TransactionParticipant::getOldestActiveTimestamp(Timestamp stableTimestamp) {
         }
 
         auto collection =
-            CollectionCatalog::get(opCtx.get()).lookupCollectionByNamespace(opCtx.get(), nss);
+            CollectionCatalog::get(opCtx.get())->lookupCollectionByNamespace(opCtx.get(), nss);
         if (!collection) {
             return boost::none;
         }
@@ -621,7 +624,7 @@ void TransactionParticipant::Participant::_setReadSnapshot(OperationContext* opC
     if (readConcernArgs.getArgsAtClusterTime()) {
         // Read concern code should have already set the timestamp on the recovery unit.
         const auto readTimestamp = readConcernArgs.getArgsAtClusterTime()->asTimestamp();
-        const auto ruTs = opCtx->recoveryUnit()->getPointInTimeReadTimestamp();
+        const auto ruTs = opCtx->recoveryUnit()->getPointInTimeReadTimestamp(opCtx);
         invariant(readTimestamp == ruTs,
                   "readTimestamp: {}, pointInTime: {}"_format(readTimestamp.toString(),
                                                               ruTs ? ruTs->toString() : "none"));
@@ -1140,8 +1143,9 @@ Timestamp TransactionParticipant::Participant::prepareTransaction(
     for (const auto& transactionOp : completedTransactionOperations) {
         transactionOperationUuids.insert(transactionOp.getUuid().get());
     }
+    auto catalog = CollectionCatalog::get(opCtx);
     for (const auto& uuid : transactionOperationUuids) {
-        auto collection = CollectionCatalog::get(opCtx).lookupCollectionByUUID(opCtx, uuid);
+        auto collection = catalog->lookupCollectionByUUID(opCtx, uuid);
         uassert(ErrorCodes::OperationNotSupportedInTransaction,
                 str::stream() << "prepareTransaction failed because one of the transaction "
                                  "operations was done against a temporary collection '"

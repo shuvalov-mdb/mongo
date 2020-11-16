@@ -251,7 +251,7 @@ Message getMore(OperationContext* opCtx,
     // Top. We avoid using AutoGetCollectionForReadCommand because we may need to drop and reacquire
     // locks when the cursor is awaitData, but we don't want to update the stats twice.
     UninterruptibleLockGuard noInterrupt(opCtx->lockState());
-    boost::optional<AutoGetCollectionForRead> readLock;
+    boost::optional<AutoGetCollectionForReadMaybeLockFree> readLock;
     boost::optional<AutoStatsTracker> statsTracker;
 
     // These are set in the QueryResult msg we return.
@@ -274,7 +274,7 @@ Message getMore(OperationContext* opCtx,
                                  nss,
                                  Top::LockType::NotLocked,
                                  AutoStatsTracker::LogMode::kUpdateTopAndCurOp,
-                                 CollectionCatalog::get(opCtx).getDatabaseProfileLevel(nss.db()));
+                                 CollectionCatalog::get(opCtx)->getDatabaseProfileLevel(nss.db()));
             auto view = autoDb.getDb() ? ViewCatalog::get(autoDb.getDb())->lookup(opCtx, nss.ns())
                                        : nullptr;
             uassert(
@@ -291,7 +291,7 @@ Message getMore(OperationContext* opCtx,
                              nss,
                              Top::LockType::ReadLocked,
                              AutoStatsTracker::LogMode::kUpdateTopAndCurOp,
-                             CollectionCatalog::get(opCtx).getDatabaseProfileLevel(nss.db()));
+                             CollectionCatalog::get(opCtx)->getDatabaseProfileLevel(nss.db()));
 
         // This checks to make sure the operation is allowed on a replicated node.  Since we are not
         // passing in a query object (necessary to check SlaveOK query option), we allow reads
@@ -604,7 +604,7 @@ bool runQuery(OperationContext* opCtx,
     LOGV2_DEBUG(20914, 2, "Running query", "query"_attr = redact(cq->toStringShort()));
 
     // Parse, canonicalize, plan, transcribe, and get a plan executor.
-    AutoGetCollectionForReadCommand collection(
+    AutoGetCollectionForReadCommandMaybeLockFree collection(
         opCtx, nss, AutoGetCollectionViewMode::kViewsForbidden);
     const QueryRequest& qr = cq->getQueryRequest();
 
@@ -634,8 +634,12 @@ bool runQuery(OperationContext* opCtx,
         bb.skip(sizeof(QueryResult::Value));
 
         BSONObjBuilder explainBob;
-        Explain::explainStages(
-            exec.get(), collection.getCollection(), verbosity, BSONObj(), &explainBob);
+        Explain::explainStages(exec.get(),
+                               collection.getCollection(),
+                               verbosity,
+                               BSONObj(),
+                               upconvertedQuery,
+                               &explainBob);
 
         // Add the resulting object to the return buffer.
         BSONObj explainObj = explainBob.obj();

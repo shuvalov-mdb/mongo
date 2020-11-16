@@ -292,7 +292,7 @@ StatusWith<StringMap<ExpressionContext::ResolvedNamespace>> resolveInvolvedNames
             // views, simply assume that the namespace is a collection.
             resolvedNamespaces[involvedNs.coll()] = {involvedNs, std::vector<BSONObj>{}};
         } else if (!db ||
-                   CollectionCatalog::get(opCtx).lookupCollectionByNamespace(opCtx, involvedNs)) {
+                   CollectionCatalog::get(opCtx)->lookupCollectionByNamespace(opCtx, involvedNs)) {
             // If the aggregation database exists and 'involvedNs' refers to a collection namespace,
             // then we resolve it as an empty pipeline in order to read directly from the underlying
             // collection. If the database doesn't exist, then we still resolve it as an empty
@@ -342,8 +342,9 @@ Status collatorCompatibleWithPipeline(OperationContext* opCtx,
     if (!viewCatalog) {
         return Status::OK();
     }
+    auto catalog = CollectionCatalog::get(opCtx);
     for (auto&& potentialViewNs : liteParsedPipeline.getInvolvedNamespaces()) {
-        if (CollectionCatalog::get(opCtx).lookupCollectionByNamespace(opCtx, potentialViewNs)) {
+        if (catalog->lookupCollectionByNamespace(opCtx, potentialViewNs)) {
             continue;
         }
 
@@ -501,7 +502,7 @@ Status runAggregate(OperationContext* opCtx,
     // If emplaced, AutoGetCollectionForReadCommand will throw if the sharding version for this
     // connection is out of date. If the namespace is a view, the lock will be released before
     // re-running the expanded aggregation.
-    boost::optional<AutoGetCollectionForReadCommand> ctx;
+    boost::optional<AutoGetCollectionForReadCommandMaybeLockFree> ctx;
 
     std::vector<unique_ptr<PlanExecutor, PlanExecutor::Deleter>> execs;
     boost::intrusive_ptr<ExpressionContext> expCtx;
@@ -761,7 +762,7 @@ Status runAggregate(OperationContext* opCtx,
         auto bodyBuilder = result->getBodyBuilder();
         if (auto pipelineExec = dynamic_cast<PlanExecutorPipeline*>(explainExecutor)) {
             Explain::explainPipeline(
-                pipelineExec, true /* executePipeline */, *(expCtx->explain), &bodyBuilder);
+                pipelineExec, true /* executePipeline */, *(expCtx->explain), cmdObj, &bodyBuilder);
         } else {
             invariant(explainExecutor->getOpCtx() == opCtx);
             // The explainStages() function for a non-pipeline executor may need to execute the plan
@@ -773,6 +774,7 @@ Status runAggregate(OperationContext* opCtx,
                                    ctx->getCollection(),
                                    *(expCtx->explain),
                                    BSON("optimizedPipeline" << true),
+                                   cmdObj,
                                    &bodyBuilder);
         }
     } else {

@@ -212,7 +212,6 @@ public:
         registry->addObserver(std::make_unique<OpObserverImpl>());
         _opCtx->getServiceContext()->setOpObserver(std::move(registry));
 
-        repl::setOplogCollectionName(_opCtx->getServiceContext());
         repl::createOplog(_opCtx);
 
         _clock->tickClusterTimeTo(LogicalTime(Timestamp(1, 0)));
@@ -2560,7 +2559,7 @@ public:
 
         // Assert the 'a_1' and `b_1` indexes becomes ready at the last oplog entry time.
         RecordId renamedCatalogId = CollectionCatalog::get(_opCtx)
-                                        .lookupCollectionByNamespace(_opCtx, renamedNss)
+                                        ->lookupCollectionByNamespace(_opCtx, renamedNss)
                                         ->getCatalogId();
         ASSERT_TRUE(getIndexMetaData(
                         getMetaDataAtTime(durableCatalog, renamedCatalogId, indexCommitTs), "a_1")

@@ -47,13 +47,15 @@
 #include "mongo/db/auth/authorization_session.h"
 #include "mongo/db/auth/privilege.h"
 #include "mongo/db/client.h"
-#include "mongo/db/command_generic_argument.h"
 #include "mongo/db/commands/test_commands_enabled.h"
 #include "mongo/db/curop.h"
 #include "mongo/db/error_labels.h"
 #include "mongo/db/jsobj.h"
 #include "mongo/db/namespace_string.h"
 #include "mongo/db/read_write_concern_defaults.h"
+#include "mongo/idl/basic_types_gen.h"
+#include "mongo/idl/command_generic_argument.h"
+#include "mongo/idl/idl_parser.h"
 #include "mongo/logv2/log.h"
 #include "mongo/rpc/factory.h"
 #include "mongo/rpc/metadata/client_metadata.h"
@@ -181,6 +183,20 @@ void CommandHelpers::runCommandInvocation(OperationContext* opCtx,
     if (hooks) {
         hooks->onAfterRun(opCtx, request, invocation);
     }
+}
+
+Future<void> CommandHelpers::runCommandInvocationAsync(
+    std::shared_ptr<RequestExecutionContext> rec,
+    std::shared_ptr<CommandInvocation> invocation) try {
+    auto hooks = getCommandInvocationHooksHandle(rec->getOpCtx()->getServiceContext());
+    if (hooks)
+        hooks->onBeforeAsyncRun(rec, invocation.get());
+    return invocation->runAsync(rec).then([rec, hooks, invocation] {
+        if (hooks)
+            hooks->onAfterAsyncRun(rec, invocation.get());
+    });
+} catch (const DBException& e) {
+    return e.toStatus();
 }
 
 void CommandHelpers::auditLogAuthEvent(OperationContext* opCtx,
@@ -321,6 +337,20 @@ bool CommandHelpers::appendCommandStatusNoThrow(BSONObjBuilder& result, const St
     if (auto extraInfo = status.extraInfo()) {
         extraInfo->serialize(&result);
     }
+    // If the command has errored, assert that it satisfies the IDL-defined requirements on a
+    // command error reply.
+    if (!status.isOK()) {
+        try {
+            ErrorReply::parse(IDLParserErrorContext("appendCommandStatusNoThrow"),
+                              result.asTempObj());
+        } catch (const DBException&) {
+            invariant(false,
+                      "invalid error-response to a command constructed in "
+                      "CommandHelpers::appendComandStatusNoThrow. All erroring command responses "
+                      "must comply with the format specified by the IDL-defined struct ErrorReply, "
+                      "defined in idl/basic_types.idl");
+        }
+    }
     return status.isOK();
 }
 
@@ -366,16 +396,35 @@ void CommandHelpers::appendCommandWCStatus(BSONObjBuilder& result,
     }
 }
 
-BSONObj CommandHelpers::appendPassthroughFields(const BSONObj& cmdObjWithPassthroughFields,
-                                                const BSONObj& request) {
+BSONObj CommandHelpers::appendGenericCommandArgs(const BSONObj& cmdObjWithGenericArgs,
+                                                 const BSONObj& request) {
     BSONObjBuilder b;
     b.appendElements(request);
-    for (const auto& elem : filterCommandRequestForPassthrough(cmdObjWithPassthroughFields)) {
+    for (const auto& elem : filterCommandRequestForPassthrough(cmdObjWithGenericArgs)) {
         const auto name = elem.fieldNameStringData();
         if (isGenericArgument(name) && !request.hasField(name)) {
             b.append(elem);
         }
     }
+    return b.obj();
+}
+
+void CommandHelpers::appendGenericReplyFields(const BSONObj& replyObjWithGenericReplyFields,
+                                              const BSONObj& reply,
+                                              BSONObjBuilder* replyBuilder) {
+    replyBuilder->appendElements(reply);
+    for (const auto& elem : filterCommandReplyForPassthrough(replyObjWithGenericReplyFields)) {
+        const auto name = elem.fieldNameStringData();
+        if (isGenericArgument(name) && !reply.hasField(name)) {
+            replyBuilder->append(elem);
+        }
+    }
+}
+
+BSONObj CommandHelpers::appendGenericReplyFields(const BSONObj& replyObjWithGenericReplyFields,
+                                                 const BSONObj& reply) {
+    BSONObjBuilder b;
+    appendGenericReplyFields(replyObjWithGenericReplyFields, reply, &b);
     return b.obj();
 }
 
@@ -437,7 +486,7 @@ void CommandHelpers::filterCommandRequestForPassthrough(BSONObjIterator* cmdIter
             BSONObjBuilder(requestBuilder->subobjStart("$queryOptions")).append(elem);
             continue;
         }
-        if (isRequestStripArgument(name))
+        if (!shouldForwardToShards(name))
             continue;
         requestBuilder->append(elem);
     }
@@ -447,7 +496,7 @@ void CommandHelpers::filterCommandReplyForPassthrough(const BSONObj& cmdObj,
                                                       BSONObjBuilder* output) {
     for (auto elem : cmdObj) {
         const auto name = elem.fieldNameStringData();
-        if (isReplyStripArgument(name))
+        if (!shouldForwardFromShards(name))
             continue;
         output->append(elem);
     }
@@ -783,6 +832,16 @@ private:
             BSONObjBuilder bob = result->getBodyBuilder();
             CommandHelpers::appendSimpleCommandStatus(bob, ok);
         }
+    }
+
+    Future<void> runAsync(std::shared_ptr<RequestExecutionContext> rec) override {
+        return _command->runAsync(rec, _dbName).onError([rec](Status status) {
+            if (status.code() != ErrorCodes::FailedToRunWithReplyBuilder)
+                return status;
+            BSONObjBuilder bob = rec->getReplyBuilder()->getBodyBuilder();
+            CommandHelpers::appendSimpleCommandStatus(bob, false);
+            return Status::OK();
+        });
     }
 
     void explain(OperationContext* opCtx,

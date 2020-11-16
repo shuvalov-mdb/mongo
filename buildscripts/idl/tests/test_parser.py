@@ -304,6 +304,15 @@ class TestParser(testcase.IDLTestcase):
                     foo: bar
             """))
 
+        # Missing fields
+        self.assert_parse(
+            textwrap.dedent("""
+        structs:
+            foo:
+                description: foo
+                strict: true
+            """))
+
     def test_struct_negative(self):
         # type: () -> None
         """Negative struct test cases."""
@@ -314,15 +323,6 @@ class TestParser(testcase.IDLTestcase):
         structs:
             foo: foo
             """), idl.errors.ERROR_ID_IS_NODE_TYPE)
-
-        # Missing fields
-        self.assert_parse_fail(
-            textwrap.dedent("""
-        structs:
-            foo:
-                description: foo
-                strict: true
-            """), idl.errors.ERROR_ID_EMPTY_FIELDS)
 
         # unknown field
         self.assert_parse_fail(
@@ -842,8 +842,6 @@ class TestParser(testcase.IDLTestcase):
                 api_version: 1
                 is_deprecated: true
                 unstable: true
-                forward_to_shards: true
-                forward_from_shards: true
                 immutable: true
                 inline_chained_structs: true
                 generate_comparison_operators: true
@@ -853,20 +851,36 @@ class TestParser(testcase.IDLTestcase):
                 reply_type: foo_reply_struct
             """))
 
-        # All fields with false for bools
+        # All fields with false for bools, except strict
         self.assert_parse(
             textwrap.dedent("""
         commands:
             foo:
                 description: foo
-                strict: false
                 command_name: foo
+                strict: true
                 namespace: ignored
                 api_version: 1
                 is_deprecated: false
                 unstable: false
-                forward_to_shards: false
-                forward_from_shards: false
+                immutable: false
+                inline_chained_structs: false
+                generate_comparison_operators: false
+                fields:
+                    foo: bar
+                reply_type: foo_reply_struct
+            """))
+
+        # All fields with false for bools, no api_version
+        self.assert_parse(
+            textwrap.dedent("""
+        commands:
+            foo:
+                description: foo
+                command_name: foo
+                strict: false
+                namespace: ignored
+                is_deprecated: false
                 immutable: false
                 inline_chained_structs: false
                 generate_comparison_operators: false
@@ -1045,6 +1059,21 @@ class TestParser(testcase.IDLTestcase):
                     foo: bar
                 reply_type: foo_reply_struct
             """), idl.errors.ERROR_ID_IS_NODE_TYPE)
+
+        # strict:true required if api_version set
+        self.assert_parse_fail(
+            textwrap.dedent("""
+        commands:
+            foo:
+                description: foo
+                command_name: foo
+                namespace: ignored
+                api_version: "1"
+                strict: false
+                fields:
+                    foo: bar
+                reply_type: foo_reply_struct
+            """), idl.errors.ERROR_ID_API_VERSION_NO_STRICT)
 
         # Cannot specify unstable with empty api_version
         self.assert_parse_fail(
@@ -1356,6 +1385,126 @@ class TestParser(testcase.IDLTestcase):
                     description: "Make toast"
                     cpp_varname: gToaster
             """), idl.errors.ERROR_ID_MISSING_REQUIRED_FIELD)
+
+    def _test_field_list(self, field_list_name, should_forward_name):
+        # type: (str, str) -> None
+        """Positive field list test cases."""
+
+        # Generic field with no options
+        self.assert_parse(
+            textwrap.dedent(f"""
+        {field_list_name}:
+            foo:
+                description: foo
+                fields:
+                    foo: {{}}
+            """))
+
+        # All fields with true for bools
+        self.assert_parse(
+            textwrap.dedent(f"""
+        {field_list_name}:
+            foo:
+                description: foo
+                fields:
+                    foo:
+                        {should_forward_name}: true
+            """))
+
+        # All fields with false for bools
+        self.assert_parse(
+            textwrap.dedent(f"""
+        {field_list_name}:
+            foo:
+                description: foo
+                fields:
+                    foo:
+                        {should_forward_name}: false
+            """))
+
+        # cpp_name.
+        self.assert_parse(
+            textwrap.dedent(f"""
+        {field_list_name}:
+            foo:
+                description: foo
+                cpp_name: foo
+                fields:
+                    foo: {{}}
+            """))
+
+    def _test_field_list_negative(self, field_list_name, should_forward_name):
+        # type: (str, str) -> None
+        """Negative field list test cases."""
+
+        # Field list as a scalar
+        self.assert_parse_fail(
+            textwrap.dedent(f"""
+        {field_list_name}:
+            foo: 1
+            """), idl.errors.ERROR_ID_IS_NODE_TYPE)
+
+        # No description
+        self.assert_parse_fail(
+            textwrap.dedent(f"""
+        {field_list_name}:
+            foo:
+                fields:
+                    foo: {{}}
+            """), idl.errors.ERROR_ID_MISSING_REQUIRED_FIELD)
+
+        # Unknown option
+        self.assert_parse_fail(
+            textwrap.dedent(f"""
+        {field_list_name}:
+            foo:
+                description: foo
+                foo: bar
+                fields:
+                    foo: {{}}
+            """), idl.errors.ERROR_ID_UNKNOWN_NODE)
+
+        # forward_to_shards is a bool.
+        self.assert_parse_fail(
+            textwrap.dedent(f"""
+        {field_list_name}:
+            foo:
+                description: foo
+                fields:
+                    foo:
+                        {should_forward_name}: asdf
+            """), idl.errors.ERROR_ID_IS_NODE_VALID_BOOL)
+
+        # forward_from_shards is a bool
+        self.assert_parse_fail(
+            textwrap.dedent(f"""
+        {field_list_name}:
+            foo:
+                description: foo
+                fields:
+                    foo:
+                        {should_forward_name}: asdf
+            """), idl.errors.ERROR_ID_IS_NODE_VALID_BOOL)
+
+    def test_generic_arguments_list(self):
+        # type: () -> None
+        """Positive generic argument list test cases."""
+        self._test_field_list("generic_argument_lists", "forward_to_shards")
+
+    def test_generic_arguments_list_negative(self):
+        # type: () -> None
+        """Negative generic argument list test cases."""
+        self._test_field_list_negative("generic_argument_lists", "forward_to_shards")
+
+    def test_generic_reply_fields_list(self):
+        # type: () -> None
+        """Positive generic reply fields list test cases."""
+        self._test_field_list("generic_reply_field_lists", "forward_from_shards")
+
+    def test_generic_reply_fields_list_negative(self):
+        # type: () -> None
+        """Negative generic reply fields list test cases."""
+        self._test_field_list_negative("generic_reply_field_lists", "forward_from_shards")
 
 
 if __name__ == '__main__':

@@ -505,16 +505,16 @@ Status storeMongodOptions(const moe::Environment& params) {
         // storage engines will continue to perform regular capped collection handling for the oplog
         // collection, regardless of this parameter setting.
         storageGlobalParams.allowOplogTruncation = false;
+    }
 
-        // Standalone mode does not currently support lock-free reads, so we disable it. If the user
-        // tries to explicitly enable it by specifying --disableLockFreeReads=false, log a warning
-        // so that the user knows the feature will not run in standalone mode.
-        if (!storageGlobalParams.disableLockFreeReads) {
-            LOGV2_WARNING(
-                4788400,
-                "Lock-free reads is not supported in standalone mode: disabling lock-free reads.");
-            storageGlobalParams.disableLockFreeReads = true;
-        }
+    if (!replSettings.getReplSetString().empty() &&
+        (params.count("security.authorization") &&
+         params["security.authorization"].as<std::string>() == "enabled") &&
+        !params.count("security.keyFile")) {
+        return Status(
+            ErrorCodes::BadValue,
+            str::stream()
+                << "security.keyFile is required when authorization is enabled with replica sets");
     }
 
     if (params.count("replication.enableMajorityReadConcern")) {
@@ -683,9 +683,12 @@ Status storeMongodOptions(const moe::Environment& params) {
 }
 
 // This warning must be deferred until after ServerLogRedirection has started up so that it goes to
-// the right place.
-MONGO_INITIALIZER_WITH_PREREQUISITES(IgnoreEnableMajorityReadConcernWarning,
-                                     ("ServerLogRedirection"))
+// the right place. This initializer depends on the "default" initializer, which in turn depends on
+// the "ServerLogRedirection". This ensures that when this initializer is run, the log redirection
+// to file, if any, is ready. The reason for depending on "default" instead of
+// "ServerLogRedirection" is that this way we avoid having to add a dummy "ServerLogRedirection"
+// initializer in each one of the unit tests that depend on mongod_options.
+MONGO_INITIALIZER(IgnoreEnableMajorityReadConcernWarning)
 (InitializerContext*) {
     if (gIgnoreEnableMajorityReadConcernWarning) {
         LOGV2_WARNING(20879,

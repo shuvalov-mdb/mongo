@@ -34,12 +34,15 @@ variables:
     - wtdevelop
 
     - dsi
-    - signal-processing
     - genny
+    - signal-processing
+    - workloads
     - linkbench
     - linkbench2
-    - workloads
     - mongo-perf
+    - YCSB
+    - benchmarks
+    - py-tpcc
 
 
 modules:
@@ -67,19 +70,32 @@ modules:
   branch: develop
 - name: linkbench
   repo: git@github.com:10gen/linkbench.git
-  prefix: linkbench
+  prefix: ../../src
   branch: master
 - name: linkbench2
   repo: git@github.com:mdcallag/linkbench.git
-  prefix: linkbench2
+  prefix: ../../src
   branch: master
   ref: 63207190657737b32eb0e81c5b81ad1b8bad0e5a
 - name: mongo-perf
   repo: git@github.com:mongodb/mongo-perf.git
   prefix: ../../src
   branch: master
-###
+- name: YCSB
+  repo: git@github.com:mongodb-labs/YCSB.git
+  prefix: ../../src
+  branch: master
+  ref: 9e7888c5009e44a185b135104dd8456eea1deb1e
+- name: benchmarks
+  repo: git@github.com:mongodb-labs/benchmarks.git
+  prefix: ../../src
+  branch: master
+- name: py-tpcc
+  repo: git@github.com:10gen/py-tpcc.git
+  prefix: ../../src
+  ref: 52185e96bf28be6608ea65b61ff1d134b7cb3f13
 
+###
 - name: enterprise
   repo: git@github.com:10gen/mongo-enterprise-modules.git
   prefix: src/mongo/db/modules
@@ -87,10 +103,6 @@ modules:
 - name: mongo-tools
   repo: git@github.com:mongodb/mongo-tools.git
   prefix: mongo-tools/src/github.com/mongodb
-  branch: master
-- name: mongo-perf
-  repo: git@github.com:mongodb/mongo-perf.git
-  prefix: ../../src
   branch: master
 
 
@@ -124,12 +136,15 @@ functions:
         directory: *src_dir
         revisions:
           dsi: ${dsi_rev}
+          genny: ${genny_rev}
+          signal-processing: ${signal-processing_rev}
           linkbench: ${linkbench_rev}
           linkbench2: ${linkbench2_rev}
-          genny: ${genny_rev}
           workloads: ${workloads_rev}
-          signal-processing: ${signal-processing_rev}
           mongo-perf: ${mongo-perf_rev}
+          YCSB: ${YCSB_rev}
+          benchmarks: ${benchmarks_rev}
+          py-tpcc: ${py-tpcc_rev}
     - command: expansions.write
       params:
         file: ./expansions.yml
@@ -625,6 +640,71 @@ tasks:
            exclude_filter: single_threaded,
            threads: "1 2 4 8",
            read_cmd: 'false'}
+- name: misc_custom_filter_default
+  depends_on: *_compile
+  commands:
+    - func: f_run_dsi_workload
+      vars:
+        test_control: microbenchmarks
+        mongodb_setup: microbenchmarks_standalone_custom_filter_default
+        test_control_params: |
+          {include_filter_1: command multi remove mixed,
+           include_filter_2: core regression,
+           exclude_filter: single_threaded,
+           threads: "1 2 4 8",
+           read_cmd: 'false'}
+- name: misc_custom_filter_slow_or_sample
+  depends_on: *_compile
+  commands:
+    - func: f_run_dsi_workload
+      vars:
+        test_control: microbenchmarks
+        mongodb_setup: microbenchmarks_standalone_custom_filter_slow_or_sample
+        test_control_params: |
+          {include_filter_1: command multi remove mixed,
+           include_filter_2: core regression,
+           exclude_filter: single_threaded,
+           threads: "1 2 4 8",
+           read_cmd: 'false'}
+- name: misc_custom_filter_complex
+  depends_on: *_compile
+  commands:
+    - func: f_run_dsi_workload
+      vars:
+        test_control: microbenchmarks
+        mongodb_setup: microbenchmarks_standalone_custom_filter_complex
+        test_control_params: |
+          {include_filter_1: command multi remove mixed,
+           include_filter_2: core regression,
+           exclude_filter: single_threaded,
+           threads: "1 2 4 8",
+           read_cmd: 'false'}
+- name: misc_custom_filter_whole_doc
+  depends_on: *_compile
+  commands:
+    - func: f_run_dsi_workload
+      vars:
+        test_control: microbenchmarks
+        mongodb_setup: microbenchmarks_standalone_custom_filter_whole_doc
+        test_control_params: |
+          {include_filter_1: command multi remove mixed,
+           include_filter_2: core regression,
+           exclude_filter: single_threaded,
+           threads: "1 2 4 8",
+           read_cmd: 'false'}
+- name: misc_slowms_everything
+  depends_on: *_compile
+  commands:
+    - func: f_run_dsi_workload
+      vars:
+        test_control: microbenchmarks
+        mongodb_setup: microbenchmarks_standalone_slowms_everything
+        test_control_params: |
+          {include_filter_1: command multi remove mixed,
+           include_filter_2: core regression,
+           exclude_filter: single_threaded,
+           threads: "1 2 4 8",
+           read_cmd: 'false'}
 - name: singleThreaded
   depends_on: *_compile
   commands:
@@ -737,6 +817,11 @@ buildvariants:
   - name: wildcard-index-write
   - name: geo
   - name: misc
+  - name: misc_custom_filter_default
+  - name: misc_custom_filter_slow_or_sample
+  - name: misc_custom_filter_complex
+  - name: misc_custom_filter_whole_doc
+  - name: misc_slowms_everything
   - name: singleThreaded
   - name: pipeline-updates
   - name: javascript

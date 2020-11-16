@@ -1796,6 +1796,7 @@ void getCertInfo(CertInformationToLog* info, const ::CFArrayRef cert) {
     const auto certSha1 = SHA1Block::computeHash({certData});
     info->thumbprint =
         std::vector<char>((char*)certSha1.data(), (char*)certSha1.data() + certSha1.kHashLength);
+    info->hexEncodedThumbprint = hexblob::encode(info->thumbprint.data(), info->thumbprint.size());
 }
 
 SSLInformationToLog SSLManagerApple::getSSLInformationToLog() const {

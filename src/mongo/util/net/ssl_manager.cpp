@@ -335,14 +335,9 @@ std::shared_ptr<SSLManagerInterface> SSLManagerCoordinator::getSSLManager() {
 }
 
 void logCert(const CertInformationToLog& cert, StringData certType, const int logNum) {
-    LOGV2(logNum,
-          "Certificate information",
-          "type"_attr = certType,
-          "subject"_attr = cert.subject.toString(),
-          "issuer"_attr = cert.issuer.toString(),
-          "thumbprint"_attr = hexblob::encode(cert.thumbprint.data(), cert.thumbprint.size()),
-          "notValidBefore"_attr = cert.validityNotBefore.toString(),
-          "notValidAfter"_attr = cert.validityNotAfter.toString());
+    auto attrs = cert.getDynamicAttributes();
+    attrs.add("type", certType);
+    LOGV2(logNum, "Certificate information", attrs);
 }
 
 void logCRL(const CRLInformationToLog& crl, const int logNum) {

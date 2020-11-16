@@ -135,7 +135,7 @@ void DocumentSourceCursor::loadBatch() {
     PlanExecutor::ExecState state;
     Document resultObj;
 
-    boost::optional<AutoGetCollectionForRead> autoColl;
+    boost::optional<AutoGetCollectionForReadMaybeLockFree> autoColl;
     if (_exec->lockPolicy() == PlanExecutor::LockPolicy::kLockExternally) {
         autoColl.emplace(pExpCtx->opCtx, _exec->nss());
         uassertStatusOK(repl::ReplicationCoordinator::get(pExpCtx->opCtx)
@@ -219,7 +219,7 @@ Value DocumentSourceCursor::serialize(boost::optional<ExplainOptions::Verbosity>
         AutoGetDb dbLock(opCtx, _exec->nss().db(), lockMode);
         Lock::CollectionLock collLock(opCtx, _exec->nss(), lockMode);
         auto collection = dbLock.getDb()
-            ? CollectionCatalog::get(opCtx).lookupCollectionByNamespace(opCtx, _exec->nss())
+            ? CollectionCatalog::get(opCtx)->lookupCollectionByNamespace(opCtx, _exec->nss())
             : nullptr;
 
         Explain::explainStages(_exec.get(),
@@ -227,6 +227,7 @@ Value DocumentSourceCursor::serialize(boost::optional<ExplainOptions::Verbosity>
                                verbosity.get(),
                                _execStatus,
                                _winningPlanTrialStats,
+                               BSONObj(),
                                BSONObj(),
                                &explainStatsBuilder);
     }

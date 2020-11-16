@@ -44,7 +44,9 @@ namespace resharding {
  * respectively.
  */
 void createTemporaryReshardingCollectionLocally(OperationContext* opCtx,
-                                                const NamespaceString& reshardingNss,
+                                                const NamespaceString& originalNss,
+                                                const UUID& reshardingUUID,
+                                                const UUID& existingUUID,
                                                 Timestamp fetchTimestamp);
 
 }  // namespace resharding
@@ -134,6 +136,8 @@ private:
     // Transitions the state on-disk and in-memory to 'endState'.
     void _transitionState(RecipientStateEnum endState,
                           boost::optional<Timestamp> fetchTimestamp = boost::none);
+
+    void _transitionStateAndUpdateCoordinator(RecipientStateEnum endState);
 
     // Transitions the state on-disk and in-memory to kError.
     void _transitionStateToError(const Status& status);

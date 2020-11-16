@@ -63,24 +63,6 @@ LocalOplogInfo* LocalOplogInfo::get(OperationContext* opCtx) {
     return get(opCtx->getServiceContext());
 }
 
-const NamespaceString& LocalOplogInfo::getOplogCollectionName() const {
-    return _oplogName;
-}
-
-void LocalOplogInfo::setOplogCollectionName(ServiceContext* service) {
-    switch (ReplicationCoordinator::get(service)->getReplicationMode()) {
-        case ReplicationCoordinator::modeReplSet:
-            _oplogName = NamespaceString::kRsOplogNamespace;
-            break;
-        case ReplicationCoordinator::modeNone:
-            if (ReplSettings::shouldRecoverFromOplogAsStandalone()) {
-                _oplogName = NamespaceString::kRsOplogNamespace;
-            }
-            // leave empty otherwise.
-            break;
-    }
-}
-
 const CollectionPtr& LocalOplogInfo::getCollection() const {
     return _oplog;
 }

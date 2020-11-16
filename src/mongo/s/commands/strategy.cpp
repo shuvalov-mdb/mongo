@@ -84,7 +84,7 @@
 #include "mongo/s/shard_invalidated_for_targeting_exception.h"
 #include "mongo/s/stale_exception.h"
 #include "mongo/s/transaction_router.h"
-#include "mongo/transport/ismaster_metrics.h"
+#include "mongo/transport/hello_metrics.h"
 #include "mongo/transport/session.h"
 #include "mongo/util/fail_point.h"
 #include "mongo/util/scopeguard.h"
@@ -1339,6 +1339,6 @@ void Strategy::explainFind(OperationContext* opCtx,
         ClusterExplain::getStageNameForReadOp(shardResponses.size(), findCommand);
 
     uassertStatusOK(ClusterExplain::buildExplainResult(
-        opCtx, shardResponses, mongosStageName, millisElapsed, out));
+        opCtx, shardResponses, mongosStageName, millisElapsed, findCommand, out));
 }
 }  // namespace mongo

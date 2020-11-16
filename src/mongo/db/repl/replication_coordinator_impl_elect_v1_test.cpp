@@ -34,7 +34,7 @@
 #include "mongo/db/concurrency/replication_state_transition_lock_guard.h"
 #include "mongo/db/jsobj.h"
 #include "mongo/db/operation_context_noop.h"
-#include "mongo/db/repl/is_master_response.h"
+#include "mongo/db/repl/hello_response.h"
 #include "mongo/db/repl/mock_fixture.h"
 #include "mongo/db/repl/repl_set_config.h"
 #include "mongo/db/repl/repl_set_heartbeat_args_v1.h"
@@ -176,15 +176,15 @@ TEST_F(ReplCoordTest, ElectionSucceedsWhenNodeIsTheOnlyElectableNode) {
     auto& opCtx = *opCtxPtr;
 
     // Since we're still in drain mode, expect that we report ismaster: false, issecondary:true.
-    auto imResponse =
-        getReplCoord()->awaitIsMasterResponse(opCtxPtr.get(), {}, boost::none, boost::none);
-    ASSERT_FALSE(imResponse->isMaster()) << imResponse->toBSON().toString();
-    ASSERT_TRUE(imResponse->isSecondary()) << imResponse->toBSON().toString();
+    auto helloResponse =
+        getReplCoord()->awaitHelloResponse(opCtxPtr.get(), {}, boost::none, boost::none);
+    ASSERT_FALSE(helloResponse->isWritablePrimary()) << helloResponse->toBSON().toString();
+    ASSERT_TRUE(helloResponse->isSecondary()) << helloResponse->toBSON().toString();
     signalDrainComplete(&opCtx);
-    imResponse =
-        getReplCoord()->awaitIsMasterResponse(opCtxPtr.get(), {}, boost::none, boost::none);
-    ASSERT_TRUE(imResponse->isMaster()) << imResponse->toBSON().toString();
-    ASSERT_FALSE(imResponse->isSecondary()) << imResponse->toBSON().toString();
+    helloResponse =
+        getReplCoord()->awaitHelloResponse(opCtxPtr.get(), {}, boost::none, boost::none);
+    ASSERT_TRUE(helloResponse->isWritablePrimary()) << helloResponse->toBSON().toString();
+    ASSERT_FALSE(helloResponse->isSecondary()) << helloResponse->toBSON().toString();
 }
 
 TEST_F(ReplCoordTest, StartElectionDoesNotStartAnElectionWhenNodeIsRecovering) {
@@ -233,15 +233,15 @@ TEST_F(ReplCoordTest, ElectionSucceedsWhenNodeIsTheOnlyNode) {
     auto& opCtx = *opCtxPtr;
 
     // Since we're still in drain mode, expect that we report ismaster: false, issecondary:true.
-    auto imResponse =
-        getReplCoord()->awaitIsMasterResponse(opCtxPtr.get(), {}, boost::none, boost::none);
-    ASSERT_FALSE(imResponse->isMaster()) << imResponse->toBSON().toString();
-    ASSERT_TRUE(imResponse->isSecondary()) << imResponse->toBSON().toString();
+    auto helloResponse =
+        getReplCoord()->awaitHelloResponse(opCtxPtr.get(), {}, boost::none, boost::none);
+    ASSERT_FALSE(helloResponse->isWritablePrimary()) << helloResponse->toBSON().toString();
+    ASSERT_TRUE(helloResponse->isSecondary()) << helloResponse->toBSON().toString();
     signalDrainComplete(&opCtx);
-    imResponse =
-        getReplCoord()->awaitIsMasterResponse(opCtxPtr.get(), {}, boost::none, boost::none);
-    ASSERT_TRUE(imResponse->isMaster()) << imResponse->toBSON().toString();
-    ASSERT_FALSE(imResponse->isSecondary()) << imResponse->toBSON().toString();
+    helloResponse =
+        getReplCoord()->awaitHelloResponse(opCtxPtr.get(), {}, boost::none, boost::none);
+    ASSERT_TRUE(helloResponse->isWritablePrimary()) << helloResponse->toBSON().toString();
+    ASSERT_FALSE(helloResponse->isSecondary()) << helloResponse->toBSON().toString();
 
     // Check that only the 'numCatchUpsSkipped' primary catchup conclusion reason was incremented.
     ASSERT_EQ(0, ReplicationMetrics::get(opCtxPtr.get()).getNumCatchUpsSucceeded_forTesting());
@@ -2383,6 +2383,81 @@ TEST_F(ReplCoordTest, NodeCancelsElectionWhenWritingLastVoteInDryRun) {
     ASSERT(TopologyCoordinator::Role::kFollower == getTopoCoord().getRole());
 }
 
+TEST_F(ReplCoordTest, MemberHbDataIsRestartedUponWinningElection) {
+    auto replAllSeverityGuard = unittest::MinimumLoggedSeverityGuard{
+        logv2::LogComponent::kReplication, logv2::LogSeverity::Debug(3)};
+
+    auto replConfigBson = BSON("_id"
+                               << "mySet"
+                               << "protocolVersion" << 1 << "version" << 1 << "members"
+                               << BSON_ARRAY(BSON("_id" << 1 << "host"
+                                                        << "node1:12345")
+                                             << BSON("_id" << 2 << "host"
+                                                           << "node2:12345")
+                                             << BSON("_id" << 3 << "host"
+                                                           << "node3:12345")));
+
+    auto myHostAndPort = HostAndPort("node1", 12345);
+    assertStartSuccess(replConfigBson, myHostAndPort);
+    replCoordSetMyLastAppliedOpTime(OpTime(Timestamp(100, 1), 0), Date_t() + Seconds(100));
+    replCoordSetMyLastDurableOpTime(OpTime(Timestamp(100, 1), 0), Date_t() + Seconds(100));
+    ASSERT_OK(getReplCoord()->setFollowerMode(MemberState::RS_SECONDARY));
+
+    // Respond to heartbeat requests. This should update memberData for all nodes.
+    simulateEnoughHeartbeatsForAllNodesUp();
+    simulateSuccessfulDryRun();
+
+    // Verify that all other nodes were updated since restart.
+    auto memberData = getReplCoord()->getMemberData();
+    for (auto& member : memberData) {
+        // We should not have updated our own memberData.
+        if (member.isSelf()) {
+            continue;
+        }
+        ASSERT_TRUE(member.isUpdatedSinceRestart());
+    }
+
+    enterNetwork();
+    NetworkInterfaceMock* net = getNet();
+
+    // Advance clock time so that heartbeat requests are in SENT state.
+    auto config = getReplCoord()->getReplicaSetConfig_forTest();
+    net->advanceTime(net->now() + config.getHeartbeatInterval());
+
+    while (net->hasReadyRequests()) {
+        const NetworkInterfaceMock::NetworkOperationIterator noi = net->getNextReadyRequest();
+        const RemoteCommandRequest& request = noi->getRequest();
+        LOGV2(5031801,
+              "{request_target} processing {request_cmdObj}",
+              "request_target"_attr = request.target.toString(),
+              "request_cmdObj"_attr = request.cmdObj);
+        if (request.cmdObj.firstElement().fieldNameStringData() != "replSetRequestVotes") {
+            // Since the heartbeat requests are in SENT state, we will black hole them here to avoid
+            // responding to them.
+            net->blackHole(noi);
+        } else {
+            net->scheduleResponse(noi,
+                                  net->now(),
+                                  makeResponseStatus(BSON("ok" << 1 << "term" << 1 << "voteGranted"
+                                                               << true << "reason"
+                                                               << "")));
+        }
+        net->runReadyNetworkOperations();
+    }
+    exitNetwork();
+
+    getReplCoord()->waitForElectionFinish_forTest();
+    ASSERT_TRUE(getReplCoord()->getMemberState().primary());
+
+    // Verify that the memberData for every node has not been updated since becoming primary. This
+    // can only happen if all heartbeat requests are restarted after the election, not just
+    // heartbeats in SCHEDULED state.
+    memberData = getReplCoord()->getMemberData();
+    for (auto& member : memberData) {
+        ASSERT_FALSE(member.isUpdatedSinceRestart());
+    }
+}
+
 class PrimaryCatchUpTest : public ReplCoordTest {
 protected:
     using NetworkOpIter = NetworkInterfaceMock::NetworkOperationIterator;
@@ -2474,10 +2549,10 @@ protected:
 
         simulateSuccessfulV1Voting();
         const auto opCtx = makeOperationContext();
-        auto imResponse =
-            getReplCoord()->awaitIsMasterResponse(opCtx.get(), {}, boost::none, boost::none);
-        ASSERT_FALSE(imResponse->isMaster()) << imResponse->toBSON().toString();
-        ASSERT_TRUE(imResponse->isSecondary()) << imResponse->toBSON().toString();
+        auto helloResponse =
+            getReplCoord()->awaitHelloResponse(opCtx.get(), {}, boost::none, boost::none);
+        ASSERT_FALSE(helloResponse->isWritablePrimary()) << helloResponse->toBSON().toString();
+        ASSERT_TRUE(helloResponse->isSecondary()) << helloResponse->toBSON().toString();
 
         return config;
     }

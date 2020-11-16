@@ -1099,25 +1099,26 @@ class ReshardingTxnCloningPipelineTest : public AggregationContextFixture {
 
 protected:
     std::pair<std::deque<DocumentSource::GetNextResult>, std::deque<SessionTxnRecord>>
-    makeTransactions(size_t numTransactions,
-                     std::function<Timestamp(size_t)> getTimestamp,
-                     bool includeMultiDocTransaction = false) {
+    makeTransactions(size_t numRetryableWrites,
+                     size_t numMultiDocTxns,
+                     std::function<Timestamp(size_t)> getTimestamp) {
         std::deque<DocumentSource::GetNextResult> mockResults;
         std::deque<SessionTxnRecord>
             expectedTransactions;  // this will hold the expected result for this test
-        for (size_t i = 0; i < numTransactions; i++) {
+        for (size_t i = 0; i < numRetryableWrites; i++) {
             auto transaction = SessionTxnRecord(
                 makeLogicalSessionIdForTest(), 0, repl::OpTime(getTimestamp(i), 0), Date_t());
             mockResults.emplace_back(Document(transaction.toBSON()));
             expectedTransactions.emplace_back(transaction);
         }
-        if (includeMultiDocTransaction) {
+        for (size_t i = 0; i < numMultiDocTxns; i++) {
             auto transaction = SessionTxnRecord(makeLogicalSessionIdForTest(),
                                                 0,
-                                                repl::OpTime(getTimestamp(numTransactions), 0),
+                                                repl::OpTime(getTimestamp(numMultiDocTxns), 0),
                                                 Date_t());
             transaction.setState(DurableTxnStateEnum::kInProgress);
             mockResults.emplace_back(Document(transaction.toBSON()));
+            expectedTransactions.emplace_back(transaction);
         }
         std::sort(expectedTransactions.begin(),
                   expectedTransactions.end(),
@@ -1162,7 +1163,7 @@ protected:
 
 TEST_F(ReshardingTxnCloningPipelineTest, TxnPipelineSorted) {
     auto [mockResults, expectedTransactions] =
-        makeTransactions(10, [](size_t) { return Timestamp::min(); });
+        makeTransactions(10, 10, [](size_t) { return Timestamp::min(); });
 
     auto pipeline = constructPipeline(mockResults, Timestamp::max(), boost::none);
 
@@ -1173,8 +1174,8 @@ TEST_F(ReshardingTxnCloningPipelineTest, TxnPipelineSorted) {
 TEST_F(ReshardingTxnCloningPipelineTest, TxnPipelineBeforeFetchTimestamp) {
     size_t numTransactions = 10;
     Timestamp fetchTimestamp(numTransactions / 2 + 1, 0);
-    auto [mockResults, expectedTransactions] =
-        makeTransactions(numTransactions, [](size_t i) { return Timestamp(i + 1, 0); });
+    auto [mockResults, expectedTransactions] = makeTransactions(
+        numTransactions, numTransactions, [](size_t i) { return Timestamp(i + 1, 0); });
     expectedTransactions.erase(
         std::remove_if(expectedTransactions.begin(),
                        expectedTransactions.end(),
@@ -1191,8 +1192,8 @@ TEST_F(ReshardingTxnCloningPipelineTest, TxnPipelineBeforeFetchTimestamp) {
 
 TEST_F(ReshardingTxnCloningPipelineTest, TxnPipelineAfterID) {
     size_t numTransactions = 10;
-    auto [mockResults, expectedTransactions] =
-        makeTransactions(numTransactions, [](size_t i) { return Timestamp(i + 1, 0); });
+    auto [mockResults, expectedTransactions] = makeTransactions(
+        numTransactions, numTransactions, [](size_t i) { return Timestamp(i + 1, 0); });
     auto middleTransaction = expectedTransactions.begin() + (numTransactions / 2);
     auto middleTransactionSessionId = middleTransaction->getSessionId();
     expectedTransactions.erase(expectedTransactions.begin(), middleTransaction + 1);
@@ -1200,251 +1201,6 @@ TEST_F(ReshardingTxnCloningPipelineTest, TxnPipelineAfterID) {
     auto pipeline = constructPipeline(mockResults, Timestamp::max(), middleTransactionSessionId);
 
     ASSERT(pipelineMatchesDeque(pipeline, expectedTransactions));
-}
-
-TEST_F(ReshardingTxnCloningPipelineTest, TxnPipelineOnlyRetryableWrites) {
-    auto [mockResults, expectedTransactions] =
-        makeTransactions(10, [](size_t) { return Timestamp::min(); }, true);
-
-    auto pipeline = constructPipeline(mockResults, Timestamp::max(), boost::none);
-
-    ASSERT(pipelineMatchesDeque(pipeline, expectedTransactions));
-}
-
-class ReshardingCollectionCloneTest : public AggregationContextFixture {
-protected:
-    const NamespaceString& sourceNss() {
-        return _sourceNss;
-    }
-
-    boost::intrusive_ptr<ExpressionContextForTest> createExpressionContext(
-        NamespaceString sourceNss) {
-        _sourceNss = sourceNss;
-        NamespaceString foreignNss("config.cache.chunks." + sourceNss.toString());
-        boost::intrusive_ptr<ExpressionContextForTest> expCtx(
-            new ExpressionContextForTest(getOpCtx(), sourceNss));
-        expCtx->setResolvedNamespace(sourceNss, {sourceNss, {}});
-        expCtx->setResolvedNamespace(foreignNss, {foreignNss, {}});
-        return expCtx;
-    }
-
-
-    std::deque<DocumentSource::GetNextResult> makeForeignData(const ShardKeyPattern& pattern) {
-        const std::initializer_list<const char*> data{
-            "{_id: { x : { $minKey : 1 } }, max: { x : 0.0 }, shard: 'shard1' }",
-            "{_id: { x : 0.0 }, max: { x : { $maxKey : 1 } }, shard: 'shard2' }"};
-        std::deque<DocumentSource::GetNextResult> results;
-        for (auto&& json : data) {
-            results.emplace_back(Document(fromjson(json)));
-        }
-        return results;
-    }
-
-    std::deque<DocumentSource::GetNextResult> makeForeignData(std::vector<BSONObj> data) {
-        std::deque<DocumentSource::GetNextResult> results;
-        for (auto&& obj : data) {
-            results.emplace_back(Document(obj));
-        }
-        return results;
-    }
-
-    std::deque<DocumentSource::GetNextResult> makeSourceData(const ShardKeyPattern& pattern) {
-        const std::initializer_list<const char*> data{
-            "{_id: 1, x: { $minKey: 1} }",
-            "{_id: 2, x: -0.001}",
-            "{_id: 3, x: NumberLong(0)}",
-            "{_id: 4, x: 0.0}",
-            "{_id: 5, x: 0.001}",
-            "{_id: 6, x: { $maxKey: 1} }",
-        };
-        std::deque<DocumentSource::GetNextResult> results;
-        for (auto&& json : data) {
-            results.emplace_back(Document(fromjson(json)));
-        }
-        return results;
-    }
-
-    std::deque<DocumentSource::GetNextResult> makeSourceData(std::vector<BSONObj> data) {
-        std::deque<DocumentSource::GetNextResult> results;
-        for (auto&& obj : data) {
-            results.emplace_back(Document(obj));
-        }
-        return results;
-    }
-
-private:
-    NamespaceString _sourceNss;
-};
-
-TEST_F(ReshardingCollectionCloneTest, CollectionClonePipelineBasicMinKey) {
-    NamespaceString fromNs("test", "system.resharding.coll");
-    ShardKeyPattern pattern(BSON("x" << 1));
-
-    auto expCtx = createExpressionContext(fromNs);
-
-    auto foreignData = makeForeignData(pattern);
-    expCtx->mongoProcessInterface = std::make_shared<MockMongoInterface>(std::move(foreignData));
-
-    auto sourceData = makeSourceData(pattern);
-    auto mockSource = DocumentSourceMock::createForTest(std::move(sourceData), expCtx);
-
-    auto pipeline = createAggForCollectionCloning(expCtx, pattern, fromNs, ShardId("shard1"));
-    pipeline->addInitialSource(mockSource);
-
-    auto next = pipeline->getNext();
-    ASSERT(next);
-    BSONObj val = fromjson("{_id: 1, x: {$minKey : 1}}");
-    ASSERT_BSONOBJ_BINARY_EQ(val, next->toBson());
-
-    next = pipeline->getNext();
-    ASSERT(next);
-    ASSERT_BSONOBJ_BINARY_EQ(BSON("_id" << 2 << "x" << -0.001), next->toBson());
-
-    ASSERT(!pipeline->getNext());
-}
-
-TEST_F(ReshardingCollectionCloneTest, CollectionClonePipelineBasicMaxKey) {
-    NamespaceString fromNs("test", "system.resharding.coll");
-    ShardKeyPattern pattern(BSON("x" << 1));
-
-    auto expCtx = createExpressionContext(fromNs);
-
-    auto foreignData = makeForeignData(pattern);
-    expCtx->mongoProcessInterface = std::make_shared<MockMongoInterface>(std::move(foreignData));
-
-    auto sourceData = makeSourceData(pattern);
-    auto mockSource = DocumentSourceMock::createForTest(std::move(sourceData), expCtx);
-
-    auto pipeline = createAggForCollectionCloning(expCtx, pattern, fromNs, ShardId("shard2"));
-    pipeline->addInitialSource(mockSource);
-
-    auto next = pipeline->getNext();
-    ASSERT(next);
-    BSONObj val = fromjson("{_id: 3, x: NumberLong(0)}");
-    ASSERT_BSONOBJ_BINARY_EQ(val, next->toBson());
-
-    next = pipeline->getNext();
-    ASSERT(next);
-    ASSERT_BSONOBJ_BINARY_EQ(BSON("_id" << 4 << "x" << 0.0), next->toBson());
-
-    next = pipeline->getNext();
-    ASSERT(next);
-    ASSERT_BSONOBJ_BINARY_EQ(BSON("_id" << 5 << "x" << 0.001), next->toBson());
-
-    next = pipeline->getNext();
-    ASSERT(next);
-    val = fromjson("{_id: 6, x: {$maxKey: 1}}");
-    ASSERT_BSONOBJ_BINARY_EQ(val, next->toBson());
-
-
-    ASSERT(!pipeline->getNext());
-}
-
-template <class T>
-auto getHashedElementValue(T value) {
-    return BSONElementHasher::hash64(BSON("" << value).firstElement(),
-                                     BSONElementHasher::DEFAULT_HASH_SEED);
-}
-
-TEST_F(ReshardingCollectionCloneTest, CollectionClonePipelineBasicHashedExactMatch) {
-    NamespaceString fromNs("test", "system.resharding.coll");
-    ShardKeyPattern pattern(BSON("x"
-                                 << "hashed"));
-
-    auto expCtx = createExpressionContext(fromNs);
-
-    // Documents in a mock config.cache.chunks collection. Mocked collection boundaries:
-    // - [MinKey, hash(0))      : shard1
-    // - [hash(0), hash(0) + 1) : shard2
-    // - [hash(0) + 1, MaxKey]  : shard3
-    auto foreignData =
-        makeForeignData({BSON("_id" << BSON("x" << MINKEY) << "max"
-                                    << BSON("x" << getHashedElementValue(0)) << "shard"
-                                    << "shard1"),
-                         BSON("_id" << BSON("x" << getHashedElementValue(0)) << "max"
-                                    << BSON("x" << getHashedElementValue(0) + 1) << "shard"
-                                    << "shard2"),
-                         BSON("_id" << BSON("x" << getHashedElementValue(0) + 1) << "max"
-                                    << BSON("x" << MAXKEY) << "shard"
-                                    << "shard3")});
-    expCtx->mongoProcessInterface = std::make_shared<MockMongoInterface>(std::move(foreignData));
-
-    // Documents in a mocked sharded collection.
-    auto sourceData = makeSourceData({fromjson("{_id: 1, x: {$minKey: 1}}"),
-                                      fromjson("{_id: 2, x: -1}"),
-                                      fromjson("{_id: 3, x: -0.123}"),
-                                      fromjson("{_id: 4, x: 0}"),
-                                      fromjson("{_id: 5, x: NumberLong(0)}"),
-                                      fromjson("{_id: 6, x: 0.123}"),
-                                      fromjson("{_id: 7, x: 1}"),
-                                      fromjson("{_id: 8, x: {$maxKey: 1}}")});
-    auto mockSource = DocumentSourceMock::createForTest(std::move(sourceData), expCtx);
-
-    auto pipeline = createAggForCollectionCloning(expCtx, pattern, fromNs, ShardId("shard2"));
-    pipeline->addInitialSource(mockSource);
-
-    auto next = pipeline->getNext();
-    ASSERT(next);
-    ASSERT_BSONOBJ_BINARY_EQ(fromjson("{_id: 3, x: -0.123}"), next->toBson());
-
-    next = pipeline->getNext();
-    ASSERT(next);
-    ASSERT_BSONOBJ_BINARY_EQ(fromjson("{_id: 4, x: 0}"), next->toBson());
-
-    next = pipeline->getNext();
-    ASSERT(next);
-    ASSERT_BSONOBJ_BINARY_EQ(fromjson("{_id: 5, x: NumberLong(0)}"), next->toBson());
-
-    next = pipeline->getNext();
-    ASSERT(next);
-    ASSERT_BSONOBJ_BINARY_EQ(fromjson("{_id: 6, x: 0.123}"), next->toBson());
-
-    ASSERT_FALSE(pipeline->getNext());
-}
-
-TEST_F(ReshardingCollectionCloneTest, CollectionClonePipelineBasicHashedExactMatchCompoundKey) {
-    NamespaceString fromNs("test", "system.resharding.coll");
-    ShardKeyPattern pattern(BSON("x"
-                                 << "hashed"
-                                 << "y" << 1));
-
-    auto expCtx = createExpressionContext(fromNs);
-
-    // Documents in a mock config.cache.chunks collection. Mocked collection boundaries:
-    // - [{x: MinKey, y: MinKey}, {x: hash(0), y: 0}) : shard1
-    // - [{x: hash(0), y: 0}, {x: hash(0), y: 1})     : shard2
-    // - [{x: hash(0), y: 1}, {x: MaxKey, y: MaxKey}] : shard3
-    auto foreignData = makeForeignData(
-        {BSON("_id" << BSON("x" << MINKEY << "y" << MINKEY) << "max"
-                    << BSON("x" << getHashedElementValue(0) << "y" << 0) << "shard"
-                    << "shard1"),
-         BSON("_id" << BSON("x" << getHashedElementValue(0) << "y" << 0) << "max"
-                    << BSON("x" << (getHashedElementValue(0) + 0) << "y" << 1) << "shard"
-                    << "shard2"),
-         BSON("_id" << BSON("x" << (getHashedElementValue(0) + 0) << "y" << 1) << "max"
-                    << BSON("x" << MAXKEY << "y" << MAXKEY) << "shard"
-                    << "shard3")});
-    expCtx->mongoProcessInterface = std::make_shared<MockMongoInterface>(std::move(foreignData));
-
-    // Documents in a mocked sharded collection.
-    auto sourceData = makeSourceData({fromjson("{_id: 1, x: {$minKey: 1}}"),
-                                      fromjson("{_id: 2, x: -1}"),
-                                      fromjson("{_id: 3, x: -0.123, y: -1}"),
-                                      fromjson("{_id: 4, x: 0, y: 0}"),
-                                      fromjson("{_id: 5, x: NumberLong(0), y: 1}"),
-                                      fromjson("{_id: 6, x: 0.123}"),
-                                      fromjson("{_id: 7, x: 1}"),
-                                      fromjson("{_id: 8, x: {$maxKey: 1}}")});
-    auto mockSource = DocumentSourceMock::createForTest(std::move(sourceData), expCtx);
-
-    auto pipeline = createAggForCollectionCloning(expCtx, pattern, fromNs, ShardId("shard2"));
-    pipeline->addInitialSource(mockSource);
-
-    auto next = pipeline->getNext();
-    ASSERT(next);
-    ASSERT_BSONOBJ_BINARY_EQ(fromjson("{_id: 4, x: 0, y: 0}"), next->toBson());
-
-    ASSERT_FALSE(pipeline->getNext());
 }
 
 }  // namespace

@@ -384,7 +384,7 @@ public:
             // CurOp and Top. We avoid using AutoGetCollectionForReadCommand because we may need to
             // drop and reacquire locks when the cursor is awaitData, but we don't want to update
             // the stats twice.
-            boost::optional<AutoGetCollectionForRead> readLock;
+            boost::optional<AutoGetCollectionForReadMaybeLockFree> readLock;
             boost::optional<AutoStatsTracker> statsTracker;
 
             if (cursorPin->getExecutor()->lockPolicy() ==
@@ -395,7 +395,7 @@ public:
                         _request.nss,
                         Top::LockType::NotLocked,
                         AutoStatsTracker::LogMode::kUpdateTopAndCurOp,
-                        CollectionCatalog::get(opCtx).getDatabaseProfileLevel(_request.nss.db()));
+                        CollectionCatalog::get(opCtx)->getDatabaseProfileLevel(_request.nss.db()));
                 }
             } else {
                 invariant(cursorPin->getExecutor()->lockPolicy() ==
@@ -425,7 +425,7 @@ public:
                     _request.nss,
                     Top::LockType::ReadLocked,
                     AutoStatsTracker::LogMode::kUpdateTopAndCurOp,
-                    CollectionCatalog::get(opCtx).getDatabaseProfileLevel(_request.nss.db()));
+                    CollectionCatalog::get(opCtx)->getDatabaseProfileLevel(_request.nss.db()));
 
                 // Check whether we are allowed to read from this node after acquiring our locks.
                 uassertStatusOK(repl::ReplicationCoordinator::get(opCtx)->checkCanServeReadsFor(

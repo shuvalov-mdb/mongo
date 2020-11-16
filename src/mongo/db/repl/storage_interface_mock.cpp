@@ -69,7 +69,9 @@ StatusWith<int> StorageInterfaceMock::incrementRollbackID(OperationContext* opCt
     return _rbid;
 }
 
-void StorageInterfaceMock::setStableTimestamp(ServiceContext* serviceCtx, Timestamp snapshotName) {
+void StorageInterfaceMock::setStableTimestamp(ServiceContext* serviceCtx,
+                                              Timestamp snapshotName,
+                                              bool force) {
     stdx::lock_guard<Latch> lock(_mutex);
     _stableTimestamp = snapshotName;
 }
@@ -92,10 +94,6 @@ Timestamp StorageInterfaceMock::getInitialDataTimestamp() const {
 
 Timestamp StorageInterfaceMock::getAllDurableTimestamp(ServiceContext* serviceCtx) const {
     return allDurableTimestamp;
-}
-
-Timestamp StorageInterfaceMock::getOldestOpenReadTimestamp(ServiceContext* serviceCtx) const {
-    return oldestOpenReadTimestamp;
 }
 
 Status CollectionBulkLoaderMock::init(const std::vector<BSONObj>& secondaryIndexSpecs) {

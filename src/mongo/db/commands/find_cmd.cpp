@@ -227,7 +227,7 @@ public:
 
             const auto hasTerm = _request.body.hasField(kTermField);
             uassertStatusOK(authSession->checkAuthForFind(
-                CollectionCatalog::get(opCtx).resolveNamespaceStringOrUUID(
+                CollectionCatalog::get(opCtx)->resolveNamespaceStringOrUUID(
                     opCtx, CommandHelpers::parseNsOrUUID(_dbName, _request.body)),
                 hasTerm));
         }
@@ -237,7 +237,7 @@ public:
                      rpc::ReplyBuilderInterface* result) override {
             // Acquire locks. The RAII object is optional, because in the case of a view, the locks
             // need to be released.
-            boost::optional<AutoGetCollectionForReadCommand> ctx;
+            boost::optional<AutoGetCollectionForReadCommandMaybeLockFree> ctx;
             ctx.emplace(opCtx,
                         CommandHelpers::parseNsCollectionRequired(_dbName, _request.body),
                         AutoGetCollectionViewMode::kViewsPermitted);
@@ -298,7 +298,8 @@ public:
 
             auto bodyBuilder = result->getBodyBuilder();
             // Got the execution tree. Explain it.
-            Explain::explainStages(exec.get(), collection, verbosity, BSONObj(), &bodyBuilder);
+            Explain::explainStages(
+                exec.get(), collection, verbosity, BSONObj(), _request.body, &bodyBuilder);
         }
 
         /**
@@ -360,7 +361,7 @@ public:
 
             // Acquire locks. If the query is on a view, we release our locks and convert the query
             // request into an aggregation command.
-            boost::optional<AutoGetCollectionForReadCommand> ctx;
+            boost::optional<AutoGetCollectionForReadCommandMaybeLockFree> ctx;
             ctx.emplace(opCtx,
                         CommandHelpers::parseNsOrUUID(_dbName, _request.body),
                         AutoGetCollectionViewMode::kViewsPermitted);

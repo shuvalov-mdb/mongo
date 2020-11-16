@@ -124,7 +124,7 @@ public:
 
         const auto hasTerm = false;
         return authSession->checkAuthForFind(
-            CollectionCatalog::get(opCtx).resolveNamespaceStringOrUUID(
+            CollectionCatalog::get(opCtx)->resolveNamespaceStringOrUUID(
                 opCtx, CommandHelpers::parseNsOrUUID(dbname, cmdObj)),
             hasTerm);
     }
@@ -180,7 +180,8 @@ public:
             getExecutorDistinct(&collection, QueryPlannerParams::DEFAULT, &parsedDistinct));
 
         auto bodyBuilder = result->getBodyBuilder();
-        Explain::explainStages(executor.get(), collection, verbosity, BSONObj(), &bodyBuilder);
+        Explain::explainStages(
+            executor.get(), collection, verbosity, BSONObj(), cmdObj, &bodyBuilder);
         return Status::OK();
     }
 

@@ -177,6 +177,13 @@ std::unique_ptr<Pipeline, PipelineDeleter> createOplogFetchingPipelineForReshard
     const ShardId& recipientShard,
     bool doesDonorOwnMinKeyChunk);
 
+namespace resharding {
+
+boost::optional<TypeCollectionDonorFields> getDonorFields(OperationContext* opCtx,
+                                                          const NamespaceString& sourceNss,
+                                                          const BSONObj& fullDocument);
+}
+
 /**
  * Returns the shard Id of the recipient shard that would own the document under the new shard
  * key pattern.
@@ -184,15 +191,6 @@ std::unique_ptr<Pipeline, PipelineDeleter> createOplogFetchingPipelineForReshard
 boost::optional<ShardId> getDestinedRecipient(OperationContext* opCtx,
                                               const NamespaceString& sourceNss,
                                               const BSONObj& fullDocument);
-
-/**
- * Creates pipeline for filtering collection data matching the recipient shard.
- */
-std::unique_ptr<Pipeline, PipelineDeleter> createAggForCollectionCloning(
-    const boost::intrusive_ptr<ExpressionContext>& expCtx,
-    const ShardKeyPattern& newShardKeyPattern,
-    const NamespaceString& tempNss,
-    const ShardId& recipientShard);
 
 /**
  * Sentinel oplog format:

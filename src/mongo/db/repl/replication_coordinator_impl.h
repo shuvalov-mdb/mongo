@@ -358,13 +358,13 @@ public:
 
     virtual void incrementTopologyVersion() override;
 
-    using SharedIsMasterResponse = std::shared_ptr<const IsMasterResponse>;
+    using SharedHelloResponse = std::shared_ptr<const HelloResponse>;
 
-    virtual SharedSemiFuture<SharedIsMasterResponse> getIsMasterResponseFuture(
+    virtual SharedSemiFuture<SharedHelloResponse> getHelloResponseFuture(
         const SplitHorizon::Parameters& horizonParams,
         boost::optional<TopologyVersion> clientTopologyVersion) override;
 
-    virtual std::shared_ptr<const IsMasterResponse> awaitIsMasterResponse(
+    virtual std::shared_ptr<const HelloResponse> awaitHelloResponse(
         OperationContext* opCtx,
         const SplitHorizon::Parameters& horizonParams,
         boost::optional<TopologyVersion> clientTopologyVersion,
@@ -383,7 +383,7 @@ public:
                                             OnRemoteCmdScheduledFn onRemoteCmdScheduled,
                                             OnRemoteCmdCompleteFn onRemoteCmdComplete) override;
 
-    virtual void restartHeartbeats_forTest() override;
+    virtual void restartScheduledHeartbeats_forTest() override;
 
     // ================== Test support API ===================
 
@@ -490,7 +490,7 @@ private:
     using ScheduleFn = std::function<StatusWith<executor::TaskExecutor::CallbackHandle>(
         const executor::TaskExecutor::CallbackFn& work)>;
 
-    using SharedPromiseOfIsMasterResponse = SharedPromise<std::shared_ptr<const IsMasterResponse>>;
+    using SharedPromiseOfHelloResponse = SharedPromise<std::shared_ptr<const HelloResponse>>;
 
     /**
      * Configuration states for a replica set node.
@@ -677,7 +677,12 @@ private:
         std::multimap<OpTime, SharedWaiterHandle> _waiters;
     };
 
-    typedef std::vector<executor::TaskExecutor::CallbackHandle> HeartbeatHandles;
+    enum class HeartbeatState { kScheduled = 0, kSent = 1 };
+    struct HeartbeatHandle {
+        executor::TaskExecutor::CallbackHandle handle;
+        HeartbeatState hbState;
+        HostAndPort target;
+    };
 
     // The state and logic of primary catchup.
     //
@@ -1008,22 +1013,21 @@ private:
                                             bool isRollbackAllowed);
 
     /**
-     * Schedules a heartbeat to be sent to "target" at "when". "targetIndex" is the index
-     * into the replica set config members array that corresponds to the "target", or -1 if
-     * "target" is not in _rsConfig.
+     * Schedules a heartbeat to be sent to "target" at "when".
      */
-    void _scheduleHeartbeatToTarget_inlock(const HostAndPort& target, int targetIndex, Date_t when);
+    void _scheduleHeartbeatToTarget_inlock(const HostAndPort& target, Date_t when);
 
     /**
      * Processes each heartbeat response.
      *
      * Schedules additional heartbeats, triggers elections and step downs, etc.
      */
-    void _handleHeartbeatResponse(const executor::TaskExecutor::RemoteCommandCallbackArgs& cbData,
-                                  int targetIndex);
+    void _handleHeartbeatResponse(const executor::TaskExecutor::RemoteCommandCallbackArgs& cbData);
 
     void _trackHeartbeatHandle_inlock(
-        const StatusWith<executor::TaskExecutor::CallbackHandle>& handle);
+        const StatusWith<executor::TaskExecutor::CallbackHandle>& handle,
+        HeartbeatState hbState,
+        const HostAndPort& target);
 
     void _untrackHeartbeatHandle_inlock(const executor::TaskExecutor::CallbackHandle& handle);
 
@@ -1044,21 +1048,17 @@ private:
     void _cancelHeartbeats_inlock();
 
     /**
-     * Cancels all heartbeats, then starts a heartbeat for each member in the current config.
-     * Called while holding replCoord _mutex.
+     * Cancels all heartbeats that have been scheduled but not yet sent out, then reschedules them
+     * at the current time immediately. Called while holding replCoord _mutex.
      */
-    void _restartHeartbeats_inlock();
+    void _restartScheduledHeartbeats_inlock();
 
     /**
-     * Asynchronously sends a heartbeat to "target". "targetIndex" is the index
-     * into the replica set config members array that corresponds to the "target", or -1 if
-     * we don't have a valid replica set config.
+     * Asynchronously sends a heartbeat to "target".
      *
      * Scheduled by _scheduleHeartbeatToTarget_inlock.
      */
-    void _doMemberHeartbeat(executor::TaskExecutor::CallbackArgs cbData,
-                            const HostAndPort& target,
-                            int targetIndex);
+    void _doMemberHeartbeat(executor::TaskExecutor::CallbackArgs cbData, const HostAndPort& target);
 
 
     MemberState _getMemberState_inlock() const;
@@ -1234,17 +1234,18 @@ private:
     long long _calculateRemainingQuiesceTimeMillis() const;
 
     /**
-     * Fills an IsMasterResponse with the appropriate replication related fields. horizonString
+     * Fills a HelloResponse with the appropriate replication related fields. horizonString
      * should be passed in if hasValidConfig is true.
      */
-    std::shared_ptr<IsMasterResponse> _makeIsMasterResponse(
-        boost::optional<StringData> horizonString, WithLock, const bool hasValidConfig) const;
+    std::shared_ptr<HelloResponse> _makeHelloResponse(boost::optional<StringData> horizonString,
+                                                      WithLock,
+                                                      const bool hasValidConfig) const;
 
     /**
-     * Creates a semi-future for isMasterResponse. horizonString should be passed in if and only if
+     * Creates a semi-future for HelloResponse. horizonString should be passed in if and only if
      * the server is a valid member of the config.
      */
-    virtual SharedSemiFuture<SharedIsMasterResponse> _getIsMasterResponseFuture(
+    virtual SharedSemiFuture<SharedHelloResponse> _getHelloResponseFuture(
         WithLock,
         const SplitHorizon::Parameters& horizonParams,
         boost::optional<StringData> horizonString,
@@ -1494,7 +1495,7 @@ private:
     mutable Mutex _mutex = MONGO_MAKE_LATCH("ReplicationCoordinatorImpl::_mutex");  // (S)
 
     // Handles to actively queued heartbeats.
-    HeartbeatHandles _heartbeatHandles;  // (M)
+    std::vector<HeartbeatHandle> _heartbeatHandles;  // (M)
 
     // When this node does not know itself to be a member of a config, it adds
     // every host that sends it a heartbeat request to this set, and also starts
@@ -1532,13 +1533,13 @@ private:
 
     // Maps a horizon name to the promise waited on by awaitable isMaster requests when the node
     // has an initialized replica set config and is an active member of the replica set.
-    StringMap<std::shared_ptr<SharedPromiseOfIsMasterResponse>>
+    StringMap<std::shared_ptr<SharedPromiseOfHelloResponse>>
         _horizonToTopologyChangePromiseMap;  // (M)
 
     // Maps a requested SNI to the promise waited on by awaitable isMaster requests when the node
     // has an unitialized replica set config or is removed. An empty SNI will map to a promise on
     // the default horizon.
-    StringMap<std::shared_ptr<SharedPromiseOfIsMasterResponse>> _sniToValidConfigPromiseMap;  // (M)
+    StringMap<std::shared_ptr<SharedPromiseOfHelloResponse>> _sniToValidConfigPromiseMap;  // (M)
 
     // Set to true when we are in the process of shutting down replication.
     bool _inShutdown;  // (M)

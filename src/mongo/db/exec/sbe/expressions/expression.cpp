@@ -353,6 +353,9 @@ static stdx::unordered_map<std::string, BuiltinFn> kBuiltinFunctions = {
      BuiltinFn{[](size_t n) { return n == 3 || n == 4; }, vm::Builtin::dateToParts, false}},
     {"isoDateToParts",
      BuiltinFn{[](size_t n) { return n == 3 || n == 4; }, vm::Builtin::isoDateToParts, false}},
+    {"dayOfYear", BuiltinFn{[](size_t n) { return n == 3; }, vm::Builtin::dayOfYear, false}},
+    {"dayOfMonth", BuiltinFn{[](size_t n) { return n == 3; }, vm::Builtin::dayOfMonth, false}},
+    {"dayOfWeek", BuiltinFn{[](size_t n) { return n == 3; }, vm::Builtin::dayOfWeek, false}},
     {"datePartsWeekYear",
      BuiltinFn{[](size_t n) { return n == 9; }, vm::Builtin::datePartsWeekYear, false}},
     {"split", BuiltinFn{[](size_t n) { return n == 2; }, vm::Builtin::split, false}},
@@ -408,6 +411,8 @@ static stdx::unordered_map<std::string, BuiltinFn> kBuiltinFunctions = {
     {"setUnion", BuiltinFn{[](size_t n) { return n > 0; }, vm::Builtin::setUnion, false}},
     {"setIntersection",
      BuiltinFn{[](size_t n) { return n > 0; }, vm::Builtin::setIntersection, false}},
+    {"setDifference",
+     BuiltinFn{[](size_t n) { return n == 2; }, vm::Builtin::setDifference, false}},
 };
 
 /**
@@ -447,6 +452,8 @@ static stdx::unordered_map<std::string, InstrFn> kInstrFunctions = {
      InstrFn{[](size_t n) { return n == 1; }, &vm::CodeFragment::appendIsBinData, false}},
     {"isDate", InstrFn{[](size_t n) { return n == 1; }, &vm::CodeFragment::appendIsDate, false}},
     {"isNaN", InstrFn{[](size_t n) { return n == 1; }, &vm::CodeFragment::appendIsNaN, false}},
+    {"isRecordId",
+     InstrFn{[](size_t n) { return n == 1; }, &vm::CodeFragment::appendIsRecordId, false}},
     {"sum", InstrFn{[](size_t n) { return n == 1; }, &vm::CodeFragment::appendSum, true}},
     {"min", InstrFn{[](size_t n) { return n == 1; }, &vm::CodeFragment::appendMin, true}},
     {"max", InstrFn{[](size_t n) { return n == 1; }, &vm::CodeFragment::appendMax, true}},

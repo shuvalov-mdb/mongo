@@ -35,6 +35,8 @@
 
 #include "mongo/db/exec/sbe/values/slot.h"
 #include "mongo/db/exec/sbe/values/value.h"
+#include "mongo/db/exec/sbe/vm/datetime.h"
+#include "mongo/db/query/datetime/date_time_support.h"
 
 namespace mongo {
 namespace sbe {
@@ -151,6 +153,7 @@ struct Instruction {
         isBinData,
         isDate,
         isNaN,
+        isRecordId,
         typeMatch,
 
         function,
@@ -177,6 +180,9 @@ enum class Builtin : uint8_t {
     dateParts,
     dateToParts,
     isoDateToParts,
+    dayOfYear,
+    dayOfMonth,
+    dayOfWeek,
     datePartsWeekYear,
     dropFields,
     newObj,
@@ -221,6 +227,7 @@ enum class Builtin : uint8_t {
     isTimezone,
     setUnion,
     setIntersection,
+    setDifference,
 };
 
 class CodeFragment {
@@ -296,6 +303,7 @@ public:
     void appendIsBinData();
     void appendIsDate();
     void appendIsNaN();
+    void appendIsRecordId();
     void appendTypeMatch(uint32_t typeMask);
     void appendFunction(Builtin f, uint8_t arity);
     void appendJump(int jumpOffset);
@@ -492,11 +500,33 @@ private:
     std::tuple<bool, value::TypeTags, value::Value> genericTanh(value::TypeTags operandTag,
                                                                 value::Value operandValue);
 
+    std::tuple<bool, value::TypeTags, value::Value> genericDayOfYear(value::TypeTags timezoneDBTag,
+                                                                     value::Value timezoneDBValue,
+                                                                     value::TypeTags dateTag,
+                                                                     value::Value dateValue,
+                                                                     value::TypeTags timezoneTag,
+                                                                     value::Value timezoneValue);
+    std::tuple<bool, value::TypeTags, value::Value> genericDayOfMonth(value::TypeTags timezoneDBTag,
+                                                                      value::Value timezoneDBValue,
+                                                                      value::TypeTags dateTag,
+                                                                      value::Value dateValue,
+                                                                      value::TypeTags timezoneTag,
+                                                                      value::Value timezoneValue);
+    std::tuple<bool, value::TypeTags, value::Value> genericDayOfWeek(value::TypeTags timezoneDBTag,
+                                                                     value::Value timezoneDBValue,
+                                                                     value::TypeTags dateTag,
+                                                                     value::Value dateValue,
+                                                                     value::TypeTags timezoneTag,
+                                                                     value::Value timezoneValue);
+
     std::tuple<bool, value::TypeTags, value::Value> builtinSplit(uint8_t arity);
     std::tuple<bool, value::TypeTags, value::Value> builtinDate(uint8_t arity);
     std::tuple<bool, value::TypeTags, value::Value> builtinDateWeekYear(uint8_t arity);
     std::tuple<bool, value::TypeTags, value::Value> builtinDateToParts(uint8_t arity);
     std::tuple<bool, value::TypeTags, value::Value> builtinIsoDateToParts(uint8_t arity);
+    std::tuple<bool, value::TypeTags, value::Value> builtinDayOfYear(uint8_t arity);
+    std::tuple<bool, value::TypeTags, value::Value> builtinDayOfMonth(uint8_t arity);
+    std::tuple<bool, value::TypeTags, value::Value> builtinDayOfWeek(uint8_t arity);
     std::tuple<bool, value::TypeTags, value::Value> builtinRegexMatch(uint8_t arity);
     std::tuple<bool, value::TypeTags, value::Value> builtinDropFields(uint8_t arity);
     std::tuple<bool, value::TypeTags, value::Value> builtinNewObj(uint8_t arity);
@@ -541,6 +571,8 @@ private:
     std::tuple<bool, value::TypeTags, value::Value> builtinIsTimezone(uint8_t arity);
     std::tuple<bool, value::TypeTags, value::Value> builtinSetUnion(uint8_t arity);
     std::tuple<bool, value::TypeTags, value::Value> builtinSetIntersection(uint8_t arity);
+    std::tuple<bool, value::TypeTags, value::Value> builtinSetDifference(uint8_t arity);
+
     std::tuple<bool, value::TypeTags, value::Value> dispatchBuiltin(Builtin f, uint8_t arity);
 
     std::tuple<bool, value::TypeTags, value::Value> getFromStack(size_t offset) {

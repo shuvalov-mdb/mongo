@@ -284,15 +284,15 @@ public:
 
     void incrementTopologyVersion() override;
 
-    std::shared_ptr<const repl::IsMasterResponse> awaitIsMasterResponse(
+    std::shared_ptr<const repl::HelloResponse> awaitHelloResponse(
         OperationContext* opCtx,
         const repl::SplitHorizon::Parameters& horizonParams,
         boost::optional<TopologyVersion> previous,
         boost::optional<Date_t> deadline) override;
 
-    virtual SharedSemiFuture<std::shared_ptr<const repl::IsMasterResponse>>
-    getIsMasterResponseFuture(const repl::SplitHorizon::Parameters& horizonParams,
-                              boost::optional<TopologyVersion> clientTopologyVersion);
+    virtual SharedSemiFuture<std::shared_ptr<const repl::HelloResponse>> getHelloResponseFuture(
+        const repl::SplitHorizon::Parameters& horizonParams,
+        boost::optional<TopologyVersion> clientTopologyVersion);
 
     StatusWith<repl::OpTime> getLatestWriteOpTime(OperationContext* opCtx) const noexcept override;
 
@@ -306,7 +306,7 @@ public:
                                             OnRemoteCmdScheduledFn onRemoteCmdScheduled,
                                             OnRemoteCmdCompleteFn onRemoteCmdComplete) final;
 
-    virtual void restartHeartbeats_forTest() override;
+    virtual void restartScheduledHeartbeats_forTest() override;
 
 private:
     // Back pointer to the ServiceContext that has started the instance.

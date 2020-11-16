@@ -20,6 +20,8 @@ var rst = new ReplSetTest({
 rst.startSet();
 rst.initiate();
 
+const isLinux = getBuildInfo().buildEnvironment.target_os == "linux";
+
 let assertMetricsExist = function(metrics) {
     try {
         assert.neq(metrics, undefined);
@@ -32,6 +34,7 @@ let assertMetricsExist = function(metrics) {
             assert.gte(readMetrics.idxEntryUnitsRead, 0);
             assert.gte(readMetrics.keysSorted, 0);
             assert.gte(readMetrics.docUnitsReturned, 0);
+            assert.gte(readMetrics.cursorSeeks, 0);
         });
 
         assert.gte(metrics.cpuNanos, 0);
@@ -58,6 +61,12 @@ let getDBMetrics = (adminDB) => {
     return allMetrics;
 };
 
+let getGlobalCpuTime = (db) => {
+    let ss = db.serverStatus({resourceConsumption: true});
+    assert(ss.hasOwnProperty('resourceConsumption'), ss);
+    return ss.resourceConsumption.cpuNanos;
+};
+
 // Perform very basic reads and writes on two different databases.
 const db1Name = 'db1';
 const primary = rst.getPrimary();
@@ -70,6 +79,10 @@ const db2 = primary.getDB(db2Name);
 assert.commandWorked(db2.coll1.insert({a: 1}));
 assert.commandWorked(db2.coll2.insert({a: 1}));
 
+// The 'resourceConsumption' field should not be included in serverStatus by default.
+let ss = db1.serverStatus();
+assert(!ss.hasOwnProperty('resourceConsumption'), ss);
+
 const secondary = rst.getSecondary();
 [primary, secondary].forEach(function(node) {
     jsTestLog("Testing node: " + node);
@@ -78,6 +91,9 @@ const secondary = rst.getSecondary();
     // a previous loop iteration.
     rst.awaitReplication();
     const adminDB = node.getDB('admin');
+
+    let initialCpuTime = getGlobalCpuTime(adminDB);
+
     adminDB.aggregate([{$operationMetrics: {clearMetrics: true}}]);
 
     assert.eq(node.getDB(db1Name).coll1.find({a: 1}).itcount(), 1);
@@ -111,8 +127,10 @@ const secondary = rst.getSecondary();
         [db1Name, db2Name].forEach((db) => {
             assert.gt(allMetrics[db].primaryMetrics.docBytesRead, 0);
             assert.gt(allMetrics[db].primaryMetrics.docUnitsRead, 0);
+            assert.eq(allMetrics[db].primaryMetrics.cursorSeeks, 0);
             assert.eq(allMetrics[db].secondaryMetrics.docBytesRead, 0);
             assert.eq(allMetrics[db].secondaryMetrics.docUnitsRead, 0);
+            assert.eq(allMetrics[db].secondaryMetrics.cursorSeeks, 0);
         });
         assert.eq(allMetrics[db1Name].primaryMetrics.docBytesRead,
                   allMetrics[db2Name].primaryMetrics.docBytesRead);
@@ -121,12 +139,25 @@ const secondary = rst.getSecondary();
         [db1Name, db2Name].forEach((db) => {
             assert.gt(allMetrics[db].secondaryMetrics.docBytesRead, 0);
             assert.gt(allMetrics[db].secondaryMetrics.docUnitsRead, 0);
+            assert.eq(allMetrics[db].secondaryMetrics.cursorSeeks, 0);
             assert.eq(allMetrics[db].primaryMetrics.docBytesRead, 0);
             assert.eq(allMetrics[db].primaryMetrics.docUnitsRead, 0);
+            assert.eq(allMetrics[db].primaryMetrics.cursorSeeks, 0);
         });
         assert.eq(allMetrics[db1Name].secondaryMetrics.docBytesRead,
                   allMetrics[db2Name].secondaryMetrics.docBytesRead);
         lastDocBytesRead = allMetrics[db1Name].secondaryMetrics.docBytesRead;
+    }
+
+    // CPU time aggregation is only supported on Linux.
+    if (isLinux) {
+        // Ensure the CPU time is increasing.
+        let lastCpuTime = getGlobalCpuTime(adminDB);
+        assert.gt(lastCpuTime, initialCpuTime);
+
+        // Ensure the global CPU time matches the aggregated time for both databases.
+        assert.eq(lastCpuTime - initialCpuTime,
+                  allMetrics[db1Name].cpuNanos + allMetrics[db2Name].cpuNanos);
     }
 
     // Metrics for these databases should not be collected or reported.

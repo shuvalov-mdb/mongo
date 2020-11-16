@@ -84,7 +84,11 @@ struct ServiceEntryPointCommon {
 
         virtual void attachCurOpErrInfo(OperationContext* opCtx, const BSONObj& replyObj) const = 0;
 
-        virtual void handleException(const DBException& e, OperationContext* opCtx) const = 0;
+        virtual bool refreshDatabase(OperationContext* opCtx, const StaleDbRoutingVersion& se) const
+            noexcept = 0;
+
+        virtual bool refreshCollection(OperationContext* opCtx, const StaleConfigInfo& se) const
+            noexcept = 0;
 
         virtual void advanceConfigOpTimeFromRequestMetadata(OperationContext* opCtx) const = 0;
 
@@ -101,7 +105,7 @@ struct ServiceEntryPointCommon {
 
     static Future<DbResponse> handleRequest(OperationContext* opCtx,
                                             const Message& m,
-                                            const Hooks& hooks) noexcept;
+                                            std::unique_ptr<const Hooks> hooks) noexcept;
 
     /**
      * Produce a new object based on cmdObj, but with redactions applied as specified by
