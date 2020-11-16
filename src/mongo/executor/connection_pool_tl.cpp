@@ -394,8 +394,7 @@ auto TLTypeFactory::reactor() {
 std::shared_ptr<ConnectionPool::ConnectionInterface> TLTypeFactory::makeConnection(
     const HostAndPort& hostAndPort,
     transport::ConnectSSLMode sslMode,
-    size_t generation,
-    std::shared_ptr<const transport::SSLConnectionContext> transientSSLContext) {
+    size_t generation) {
     auto conn = std::make_shared<TLConnection>(shared_from_this(),
                                                reactor(),
                                                getGlobalServiceContext(),
@@ -404,7 +403,7 @@ std::shared_ptr<ConnectionPool::ConnectionInterface> TLTypeFactory::makeConnecti
                                                generation,
                                                _onConnectHook.get(),
                                                _connPoolOptions.skipAuthentication,
-                                               transientSSLContext);
+                                               _transientSSLContext);
     fasten(conn.get());
     return conn;
 }

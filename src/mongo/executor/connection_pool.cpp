@@ -453,12 +453,12 @@ const Status ConnectionPool::kConnectionStateUnknown =
 ConnectionPool::ConnectionPool(
     std::shared_ptr<DependentTypeFactoryInterface> impl,
     std::string name,
-    Options options,
-    std::shared_ptr<const transport::SSLConnectionContext> transientSSLContext)
+    Options options)//,
+    //std::shared_ptr<const transport::SSLConnectionContext> transientSSLContext)
     : _name(std::move(name)),
       _factory(std::move(impl)),
       _options(std::move(options)),
-      _transientSSLContext(std::move(transientSSLContext)),
+      //_transientSSLContext(std::move(transientSSLContext)),
       _controller(_options.controllerFactory()),
       _manager(options.egressTagCloserManager) {
     if (_manager) {
@@ -1043,7 +1043,7 @@ void ConnectionPool::SpecificPool::spawnConnections() {
         try {
             // make a new connection and put it in processing
             handle = _parent->_factory->makeConnection(
-                _hostAndPort, _sslMode, _generation, _parent->_transientSSLContext);
+                _hostAndPort, _sslMode, _generation);
         } catch (std::system_error& e) {
             LOGV2_FATAL(40336,
                         "Failed to construct a new connection object: {reason}",

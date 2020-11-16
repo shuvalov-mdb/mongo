@@ -1346,38 +1346,6 @@ private:
      * Setup PEM from BIO, which could be file or memory input abstraction.
      * @param inBio input BIO, where smart pointer is created with a custom deleter to call
      * 'BIO_free()'.
-     * @param log_msg additional log message to print in case of error.
-     * @return true if was successful, otherwise false
-     */
-    bool _setupPEMFromBIO(SSL_CTX* context,
-                          std::unique_ptr<BIO, decltype(&::BIO_free)> inBio,
-                          PasswordFetcher* password,
-                          StringData description) const;
-
-    /**
-     * Loads a certificate chain from memory into context.
-     * This method is intended to be a repalcement of API call SSL_CTX_use_certificate_chain_file()
-     * but using memory instead of file.
-     * @return true if was successful, otherwise false
-     */
-    static bool _readCertificateChainFromMemory(SSL_CTX* context,
-                                                const std::string& payload,
-                                                PasswordFetcher* password,
-                                                StringData description);
-
-    /**
-     * @param payload in-memory payload of a PEM file
-     * @return true if was successful, otherwise false
-     */
-    bool _setupPEMFromMemoryPayload(SSL_CTX* context,
-                                    const std::string& payload,
-                                    PasswordFetcher* password,
-                                    StringData targetClusterURI);
-
-    /**
-     * Setup PEM from BIO, which could be file or memory input abstraction.
-     * @param inBio input BIO, where smart pointer is created with a custom deleter to call
-     * 'BIO_free()'.
      * @param keyFile if the certificate was loaded from file, this is the file name. If empty,
      * it means the certificate came from memory payload.
      * @param targetClusterURI If the certificate targets a particular cluster, this is cluster URI.
@@ -1388,7 +1356,7 @@ private:
                           UniqueBIO inBio,
                           PasswordFetcher* password,
                           std::optional<StringData> keyFile,
-                          std::optional<StringData> targetClusterURI);
+                          std::optional<StringData> targetClusterURI) const;
 
     /**
      * Loads a certificate chain from memory into context.
@@ -2469,7 +2437,7 @@ bool SSLManagerOpenSSL::_readCertificateChainFromMemory(
 
 bool SSLManagerOpenSSL::_setupPEM(SSL_CTX* context,
                                   const std::string& keyFile,
-                                  PasswordFetcher* password) {
+                                  PasswordFetcher* password) const {
     logv2::DynamicAttributes errorAttrs;
     errorAttrs.add("keyFile", keyFile);
 
@@ -2498,7 +2466,7 @@ bool SSLManagerOpenSSL::_setupPEM(SSL_CTX* context,
 bool SSLManagerOpenSSL::_setupPEMFromMemoryPayload(SSL_CTX* context,
                                                    const std::string& payload,
                                                    PasswordFetcher* password,
-                                                   StringData targetClusterURI) {
+                                                   StringData targetClusterURI) const {
     logv2::DynamicAttributes errorAttrs;
     errorAttrs.add("targetClusterURI", targetClusterURI);
 
@@ -2524,7 +2492,7 @@ bool SSLManagerOpenSSL::_setupPEMFromBIO(SSL_CTX* context,
                                          UniqueBIO inBio,
                                          PasswordFetcher* password,
                                          std::optional<StringData> keyFile,
-                                         std::optional<StringData> targetClusterURI) {
+                                         std::optional<StringData> targetClusterURI) const {
     logv2::DynamicAttributes errorAttrs;
     if (keyFile) {
         errorAttrs.add("keyFile", *keyFile);
@@ -2533,10 +2501,6 @@ bool SSLManagerOpenSSL::_setupPEMFromBIO(SSL_CTX* context,
         errorAttrs.add("targetClusterURI", *targetClusterURI);
     }
 
-bool SSLManagerOpenSSL::_setupPEMFromBIO(SSL_CTX* context,
-                                         std::unique_ptr<BIO, decltype(&::BIO_free)> inBio,
-                                         PasswordFetcher* password,
-                                         StringData description) const {
     // Obtain the private key, using our callback to acquire a decryption password if necessary.
     auto password_cb = &SSLManagerOpenSSL::password_cb;
     void* userdata = static_cast<void*>(password);

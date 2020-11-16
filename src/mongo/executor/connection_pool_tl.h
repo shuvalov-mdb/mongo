@@ -51,17 +51,19 @@ public:
     TLTypeFactory(transport::ReactorHandle reactor,
                   transport::TransportLayer* tl,
                   std::unique_ptr<NetworkConnectionHook> onConnectHook,
-                  const ConnectionPool::Options& connPoolOptions)
+                  const ConnectionPool::Options& connPoolOptions,
+                  std::shared_ptr<const transport::SSLConnectionContext> transientSSLContext)
         : _executor(std::move(reactor)),
           _tl(tl),
           _onConnectHook(std::move(onConnectHook)),
-          _connPoolOptions(connPoolOptions) {}
+          _connPoolOptions(connPoolOptions),
+          _transientSSLContext(transientSSLContext) {}
 
     std::shared_ptr<ConnectionPool::ConnectionInterface> makeConnection(
         const HostAndPort& hostAndPort,
         transport::ConnectSSLMode sslMode,
-        size_t generation,
-        std::shared_ptr<const transport::SSLConnectionContext> transientSSLContext) override;
+        size_t generation) override;
+
     std::shared_ptr<ConnectionPool::TimerInterface> makeTimer() override;
     const std::shared_ptr<OutOfLineExecutor>& getExecutor() override {
         return _executor;
@@ -82,6 +84,7 @@ private:
     std::unique_ptr<NetworkConnectionHook> _onConnectHook;
     // Options originated from instance of NetworkInterfaceTL.
     const ConnectionPool::Options _connPoolOptions;
+    std::shared_ptr<const transport::SSLConnectionContext> _transientSSLContext;
 
     mutable Mutex _mutex =
         MONGO_MAKE_LATCH(HierarchicalAcquisitionLevel(0), "TLTypeFactory::_mutex");
