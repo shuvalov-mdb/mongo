@@ -107,6 +107,11 @@ public:
 #ifdef MONGO_CONFIG_SSL
     Status rotateCertificates(std::shared_ptr<SSLManagerInterface> manager,
                               bool asyncOCSPStaple) override;
+
+    StatusWith<transport::SSLConnectionContext> createTransientSSLContext(
+        const TransientSSLParams& transientSSLParams,
+        const SSLManagerInterface* optionalManager,
+        bool asyncOCSPStaple) override;
 #endif
 private:
     template <typename Callable>

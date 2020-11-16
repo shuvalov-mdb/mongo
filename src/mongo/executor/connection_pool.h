@@ -239,8 +239,7 @@ public:
     explicit ConnectionPool(
         std::shared_ptr<DependentTypeFactoryInterface> impl,
         std::string name,
-        Options options = Options{},
-        std::shared_ptr<const transport::SSLConnectionContext> transientSSLContext = {});
+        Options options = Options{});
 
     ~ConnectionPool();
 
@@ -270,9 +269,6 @@ private:
 
     const std::shared_ptr<DependentTypeFactoryInterface> _factory;
     const Options _options;
-
-    // SSL context for the connections that require non-default SSL paramaeters.
-    std::shared_ptr<const transport::SSLConnectionContext> _transientSSLContext;
 
     std::shared_ptr<ControllerInterface> _controller;
 
@@ -519,9 +515,10 @@ public:
     /**
      * Makes a new connection given a host and port
      */
-    virtual std::shared_ptr<ConnectionInterface> makeConnection(const HostAndPort& hostAndPort,
-                                                                transport::ConnectSSLMode sslMode,
-                                                                size_t generation) = 0;
+    virtual std::shared_ptr<ConnectionInterface> makeConnection(
+        const HostAndPort& hostAndPort,
+        transport::ConnectSSLMode sslMode,
+        size_t generation) = 0;
 
     /**
      *  Return the executor for use with this factory

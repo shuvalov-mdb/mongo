@@ -52,7 +52,6 @@
 namespace mongo {
 namespace {
 
-
 // Test implementation needed by ASIO transport.
 class ServiceEntryPointUtil : public ServiceEntryPoint {
 public:
@@ -602,6 +601,26 @@ TEST(SSLManager, InitServerSideContextFromMemory) {
                                             SSLManagerInterface::ConnectionDirection::kOutgoing));
 }
 
+TEST(SSLManager, TransientSSLParams) {
+    SSLParams params;
+    params.sslMode.store(::mongo::sslGlobalParams.SSLMode_requireSSL);
+    params.sslCAFile = "jstests/libs/ca.pem";
+    params.sslClusterFile = "jstests/libs/client.pem";
+
+    std::shared_ptr<SSLManagerInterface> manager =
+        SSLManagerInterface::create(params, false /* isSSLServer */);
+
+    ServiceEntryPointUtil sepu;
+
+    auto options = [] {
+        ServerGlobalParams params;
+        params.noUnixSocket = true;
+        transport::TransportLayerASIO::Options opts(&params);
+        return opts;
+    }();
+    transport::TransportLayerASIO tla(options, &sepu);
+    uassertStatusOK(tla.rotateCertificates(manager, false /* asyncOCSPStaple */));
+}
 #endif
 
 }  // namespace

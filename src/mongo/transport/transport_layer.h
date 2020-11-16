@@ -133,6 +133,17 @@ public:
     /** Rotate the in-use certificates for new connections. */
     virtual Status rotateCertificates(std::shared_ptr<SSLManagerInterface> manager,
                                       bool asyncOCSPStaple) = 0;
+
+    /**
+     * Creates a transient SSL context using targeted (non default) SSL params.
+     * @param transientSSLParams overrides any value in stored SSLConnectionContext.
+     * @param optionalManager provides an optional SSL manager, otherwise the default one will be
+     * used.
+     */
+    virtual StatusWith<transport::SSLConnectionContext> createTransientSSLContext(
+        const TransientSSLParams& transientSSLParams,
+        const SSLManagerInterface* optionalManager,
+        bool asyncOCSPStaple) = 0;
 #endif
 
 private:

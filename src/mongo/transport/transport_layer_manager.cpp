@@ -45,6 +45,7 @@
 #include "mongo/transport/service_executor_synchronous.h"
 #include "mongo/transport/session.h"
 #include "mongo/transport/transport_layer_asio.h"
+#include "mongo/util/net/ssl/context.hpp"
 #include "mongo/util/net/ssl_types.h"
 #include "mongo/util/time_support.h"
 
@@ -156,6 +157,25 @@ Status TransportLayerManager::rotateCertificates(std::shared_ptr<SSLManagerInter
     }
     return Status::OK();
 }
+
+StatusWith<transport::SSLConnectionContext> TransportLayerManager::createTransientSSLContext(
+    const TransientSSLParams& transientSSLParams,
+    const SSLManagerInterface* optionalManager,
+    bool asyncOCSPStaple) {
+
+    Status firstError(ErrorCodes::InvalidSSLConfiguration,
+                      "Failure creating transient SSL context");
+    for (auto&& tl : _tls) {
+        auto status =
+            tl->createTransientSSLContext(transientSSLParams, optionalManager, asyncOCSPStaple);
+        if (!status.isOK()) {
+            return status;
+        }
+        firstError = status.getStatus();
+    }
+    return firstError;
+}
+
 #endif
 
 }  // namespace transport
