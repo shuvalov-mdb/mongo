@@ -8,8 +8,8 @@
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
 //
 
-#ifndef ASIO_SSL_HPP
-#define ASIO_SSL_HPP
+#ifndef MONGO_UTIL_NET_SSL_HPP
+#define MONGO_UTIL_NET_SSL_HPP
 
 #if defined(_MSC_VER) && (_MSC_VER >= 1200)
 #pragma once
@@ -21,4 +21,4 @@
 #include "mongo/util/net/ssl/stream.hpp"
 #include "mongo/util/net/ssl/stream_base.hpp"
 
-#endif  // ASIO_SSL_HPP
+#endif  // MONGO_UTIL_NET_SSL_HPP

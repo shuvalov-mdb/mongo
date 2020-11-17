@@ -41,9 +41,11 @@
 #include "mongo/stdx/thread.h"
 #include "mongo/stdx/unordered_map.h"
 #include "mongo/transport/baton.h"
+#include "mongo/transport/ssl_connection_context.h"
 #include "mongo/transport/transport_layer.h"
 #include "mongo/util/hierarchical_acquisition.h"
 #include "mongo/util/strong_weak_finish_line.h"
+
 
 namespace mongo {
 namespace executor {

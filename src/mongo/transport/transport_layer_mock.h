@@ -83,6 +83,11 @@ public:
                               bool asyncOCSPStaple) override {
         return Status::OK();
     }
+
+    StatusWith<std::shared_ptr<const transport::SSLConnectionContext>> createTransientSSLContext(
+        const TransientSSLParams& transientSSLParams,
+        const SSLManagerInterface* optionalManager,
+        bool asyncOCSPStaple) override;
 #endif
 
 private:
