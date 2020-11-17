@@ -1245,7 +1245,8 @@ StatusWith<transport::SSLConnectionContext> TransportLayerASIO::_createSSLContex
         if (!transientEgressSSLParams.sslClusterPEMPayload.empty()) {
             newSSLContext.isTransientEgressSSLContext = true;
             if (transientEgressSSLParams.targetedClusterConnectionString) {
-                newSSLContext.targetClusterURI = transientEgressSSLParams.targetedClusterConnectionString.toString();
+                newSSLContext.targetClusterURI =
+                    transientEgressSSLParams.targetedClusterConnectionString.toString();
             }
         }
     }

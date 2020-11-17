@@ -166,12 +166,12 @@ StatusWith<transport::SSLConnectionContext> TransportLayerManager::createTransie
     Status firstError(ErrorCodes::InvalidSSLConfiguration,
                       "Failure creating transient SSL context");
     for (auto&& tl : _tls) {
-        auto status =
+        auto statusOrContext =
             tl->createTransientSSLContext(transientSSLParams, optionalManager, asyncOCSPStaple);
-        if (!status.isOK()) {
-            return status;
+        if (statusOrContext.isOK()) {
+            return std::move(statusOrContext.getValue());
         }
-        firstError = status.getStatus();
+        firstError = statusOrContext.getStatus();
     }
     return firstError;
 }

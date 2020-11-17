@@ -152,7 +152,11 @@ public:
                               bool asyncOCSPStaple) override;
 
     std::shared_ptr<SSLManagerInterface> getSSLManager() {
-        return _sslContext.get()->manager;
+        auto sslContext = _sslContext.get();
+        if (!sslContext) {
+            return std::shared_ptr<SSLManagerInterface>{};
+        }
+        return sslContext->manager;
     }
 
     /**

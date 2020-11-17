@@ -56,8 +56,8 @@ class TransportLayerManager final : public TransportLayer {
     TransportLayerManager& operator=(const TransportLayerManager&) = delete;
 
 public:
-    TransportLayerManager(std::vector<std::unique_ptr<TransportLayer>> tls,
-                          const WireSpec& wireSpec = WireSpec::instance())
+    explicit TransportLayerManager(std::vector<std::unique_ptr<TransportLayer>> tls,
+                                   const WireSpec& wireSpec = WireSpec::instance())
         : TransportLayer(wireSpec), _tls(std::move(tls)) {}
 
     explicit TransportLayerManager(const WireSpec& wireSpec = WireSpec::instance())

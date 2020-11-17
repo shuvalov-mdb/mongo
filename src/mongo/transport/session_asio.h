@@ -122,9 +122,7 @@ public:
             attrs.add("isIngress", isIngressSession);
             attrs.add("connectionId", id());
             attrs.add("remote", remote());
-            LOGV2(5271001,
-                  "Initializing the ASIOSession with transient SSL context",
-                  attrs);
+            LOGV2(5271001, "Initializing the ASIOSession with transient SSL context", attrs);
         }
 #endif
     } catch (const DBException&) {

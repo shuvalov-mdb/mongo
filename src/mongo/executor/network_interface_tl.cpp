@@ -142,9 +142,8 @@ NetworkInterfaceTL::NetworkInterfaceTL(std::string instanceName,
     _reactor = _tl->getReactor(transport::TransportLayer::kNewReactor);
     auto typeFactory = std::make_unique<connection_pool_tl::TLTypeFactory>(
         _reactor, _tl, std::move(_onConnectHook), _connPoolOpts, transientSSLContext);
-    _pool = std::make_shared<ConnectionPool>(std::move(typeFactory),
-                                             std::string("NetworkInterfaceTL-") + _instanceName,
-                                             _connPoolOpts);
+    _pool = std::make_shared<ConnectionPool>(
+        std::move(typeFactory), std::string("NetworkInterfaceTL-") + _instanceName, _connPoolOpts);
 
     if (TestingProctor::instance().isEnabled()) {
         _counters = std::make_unique<SynchronizedCounters>();

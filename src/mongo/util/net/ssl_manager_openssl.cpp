@@ -1340,7 +1340,7 @@ private:
     bool _setupPEMFromMemoryPayload(SSL_CTX* context,
                                     const std::string& payload,
                                     PasswordFetcher* password,
-                                    StringData description) const;
+                                    StringData targetClusterURI) const;
 
     /**
      * Setup PEM from BIO, which could be file or memory input abstraction.

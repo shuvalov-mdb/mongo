@@ -450,10 +450,9 @@ auto ConnectionPool::SpecificPool::make(std::shared_ptr<ConnectionPool> parent,
 const Status ConnectionPool::kConnectionStateUnknown =
     Status(ErrorCodes::InternalError, "Connection is in an unknown state");
 
-ConnectionPool::ConnectionPool(
-    std::shared_ptr<DependentTypeFactoryInterface> impl,
-    std::string name,
-    Options options)
+ConnectionPool::ConnectionPool(std::shared_ptr<DependentTypeFactoryInterface> impl,
+                               std::string name,
+                               Options options)
     : _name(std::move(name)),
       _factory(std::move(impl)),
       _options(std::move(options)),
@@ -1040,8 +1039,7 @@ void ConnectionPool::SpecificPool::spawnConnections() {
         OwnedConnection handle;
         try {
             // make a new connection and put it in processing
-            handle = _parent->_factory->makeConnection(
-                _hostAndPort, _sslMode, _generation);
+            handle = _parent->_factory->makeConnection(_hostAndPort, _sslMode, _generation);
         } catch (std::system_error& e) {
             LOGV2_FATAL(40336,
                         "Failed to construct a new connection object: {reason}",
