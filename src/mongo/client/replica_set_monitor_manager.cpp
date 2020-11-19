@@ -165,11 +165,12 @@ void uassertNotMixingSSL(transport::ConnectSSLMode a, transport::ConnectSSLMode 
 }  // namespace
 
 shared_ptr<ReplicaSetMonitor> ReplicaSetMonitorManager::getOrCreateMonitor(
-    const ConnectionString& connStr) {
-    return getOrCreateMonitor(MongoURI(connStr));
+    const ConnectionString& connStr, std::function<void()> cleanupCallback) {
+    return getOrCreateMonitor(MongoURI(connStr), cleanupCallback);
 }
 
-shared_ptr<ReplicaSetMonitor> ReplicaSetMonitorManager::getOrCreateMonitor(const MongoURI& uri) {
+shared_ptr<ReplicaSetMonitor> ReplicaSetMonitorManager::getOrCreateMonitor(
+    const MongoURI& uri, std::function<void()> cleanupCallback) {
     invariant(uri.type() == ConnectionString::ConnectionType::kReplicaSet);
     stdx::lock_guard<Latch> lk(_mutex);
     uassert(ErrorCodes::ShutdownInProgress,
@@ -190,12 +191,13 @@ shared_ptr<ReplicaSetMonitor> ReplicaSetMonitorManager::getOrCreateMonitor(const
           "protocol"_attr = toString(gReplicaSetMonitorProtocol),
           "uri"_attr = uri.toString());
     if (gReplicaSetMonitorProtocol == ReplicaSetMonitorProtocol::kScanning) {
-        newMonitor = std::make_shared<ScanningReplicaSetMonitor>(uri);
+        newMonitor = std::make_shared<ScanningReplicaSetMonitor>(uri, cleanupCallback);
         newMonitor->init();
     } else {
         // Both ReplicaSetMonitorProtocol::kSdam and ReplicaSetMonitorProtocol::kStreamable use the
         // StreamableReplicaSetMonitor.
-        newMonitor = StreamableReplicaSetMonitor::make(uri, getExecutor(), _getConnectionManager());
+        newMonitor = StreamableReplicaSetMonitor::make(
+            uri, getExecutor(), _getConnectionManager(), cleanupCallback);
     }
     _monitors[setName] = newMonitor;
     _numMonitorsCreated++;

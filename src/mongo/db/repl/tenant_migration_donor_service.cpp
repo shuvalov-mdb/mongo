@@ -477,13 +477,8 @@ SemiFuture<void> TenantMigrationDonorService::Instance::run(
     std::shared_ptr<executor::ScopedTaskExecutor> executor) noexcept {
     auto recipientUri =
         uassertStatusOK(MongoURI::parse(_stateDoc.getRecipientConnectionString().toString()));
-    auto recipientTargeterRS = std::shared_ptr<RemoteCommandTargeterRS>(
-        new RemoteCommandTargeterRS(recipientUri.getSetName(), recipientUri.getServers()),
-        [this, self = shared_from_this(), setName = recipientUri.getSetName()](
-            RemoteCommandTargeterRS* p) {
-            ReplicaSetMonitor::remove(setName);
-            delete p;
-        });
+    auto recipientTargeterRS = std::make_shared<RemoteCommandTargeterRS>(recipientUri.getSetName(),
+                                                                         recipientUri.getServers());
 
     return ExecutorFuture<void>(**executor)
         .then([this, self = shared_from_this(), executor] {
