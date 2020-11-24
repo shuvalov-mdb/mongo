@@ -16,6 +16,7 @@ load("jstests/libs/fail_point_util.js");
 load("jstests/libs/parallelTester.js");
 load("jstests/libs/uuid_util.js");
 load("jstests/replsets/libs/tenant_migration_test.js");
+load("jstests/replsets/libs/tenant_migration_util.js");
 
 let startupParams = {};
 
@@ -45,8 +46,8 @@ const kTenantIdPrefix = "testTenantId";
         return;
     }
     const tenantMigrationTest1 = new TenantMigrationTest({donorRst: rst0, recipientRst: rst2});
-    const tenantId0 = `${kTenantIdPrefix}_ConcurrentOutgoingMigrationsToDifferentRecipient0`;
-    const tenantId1 = `${kTenantIdPrefix}_ConcurrentOutgoingMigrationsToDifferentRecipient1`;
+    const tenantId0 = `${kTenantIdPrefix}-ConcurrentOutgoingMigrationsToDifferentRecipient0`;
+    const tenantId1 = `${kTenantIdPrefix}-ConcurrentOutgoingMigrationsToDifferentRecipient1`;
 
     const migrationOpts0 = {
         migrationIdString: extractUUIDFromObject(UUID()),
@@ -78,8 +79,8 @@ const kTenantIdPrefix = "testTenantId";
         return;
     }
     const tenantMigrationTest1 = new TenantMigrationTest({donorRst: rst1, recipientRst: rst2});
-    const tenantId0 = `${kTenantIdPrefix}_ConcurrentIncomingMigrations0`;
-    const tenantId1 = `${kTenantIdPrefix}_ConcurrentIncomingMigrations1`;
+    const tenantId0 = `${kTenantIdPrefix}-ConcurrentIncomingMigrations0`;
+    const tenantId1 = `${kTenantIdPrefix}-ConcurrentIncomingMigrations1`;
 
     const migrationOpts0 = {
         migrationIdString: extractUUIDFromObject(UUID()),
@@ -103,58 +104,63 @@ const kTenantIdPrefix = "testTenantId";
     assert(stateRes1.state, TenantMigrationTest.State.kCommitted);
 })();
 
-// TODO (SERVER-50467): Ensure that tenant migration donor only removes a ReplicaSetMonitor for
+// SERVER-50467: Ensure that tenant migration donor only removes a ReplicaSetMonitor for
 // a recipient when the last migration to that recipient completes. Before SERVER-50467, one of the
 // migration thread could try to remove the recipient RSM while the other is still using it.
 // Test concurrent outgoing migrations to same recipient.
-// (() => {
-//     const tenantId = kTenantId + "ConcurrentOutgoingMigrationsToSameRecipient";
-//     const donorsColl = rst0Primary.getCollection(kConfigDonorsNS);
+(() => {
+    const tenantMigrationTest0 = new TenantMigrationTest({donorRst: rst0, recipientRst: rst1});
+    const tenantId = `${kTenantIdPrefix}-ConcurrentOutgoingMigrationsToSameRecipient`;
 
-//     const migrationOpts0 = {
-//         migrationIdString: extractUUIDFromObject(UUID()),
-//         recipientConnString: rst1.getURL(),
-//         tenantId: tenantId + "0",
-//         readPreference: {mode: "primary"}
-//     };
-//     const migrationOpts1 = {
-//         migrationIdString: extractUUIDFromObject(UUID()),
-//         recipientConnString: rst1.getURL(),
-//         tenantId: tenantId + "1",
-//         readPreference: {mode: "primary"}
-//     };
+    const donorsColl = tenantMigrationTest0.getDonorRst().getPrimary().getCollection(
+        TenantMigrationTest.kConfigDonorsNS);
 
-//     const connPoolStatsBefore = assert.commandWorked(rst0Primary.adminCommand({connPoolStats:
-//     1})); assert.eq(Object.keys(connPoolStatsBefore.replicaSets).length, 0);
+    const migrationOpts0 = {
+        migrationIdString: extractUUIDFromObject(UUID()),
+        recipientConnString: rst1.getURL(),
+        tenantId: tenantId + "0",
+        readPreference: {mode: "primary"}
+    };
+    const migrationOpts1 = {
+        migrationIdString: extractUUIDFromObject(UUID()),
+        recipientConnString: rst1.getURL(),
+        tenantId: tenantId + "1",
+        readPreference: {mode: "primary"}
+    };
 
-//     let migrationThread0 =
-//         new Thread(TenantMigrationUtil.startMigration, rst0Primary.host, migrationOpts0);
-//     let migrationThread1 =
-//         new Thread(TenantMigrationUtil.startMigration, rst0Primary.host, migrationOpts1);
-//     let blockFp = configureFailPoint(rst0Primary, "pauseTenantMigrationAfterBlockingStarts");
+    const donorPrimary = rst0.getPrimary();
 
-//     // Make sure that there is an overlap between the two migrations.
-//     migrationThread0.start();
-//     migrationThread1.start();
-//     blockFp.wait();
-//     blockFp.wait();
-//     blockFp.off();
-//     migrationThread1.join();
-//     migrationThread0.join();
+    const connPoolStatsBefore = assert.commandWorked(donorPrimary.adminCommand({connPoolStats: 1}));
+    // assert.eq(Object.keys(connPoolStatsBefore.replicaSets).length, 0);
 
-//     // Verify that both migrations succeeded.
-//     assert.commandWorked(migrationThread0.returnData());
-//     assert.commandWorked(migrationThread1.returnData());
-//     assert(donorsColl.findOne({tenantId: migrationOpts0.tenantId, state: "committed"}));
-//     assert(donorsColl.findOne({tenantId: migrationOpts1.tenantId, state: "committed"}));
+    let migrationThread0 =
+        new Thread(TenantMigrationUtil.startMigration, donorPrimary.host, migrationOpts0);
+    let migrationThread1 =
+        new Thread(TenantMigrationUtil.startMigration, donorPrimary.host, migrationOpts1);
+    let blockFp = configureFailPoint(donorPrimary, "pauseTenantMigrationAfterBlockingStarts");
 
-//     // Verify that the recipient RSM was only created once and was removed after both migrations
-//     // finished.
-//     const connPoolStatsAfter = assert.commandWorked(rst0Primary.adminCommand({connPoolStats:
-//     1})); assert.eq(connPoolStatsAfter.numReplicaSetMonitorsCreated,
-//               connPoolStatsBefore.numReplicaSetMonitorsCreated + 1);
-//     assert.eq(Object.keys(connPoolStatsAfter.replicaSets).length, 0);
-// })();
+    // Make sure that there is an overlap between the two migrations.
+    migrationThread0.start();
+    migrationThread1.start();
+    blockFp.wait();
+    blockFp.wait();
+    blockFp.off();
+    migrationThread1.join();
+    migrationThread0.join();
+
+    // Verify that both migrations succeeded.
+    assert.commandWorked(migrationThread0.returnData());
+    assert.commandWorked(migrationThread1.returnData());
+    assert(donorsColl.findOne({tenantId: migrationOpts0.tenantId, state: "committed"}));
+    assert(donorsColl.findOne({tenantId: migrationOpts1.tenantId, state: "committed"}));
+
+    // Verify that the recipient RSM was only created once and was removed after both migrations
+    // finished.
+    const connPoolStatsAfter = assert.commandWorked(donorPrimary.adminCommand({connPoolStats: 1}));
+    assert.eq(connPoolStatsAfter.numReplicaSetMonitorsCreated,
+              connPoolStatsBefore.numReplicaSetMonitorsCreated + 1);
+    assert.eq(Object.keys(connPoolStatsAfter.replicaSets).length, 0);
+})();
 
 rst0.stopSet();
 rst1.stopSet();
