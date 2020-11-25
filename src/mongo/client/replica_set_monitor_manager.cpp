@@ -223,7 +223,9 @@ vector<string> ReplicaSetMonitorManager::getAllSetNames() {
     stdx::lock_guard<Latch> lk(_mutex);
 
     for (const auto& entry : _monitors) {
-        allNames.push_back(entry.first);
+        if (entry.second.lock()) {
+            allNames.push_back(entry.first);
+        }
     }
 
     return allNames;
@@ -241,6 +243,24 @@ void ReplicaSetMonitorManager::removeMonitor(StringData setName) {
               "Removed ReplicaSetMonitor for replica set {replicaSet}",
               "Removed ReplicaSetMonitor for replica set",
               "replicaSet"_attr = setName);
+    }
+}
+
+void ReplicaSetMonitorManager::garbageCollect(std::optional<StringData> hintSetName) {
+    stdx::lock_guard<Latch> lk(_mutex);
+    if (hintSetName) {
+        ReplicaSetMonitorsMap::const_iterator it = _monitors.find(hintSetName.value());
+        if (it != _monitors.end() && !it->second.lock()) {
+            _monitors.erase(it);
+        }
+    } else {  // Garbage collect all names.
+        for (auto it = _monitors.begin(); it != _monitors.end();) {
+            if (!it->second.lock()) {
+                _monitors.erase(it++);
+            } else {
+                ++it;
+            }
+        }
     }
 }
 

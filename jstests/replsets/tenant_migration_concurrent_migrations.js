@@ -75,10 +75,15 @@ const kTenantIdPrefix = "testTenantId";
     const connPoolStatsAfter = assert.commandWorked(donorPrimary.adminCommand({connPoolStats: 1}));
     assert.eq(connPoolStatsAfter.numReplicaSetMonitorsCreated,
               connPoolStatsBefore.numReplicaSetMonitorsCreated + 2);
+    // Donor targeted two different replica sets.
+    assert.eq(Object.keys(connPoolStatsAfter.replicaSets).length, 2);
 
     assert.commandWorked(tenantMigrationTest0.forgetMigration(migrationOpts0.migrationIdString));
     assert.commandWorked(tenantMigrationTest1.forgetMigration(migrationOpts1.migrationIdString));
-    assert.eq(Object.keys(connPoolStatsAfter.replicaSets).length, 0);
+
+    // After migrations are complete, RSMs are garbage collected.
+    const connPoolStatsAfter2 = assert.commandWorked(donorPrimary.adminCommand({connPoolStats: 1}));
+    assert.eq(Object.keys(connPoolStatsAfter2.replicaSets).length, 0);
 })();
 
 // Test concurrent incoming migrations from different donors.
@@ -112,6 +117,18 @@ const kTenantIdPrefix = "testTenantId";
     // Verify that both migrations succeeded.
     assert(stateRes0.state, TenantMigrationTest.State.kCommitted);
     assert(stateRes1.state, TenantMigrationTest.State.kCommitted);
+
+    // Cleanup.
+    assert.commandWorked(tenantMigrationTest0.forgetMigration(migrationOpts0.migrationIdString));
+    assert.commandWorked(tenantMigrationTest1.forgetMigration(migrationOpts1.migrationIdString));
+
+    const connPoolStatsAfter =
+        assert.commandWorked(rst0.getPrimary().adminCommand({connPoolStats: 1}));
+    assert.eq(Object.keys(connPoolStatsAfter.replicaSets).length, 0);
+
+    const connPoolStatsAfter2 =
+        assert.commandWorked(rst1.getPrimary().adminCommand({connPoolStats: 1}));
+    assert.eq(Object.keys(connPoolStatsAfter2.replicaSets).length, 0);
 })();
 
 // SERVER-50467: Ensure that tenant migration donor only removes a ReplicaSetMonitor for
@@ -165,9 +182,7 @@ const kTenantIdPrefix = "testTenantId";
     assert(stateRes0.state, TenantMigrationTest.State.kCommitted);
     assert(stateRes1.state, TenantMigrationTest.State.kCommitted);
 
-    jsTestLog(donorsColl.find().toArray());
     assert(donorsColl.findOne({tenantId: migrationOpts0.tenantId, state: "committed"}));
-    jsTestLog(migrationOpts1.tenantId);
     assert(donorsColl.findOne({tenantId: migrationOpts1.tenantId, state: "committed"}));
 
     // Verify that the recipient RSM was only created once and was removed after both migrations
@@ -175,7 +190,14 @@ const kTenantIdPrefix = "testTenantId";
     const connPoolStatsAfter = assert.commandWorked(donorPrimary.adminCommand({connPoolStats: 1}));
     assert.eq(connPoolStatsAfter.numReplicaSetMonitorsCreated,
               connPoolStatsBefore.numReplicaSetMonitorsCreated + 1);
-    assert.eq(Object.keys(connPoolStatsAfter.replicaSets).length, 0);
+    assert.eq(Object.keys(connPoolStatsAfter.replicaSets).length, 1);
+
+    // Cleanup.
+    assert.commandWorked(tenantMigrationTest0.forgetMigration(migrationOpts0.migrationIdString));
+    assert.commandWorked(tenantMigrationTest1.forgetMigration(migrationOpts1.migrationIdString));
+
+    const connPoolStatsAfter2 = assert.commandWorked(donorPrimary.adminCommand({connPoolStats: 1}));
+    assert.eq(Object.keys(connPoolStatsAfter2.replicaSets).length, 0);
 })();
 
 rst0.stopSet();
