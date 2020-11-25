@@ -71,13 +71,19 @@ public:
 
     void drop() override;
 
-    SemiFuture<HostAndPort> getHostOrRefresh(
-        const ReadPreferenceSetting& readPref,
-        Milliseconds maxWait = kDefaultFindHostTimeout) override;
+    /**
+     * NOTE: Cancelation via CancelationTokens is not implemented for the ScanningReplicaSetMonitor,
+     * so any token passed in will be ignored.
+     */
+    SemiFuture<HostAndPort> getHostOrRefresh(const ReadPreferenceSetting& readPref,
+                                             const CancelationToken&) override;
 
-    SemiFuture<std::vector<HostAndPort>> getHostsOrRefresh(
-        const ReadPreferenceSetting& readPref,
-        Milliseconds maxWait = kDefaultFindHostTimeout) override;
+    /**
+     * NOTE: Cancelation via CancelationTokens is not implemented for the ScanningReplicaSetMonitor,
+     * so any token passed in will be ignored.
+     */
+    SemiFuture<std::vector<HostAndPort>> getHostsOrRefresh(const ReadPreferenceSetting& readPref,
+                                                           const CancelationToken&) override;
 
     HostAndPort getPrimaryOrUassert() override;
 
@@ -134,7 +140,7 @@ public:
      */
     ScanningReplicaSetMonitor(const SetStatePtr& initialState,
                               std::function<void()> cleanupCallback);
-    ~ScanningReplicaSetMonitor();
+    ~ScanningReplicaSetMonitor() override;
 
     /**
      * This is for use in tests using MockReplicaSet to ensure that a full scan completes before
