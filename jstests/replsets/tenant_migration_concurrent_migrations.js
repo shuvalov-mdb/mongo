@@ -72,18 +72,18 @@ const kTenantIdPrefix = "testTenantId";
     assert(stateRes0.state, TenantMigrationTest.State.kCommitted);
     assert(stateRes1.state, TenantMigrationTest.State.kCommitted);
 
-    const connPoolStatsAfter = assert.commandWorked(donorPrimary.adminCommand({connPoolStats: 1}));
-    assert.eq(connPoolStatsAfter.numReplicaSetMonitorsCreated,
-              connPoolStatsBefore.numReplicaSetMonitorsCreated + 2);
+    const connPoolStatsAfter0 = assert.commandWorked(donorPrimary.adminCommand({connPoolStats: 1}));
     // Donor targeted two different replica sets.
-    assert.eq(Object.keys(connPoolStatsAfter.replicaSets).length, 2);
+    assert.eq(connPoolStatsAfter0.numReplicaSetMonitorsCreated,
+              connPoolStatsBefore.numReplicaSetMonitorsCreated + 2);
+    assert.eq(Object.keys(connPoolStatsAfter0.replicaSets).length, 2);
 
     assert.commandWorked(tenantMigrationTest0.forgetMigration(migrationOpts0.migrationIdString));
     assert.commandWorked(tenantMigrationTest1.forgetMigration(migrationOpts1.migrationIdString));
 
     // After migrations are complete, RSMs are garbage collected.
-    const connPoolStatsAfter2 = assert.commandWorked(donorPrimary.adminCommand({connPoolStats: 1}));
-    assert.eq(Object.keys(connPoolStatsAfter2.replicaSets).length, 0);
+    const connPoolStatsAfter1 = assert.commandWorked(donorPrimary.adminCommand({connPoolStats: 1}));
+    assert.eq(Object.keys(connPoolStatsAfter1.replicaSets).length, 0);
 })();
 
 // Test concurrent incoming migrations from different donors.
@@ -131,10 +131,9 @@ const kTenantIdPrefix = "testTenantId";
     assert.eq(Object.keys(connPoolStatsAfter2.replicaSets).length, 0);
 })();
 
-// SERVER-50467: Ensure that tenant migration donor only removes a ReplicaSetMonitor for
-// a recipient when the last migration to that recipient completes. Before SERVER-50467, one of the
-// migration thread could try to remove the recipient RSM while the other is still using it.
-// Test concurrent outgoing migrations to same recipient.
+// Test concurrent outgoing migrations to same recipient. Verify that tenant
+// migration donor only removes a ReplicaSetMonitor for a recipient when the last
+// migration to that recipient completes.
 (() => {
     const tenantMigrationTest0 = new TenantMigrationTest({donorRst: rst0, recipientRst: rst1});
     if (!tenantMigrationTest0.isFeatureFlagEnabled()) {
@@ -162,42 +161,56 @@ const kTenantIdPrefix = "testTenantId";
 
     const connPoolStatsBefore = assert.commandWorked(donorPrimary.adminCommand({connPoolStats: 1}));
 
-    let blockFp = configureFailPoint(donorPrimary, "pauseTenantMigrationAfterBlockingStarts");
+    let blockFp = configureFailPoint(
+        donorPrimary, "pauseTenantMigrationAfterBlockingStarts", {tenantId: tenantId1});
     assert.commandWorked(tenantMigrationTest0.startMigration(migrationOpts0));
     assert.commandWorked(tenantMigrationTest1.startMigration(migrationOpts1));
 
-    // Make sure that there is an overlap between the two migrations.
-    blockFp.wait();
-    blockFp.wait();
-    blockFp.off();
-
-    // Verify that both migrations succeeded.
-
+    // Wait migration1 to pause in the blocking state and for migration0 to commit.
+    assert.commandWorked(donorPrimary.adminCommand({
+        waitForFailPoint: "pauseTenantMigrationAfterBlockingStarts",
+        timesEntered: 1,
+        maxTimeMS: kDefaultWaitForFailPointTimeout
+    }));
     const stateRes0 =
         assert.commandWorked(tenantMigrationTest0.waitForMigrationToComplete(migrationOpts0));
+    assert(stateRes0.state, TenantMigrationTest.State.kCommitted);
+    assert(donorsColl.findOne({tenantId: migrationOpts0.tenantId, state: "committed"}));
+
+    // Verify that exactly one RSM was created.
+    const connPoolStatsDuringMigration =
+        assert.commandWorked(donorPrimary.adminCommand({connPoolStats: 1}));
+    assert.eq(connPoolStatsDuringMigration.numReplicaSetMonitorsCreated,
+              connPoolStatsBefore.numReplicaSetMonitorsCreated + 1);
+    assert.eq(Object.keys(connPoolStatsDuringMigration.replicaSets).length, 1);
+
+    // Garbage collect migration0 and verify that the RSM was not removed.
+    assert.commandWorked(tenantMigrationTest0.forgetMigration(migrationOpts0.migrationIdString));
+    assert.eq(
+        Object.keys(assert.commandWorked(donorPrimary.adminCommand({connPoolStats: 1})).replicaSets)
+            .length,
+        1);
+
+    // Let the 2nd migration to finish.
+    blockFp.off();
     const stateRes1 =
         assert.commandWorked(tenantMigrationTest1.waitForMigrationToComplete(migrationOpts1));
-
-    // Verify that both migrations succeeded.
-    assert(stateRes0.state, TenantMigrationTest.State.kCommitted);
     assert(stateRes1.state, TenantMigrationTest.State.kCommitted);
-
-    assert(donorsColl.findOne({tenantId: migrationOpts0.tenantId, state: "committed"}));
     assert(donorsColl.findOne({tenantId: migrationOpts1.tenantId, state: "committed"}));
 
-    // Verify that the recipient RSM was only created once and was removed after both migrations
-    // finished.
+    // Verify that the recipient RSM was only created once.
     const connPoolStatsAfter = assert.commandWorked(donorPrimary.adminCommand({connPoolStats: 1}));
     assert.eq(connPoolStatsAfter.numReplicaSetMonitorsCreated,
               connPoolStatsBefore.numReplicaSetMonitorsCreated + 1);
     assert.eq(Object.keys(connPoolStatsAfter.replicaSets).length, 1);
 
-    // Cleanup.
-    assert.commandWorked(tenantMigrationTest0.forgetMigration(migrationOpts0.migrationIdString));
+    // Verify that now the RSM is garbage collected after the 2nd migration is cleaned.
     assert.commandWorked(tenantMigrationTest1.forgetMigration(migrationOpts1.migrationIdString));
 
-    const connPoolStatsAfter2 = assert.commandWorked(donorPrimary.adminCommand({connPoolStats: 1}));
-    assert.eq(Object.keys(connPoolStatsAfter2.replicaSets).length, 0);
+    assert.eq(
+        Object.keys(assert.commandWorked(donorPrimary.adminCommand({connPoolStats: 1})).replicaSets)
+            .length,
+        0);
 })();
 
 rst0.stopSet();

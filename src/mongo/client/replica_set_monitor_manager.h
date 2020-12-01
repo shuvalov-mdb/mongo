@@ -125,11 +125,10 @@ public:
     void removeMonitor(StringData setName);
 
     /**
-     * Removes the already deleted monitors from the internal collection, to keep the collection
-     * tidy.
-     * @param hintSetName if set, will only check this name instead of the whole collection.
+     * Removes the already deleted monitor for 'setName' from the internal map, to keep the
+     * collection tidy.
      */
-    void garbageCollect(std::optional<StringData> hintSetName);
+    void garbageCollect(StringData setName);
 
     std::shared_ptr<ReplicaSetMonitor> getMonitorForHost(const HostAndPort& host);
 

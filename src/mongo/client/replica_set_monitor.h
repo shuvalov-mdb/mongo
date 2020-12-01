@@ -71,7 +71,7 @@ public:
 
     /**
      * Removes the ReplicaSetMonitor for the given set name from ReplicaSetMonitorManager.
-     * If the instance of the ReplicaSetMonitor exists it will receive the 'drop' command.
+     * Drop and remove the ReplicaSetMonitor for the given set name if it exists.
      * Then all connections for this host are deleted from the connection pool DBConnectionPool.
      * Those two steps are not performed atomically together, but the possible (unlikely) race:
      *  1. RSM is dropped and removed
@@ -103,8 +103,8 @@ protected:
 
 private:
     /**
-     * @return callback helper to invoke ReplicaSetMonitor::remove() when the instance of
-     * ReplicaSetMonitor for the 'name' is being destroyed.
+     * @return callback helper to safely cleanup 'ReplicaSetMonitor' and 'globalConnPool' when the
+     * instance of ReplicaSetMonitor for the 'name' is being destroyed.
      */
     static std::function<void()> _getCleanupCallback(StringData name);
 

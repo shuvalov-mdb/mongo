@@ -116,10 +116,11 @@ std::function<void()> ReplicaSetMonitor::_getCleanupCallback(StringData name) {
     return [n = name.toString()] {
         LOGV2(5046701, "ReplicaSetMonitor cleanup callback invoked", "name"_attr = n);
         // This callback should never invoke ReplicaSetMonitorManager::removeMonitor() because it's
-        // a race: the RSM stored in ReplicaSetMonitorManager could be a new one. We only need to
-        // cleanup the global connection pool for the `name`, as those connections will not function
-        // properly. Instead, it should garbage collect.
+        // a race: the RSM stored in ReplicaSetMonitorManager could be a new one. However, we can
+        // safely garbage collect RSMM for the 'name'.
         ReplicaSetMonitorManager::get()->garbageCollect(n);
+        // We need to cleanup the global connection pool for the 'name', as those connections will
+        // not function properly.
         globalConnPool.removeHost(n);
     };
 }

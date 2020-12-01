@@ -246,21 +246,11 @@ void ReplicaSetMonitorManager::removeMonitor(StringData setName) {
     }
 }
 
-void ReplicaSetMonitorManager::garbageCollect(std::optional<StringData> hintSetName) {
+void ReplicaSetMonitorManager::garbageCollect(StringData setName) {
     stdx::lock_guard<Latch> lk(_mutex);
-    if (hintSetName) {
-        ReplicaSetMonitorsMap::const_iterator it = _monitors.find(hintSetName.value());
-        if (it != _monitors.end() && !it->second.lock()) {
-            _monitors.erase(it);
-        }
-    } else {  // Garbage collect all names.
-        for (auto it = _monitors.begin(); it != _monitors.end();) {
-            if (!it->second.lock()) {
-                _monitors.erase(it++);
-            } else {
-                ++it;
-            }
-        }
+    ReplicaSetMonitorsMap::const_iterator it = _monitors.find(setName.value());
+    if (it != _monitors.end() && !it->second.lock()) {
+        _monitors.erase(it);
     }
 }
 

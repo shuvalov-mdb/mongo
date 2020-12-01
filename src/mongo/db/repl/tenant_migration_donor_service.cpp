@@ -523,7 +523,14 @@ SemiFuture<void> TenantMigrationDonorService::Instance::run(
                     auto opCtxHolder = cc().makeOperationContext();
                     auto opCtx = opCtxHolder.get();
 
-                    pauseTenantMigrationAfterBlockingStarts.pauseWhileSet(opCtx);
+                    pauseTenantMigrationAfterBlockingStarts.executeIf(
+                        [&](const BSONObj&) {
+                            pauseTenantMigrationAfterBlockingStarts.pauseWhileSet(opCtx);
+                        },
+                        [&](const BSONObj& data) {
+                            return !data.hasField("tenantId") ||
+                                _stateDoc.getTenantId() == data["tenantId"].str();
+                        });
 
                     abortTenantMigrationAfterBlockingStarts.execute([&](const BSONObj& data) {
                         if (data.hasField("blockTimeMS")) {
