@@ -117,6 +117,12 @@ structs:
                     The SSL certificate and private key that the recipient should use to
                     authenticate to the donor.
                 type: TenantMigrationPEMPayload
+            blockingStateTimeoutMillis:
+                description: 'Period of time, in milliseconds, after which the blocking state should be interrupted'
+                type: int
+                default: 10000
+                validator:
+                    gte: 1
 
     tenantMigrationRecipientDocument:
         description: "Represents an in-progress tenant migration on the migration recipient."

@@ -39,6 +39,7 @@
 #include "mongo/platform/atomic_word.h"
 #include "mongo/platform/mutex.h"
 #include "mongo/stdx/unordered_map.h"
+#include "mongo/util/cancelation.h"
 #include "mongo/util/duration.h"
 #include "mongo/util/interruptible.h"
 #include "mongo/util/string_map.h"
@@ -359,6 +360,19 @@ public:
      */
     void pauseWhileSet(Interruptible* interruptible) {
         _impl()->pauseWhileSet(interruptible);
+    }
+
+    /**
+     * Like `pauseWhileSet`, but will also unpause as soon as the cancellation token is canceled.
+     * This method does not generate any cancellation related error by itself, it only waits.
+     */
+    void pauseWhileSetAndNotCanceled(const CancelationToken* token) {
+        for (auto entryMode = kFirstTimeEntered; 
+             token->isCanceled() && MONGO_unlikely(shouldFail(entryMode));
+             entryMode = kEnteredAlready) {
+            // Not using token->onCancel() because we need to handle the fault point unset.
+            sleepFor(Milliseconds(1));
+        }
     }
 
 private:

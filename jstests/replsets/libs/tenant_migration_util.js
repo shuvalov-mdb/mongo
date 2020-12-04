@@ -89,8 +89,10 @@ var TenantMigrationUtil = (function() {
             donorCertificateForRecipient: migrationOpts.donorCertificateForRecipient ||
                 migrationCertificates.donorCertificateForRecipient,
             recipientCertificateForDonor: migrationOpts.recipientCertificateForDonor ||
-                migrationCertificates.recipientCertificateForDonor
+                migrationCertificates.recipientCertificateForDonor,
+            blockingStateTimeoutMillis: migrationOpts.blockingStateTimeoutMillis || 10000,
         };
+        jsTestLog(cmdObj);
 
         const donorRst = new ReplSetTest({rstArgs: donorRstArgs});
         let donorPrimary = donorRst.getPrimary();
