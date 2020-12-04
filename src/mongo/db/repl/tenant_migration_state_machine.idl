@@ -104,6 +104,12 @@ structs:
                     The wall-clock time at which the state machine document should be
                     removed by the TTL monitor.
                 optional: true
+            blockingStateTimeoutMillis:
+                description: 'Period of time, in milliseconds, after which the blocking state should be interrupted'
+                type: int
+                default: 10000
+                validator:
+                    gte: 1
 
     tenantMigrationRecipientDocument:
         description: "Represents an in-progress tenant migration on the migration recipient."

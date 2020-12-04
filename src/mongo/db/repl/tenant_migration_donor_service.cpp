@@ -153,6 +153,7 @@ boost::optional<BSONObj> TenantMigrationDonorService::Instance::reportForCurrent
     bob.append("recipientConnectionString", _stateDoc.getRecipientConnectionString());
     bob.append("readPreference", _stateDoc.getReadPreference().toInnerBSON());
     bob.append("lastDurableState", _durableState.state);
+    bob.append("blockingStateTimeoutMillis", _stateDoc.getBlockingStateTimeoutMillis());
     if (_stateDoc.getExpireAt()) {
         bob.append("expireAt", _stateDoc.getExpireAt()->toString());
     }
@@ -495,7 +496,7 @@ SemiFuture<void> TenantMigrationDonorService::Instance::run(
         });
 
     return ExecutorFuture<void>(**executor)
-        .then([this, self = shared_from_this(), executor] {
+        .then([this, self = shared_from_this(), executor] () -> ExecutorFuture<void> {
             if (_stateDoc.getState() > TenantMigrationDonorStateEnum::kUninitialized) {
                 return ExecutorFuture<void>(**executor, Status::OK());
             }
@@ -525,15 +526,31 @@ SemiFuture<void> TenantMigrationDonorService::Instance::run(
                         });
                 });
         })
-        .then([this, self = shared_from_this(), executor, recipientTargeterRS, token] {
+        .then([this, self = shared_from_this(), executor, recipientTargeterRS, token]  () -> ExecutorFuture<void> {
             if (_stateDoc.getState() > TenantMigrationDonorStateEnum::kBlocking) {
                 return ExecutorFuture<void>(**executor, Status::OK());
             }
 
-            invariant(_stateDoc.getBlockTimestamp());
+            auto blockStartTimestamp = _stateDoc.getBlockTimestamp();
+            invariant(blockStartTimestamp);
+            // Source to cancel the timeout if the operation completed in time.
+            CancelationSource cancelTimeoutSource;
+            // Source to cancel if the timeout expires before completion, as a child of parent token.
+            CancelationSource timeoutSource(token);
 
-            return _sendRecipientSyncDataCommand(executor, recipientTargeterRS, token)
-                .then([this, self = shared_from_this()] {
+            (*executor)->sleepFor(Milliseconds(_stateDoc.getBlockingStateTimeoutMillis()), cancelTimeoutSource.token())
+                .getAsync([this, cancelTimeoutSource, timeoutSource] (Status status) mutable {
+                    std::cerr << "!!!!! check timer: " << status << ", " << cancelTimeoutSource.token().isCanceled() << std::endl;
+                    if (status.isOK() && !cancelTimeoutSource.token().isCanceled()) {
+                        std::cerr << "!!!!! trigger timeout" << std::endl;
+                        timeoutSource.cancel();
+                    }
+                });
+
+            std::cerr << "!!!!! before _sendRecipientSyncDataCommand" << std::endl;
+            return _sendRecipientSyncDataCommand(executor, recipientTargeterRS, timeoutSource.token())
+                .then([this, self = shared_from_this()] () -> void {
+                    std::cerr << "!!!!! after _sendRecipientSyncDataCommand" << std::endl;
                     auto opCtxHolder = cc().makeOperationContext();
                     auto opCtx = opCtxHolder.get();
 
@@ -551,7 +568,8 @@ SemiFuture<void> TenantMigrationDonorService::Instance::run(
                         uasserted(ErrorCodes::InternalError, "simulate a tenant migration error");
                     });
                 })
-                .then([this, self = shared_from_this(), executor] {
+                .then([this, self = shared_from_this(), executor, cancelTimeoutSource] () mutable {
+                    cancelTimeoutSource.cancel();
                     // Enter "commit" state.
                     return _updateStateDocument(executor, TenantMigrationDonorStateEnum::kCommitted)
                         .then([this, self = shared_from_this(), executor](repl::OpTime opTime) {
@@ -560,6 +578,7 @@ SemiFuture<void> TenantMigrationDonorService::Instance::run(
                 });
         })
         .onError([this, self = shared_from_this(), executor](Status status) {
+            std::cerr << "!!!!! intercepted2" << std::endl;
             if (_stateDoc.getState() == TenantMigrationDonorStateEnum::kAborted) {
                 // The migration was resumed on stepup and it was already aborted.
                 return ExecutorFuture<void>(**executor, Status::OK());
@@ -584,6 +603,7 @@ SemiFuture<void> TenantMigrationDonorService::Instance::run(
             }
         })
         .onCompletion([this, self = shared_from_this()](Status status) {
+            std::cerr << "!!!!! completed" << std::endl;
             LOGV2(5006601,
                   "Tenant migration completed",
                   "migrationId"_attr = _stateDoc.getId(),

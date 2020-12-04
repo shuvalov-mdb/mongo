@@ -32,7 +32,9 @@ var TenantMigrationUtil = (function() {
             recipientConnectionString: migrationOpts.recipientConnString,
             tenantId: migrationOpts.tenantId,
             readPreference: migrationOpts.readPreference || {mode: "primary"},
+            blockingStateTimeoutMillis: migrationOpts.blockingStateTimeoutMillis || 10000,
         };
+        jsTestLog(cmdObj);
 
         const donorRst = new ReplSetTest({rstArgs: donorRstArgs});
         let donorPrimary = donorRst.getPrimary();
