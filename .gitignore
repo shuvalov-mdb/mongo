@@ -195,3 +195,6 @@ resmoke.ini
 
 # UndoDB Recordings
 *.undo
+
+# Node,js
+node_modules
