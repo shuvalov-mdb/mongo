@@ -5,7 +5,7 @@
   "main": "postmortem.ts",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "postmortem": "node --require ts-node/register postmortem.ts postmortem_db.ts"
+    "postmortem": "node --require ts-node/register postmortem.ts postmortem_db.ts db_spawner.ts"
   },
   "keywords": [],
   "author": "",
@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "chalk": "^4.1.0",
+    "get-port": "^5.1.1",
     "minimist": "^1.2.5",
     "mongodb": "^3.6.3",
     "mongoose": "^5.11.4",
