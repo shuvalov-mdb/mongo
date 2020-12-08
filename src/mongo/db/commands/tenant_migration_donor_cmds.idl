@@ -74,6 +74,10 @@ commands:
       readPreference:
         description: "The read preference settings that the donor will pass on to the recipient."
         type: readPreference
+      blockingStateTimeoutMillis:
+        description: 'Period of time, in milliseconds, after which the blocking state should be interrupted'
+        type: safeInt64
+        default: 10000
 
   donorForgetMigration:
     description: "Parser for the 'donorForgetMigration' command."

@@ -357,7 +357,7 @@ public:
      */
     void pauseWhileSetAndNotCanceled(const CancelationToken* token) {
         for (auto entryMode = kFirstTimeEntered; 
-             token->isCanceled() && MONGO_unlikely(shouldFail(entryMode));
+             MONGO_unlikely(shouldFail(entryMode)) && !token->isCanceled();
              entryMode = kEnteredAlready) {
             // Not using token->onCancel() because we need to handle the fault point unset.
             sleepFor(Milliseconds(1));
