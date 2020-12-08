@@ -49,6 +49,7 @@ Status wrapCallbackHandleWithCancelToken(
     token.onCancel()
         .unsafeToInlineFuture()
         .then([executor, callbackHandle = std::move(swCallbackHandle.getValue())]() mutable {
+            std::cerr << "!!!! token cancels executor" << std::endl;
             executor->cancel(callbackHandle);
         })
         .getAsync([](auto) {});
@@ -66,6 +67,7 @@ ExecutorFuture<Response> wrapScheduleCallWithCancelTokenAndFuture(
     const Request& request,
     const CancelationToken& token,
     const BatonHandle& baton) {
+
     if (token.isCanceled()) {
         return ExecutorFuture<Response>(executor, TaskExecutor::kCallbackCanceledErrorStatus);
     }
@@ -85,6 +87,11 @@ ExecutorFuture<Response> wrapScheduleCallWithCancelTokenAndFuture(
         }
     };
 
+    // Fault point to make this method to wait until the token is canceled.
+        std::cerr << "!!!! wrapScheduleCallWithCancelTokenAndFuture 2 " << token.isCanceled() << std::endl;
+    pauseCallWithCancelTokenUntilCanceled.pauseWhileSetAndNotCanceled(&token);
+        std::cerr << "!!!! wrapScheduleCallWithCancelTokenAndFuture 3 " << token.isCanceled() << std::endl;
+
     auto scheduleStatus = wrapCallbackHandleWithCancelToken(
         executor,
         std::forward<ScheduleFn>(schedule)(request, std::move(signalPromiseOnCompletion), baton),
@@ -95,11 +102,6 @@ ExecutorFuture<Response> wrapScheduleCallWithCancelTokenAndFuture(
         // run, meaning that it will be okay to set the promise here.
         sharedPromise->setError(scheduleStatus);
     }
-
-    // Fault point to make this method to wait until the token is canceled.
-    // This fault does not inject any failure, it only waits. The cancellation
-    // will be handled by the executor.
-    pauseCallWithCancelTokenUntilCanceled.pauseWhileSetAndNotCanceled(&token);
 
     return std::move(future).thenRunOn(executor);
 }

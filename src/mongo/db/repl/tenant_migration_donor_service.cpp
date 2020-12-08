@@ -272,6 +272,7 @@ ExecutorFuture<repl::OpTime> TenantMigrationDonorService::Instance::_insertState
     std::shared_ptr<executor::ScopedTaskExecutor> executor, const CancelationToken& token) {
     invariant(_stateDoc.getState() == TenantMigrationDonorStateEnum::kUninitialized);
     _stateDoc.setState(TenantMigrationDonorStateEnum::kDataSync);
+    std::cerr << "!!! insert state " << _stateDoc.getBlockingStateTimeoutMillis() << std::endl;
 
     return AsyncTry([this, self = shared_from_this()] {
                auto opCtxHolder = cc().makeOperationContext();
@@ -552,6 +553,7 @@ SemiFuture<void> TenantMigrationDonorService::Instance::run(
 
     return ExecutorFuture<void>(**executor)
         .then([this, self = shared_from_this(), executor, token] {
+    std::cerr << "!!!! pipeline start" << std::endl;
             if (_stateDoc.getState() > TenantMigrationDonorStateEnum::kUninitialized) {
                 return ExecutorFuture<void>(**executor, Status::OK());
             }
@@ -559,6 +561,7 @@ SemiFuture<void> TenantMigrationDonorService::Instance::run(
             // Enter "dataSync" state.
             return _insertStateDocument(executor, token)
                 .then([this, self = shared_from_this(), executor](repl::OpTime opTime) {
+                    std::cerr << "!!!! wait for majority" << std::endl;
                     return _waitForMajorityWriteConcern(executor, std::move(opTime));
                 });
         })
@@ -569,6 +572,7 @@ SemiFuture<void> TenantMigrationDonorService::Instance::run(
 
             return _sendRecipientSyncDataCommand(executor, recipientTargeterRS, token)
                 .then([this, self = shared_from_this()] {
+                    std::cerr << "!!!! after sending command to rec" << std::endl;
                     auto opCtxHolder = cc().makeOperationContext();
                     auto opCtx = opCtxHolder.get();
                     pauseTenantMigrationAfterDataSync.pauseWhileSet(opCtx);
@@ -582,13 +586,12 @@ SemiFuture<void> TenantMigrationDonorService::Instance::run(
                         });
                 });
         })
-        .then([this, self = shared_from_this(), executor, recipientTargeterRS, token]  () -> ExecutorFuture<void> {
+        .then([this, self = shared_from_this(), executor, recipientTargeterRS, token] {
             if (_stateDoc.getState() > TenantMigrationDonorStateEnum::kBlocking) {
                 return ExecutorFuture<void>(**executor, Status::OK());
             }
 
-            auto blockStartTimestamp = _stateDoc.getBlockTimestamp();
-            invariant(blockStartTimestamp);
+            invariant(_stateDoc.getBlockTimestamp());
             // Source to cancel the timeout if the operation completed in time.
             CancelationSource cancelTimeoutSource;
             // Source to cancel if the timeout expires before completion, as a child of parent token.
@@ -638,6 +641,10 @@ SemiFuture<void> TenantMigrationDonorService::Instance::run(
                         .then([this, self = shared_from_this(), executor](repl::OpTime opTime) {
                             return _waitForMajorityWriteConcern(executor, std::move(opTime));
                         });
+                })
+                .onError([this, self = shared_from_this(), executor](Status status) {
+                    std::cerr << "!!!!! intercepted1 " << status << std::endl;
+                    return status;
                 });
         })
         .onError([this, self = shared_from_this(), executor, token](Status status) {
