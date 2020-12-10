@@ -1,5 +1,5 @@
 /**
- *    Copyright (C) 2018-present MongoDB, Inc.
+ *    Copyright (C) 2020-present MongoDB, Inc.
  *
  *    This program is free software: you can redistribute it and/or modify
  *    it under the terms of the Server Side Public License, version 1,
@@ -27,36 +27,52 @@
  *    it in the license file.
  */
 
+
 #include "mongo/platform/basic.h"
 
-#include <boost/optional.hpp>
-#include <iostream>
-#include <vector>
+#include "mongo/s/shard_id.h"
+#include "mongo/s/sharding_router_test_fixture.h"
+#include "mongo/s/stale_exception.h"
+#include "mongo/util/assert_util.h"
 
-#include "mongo/unittest/unittest.h"
-#include "mongo/util/processinfo.h"
+namespace mongo {
 
-using boost::optional;
-using mongo::ProcessInfo;
+namespace {
 
-namespace mongo_test {
-TEST(ProcessInfo, SysInfoIsInitialized) {
-    ProcessInfo processInfo;
-    if (processInfo.supported()) {
-        ASSERT_FALSE(processInfo.getOsType().empty());
-    }
+using StaleExceptionTest = ShardingTestFixture;
+
+const NamespaceString kNss("test.nss");
+
+TEST_F(StaleExceptionTest, StaleConfigInfoSerializationTest) {
+    const ShardId kShardId("SHARD_ID");
+
+    StaleConfigInfo info(kNss, ChunkVersion::UNSHARDED(), ChunkVersion::UNSHARDED(), kShardId);
+
+    // Serialize
+    BSONObjBuilder bob;
+    info.serialize(&bob);
+
+    // Deserialize
+    auto deserializedInfo = StaleConfigInfo::parseFromCommandError(bob.obj());
+
+    ASSERT_EQUALS(deserializedInfo.getNss(), kNss);
+    ASSERT_EQUALS(deserializedInfo.getVersionReceived(), ChunkVersion::UNSHARDED());
+    ASSERT_EQUALS(*deserializedInfo.getVersionWanted(), ChunkVersion::UNSHARDED());
+    ASSERT_EQUALS(deserializedInfo.getShardId(), kShardId);
 }
 
-TEST(ProcessInfo, GetNumAvailableCores) {
-#if defined(__APPLE__) || defined(__linux__) || (defined(__sun) && defined(__SVR4)) || \
-    defined(_WIN32)
-    unsigned long numAvailCores = ProcessInfo::getNumAvailableCores();
-    ASSERT_GREATER_THAN(numAvailCores, 0u);
-    ASSERT_LESS_THAN_OR_EQUALS(numAvailCores, ProcessInfo::getNumCores());
-#endif
+TEST_F(StaleExceptionTest, StaleEpochInfoSerializationTest) {
+    StaleEpochInfo info(kNss);
+
+    // Serialize
+    BSONObjBuilder bob;
+    info.serialize(&bob);
+
+    // Deserialize
+    auto deserializedInfo = StaleEpochInfo::parseFromCommandError(bob.obj());
+
+    ASSERT_EQUALS(deserializedInfo.getNss(), kNss);
 }
 
-TEST(ProcessInfo, GetNumCoresReturnsNonZeroNumberOfProcessors) {
-    ASSERT_GREATER_THAN(ProcessInfo::getNumCores(), 0u);
-}
-}  // namespace mongo_test
+}  // namespace
+}  // namespace mongo

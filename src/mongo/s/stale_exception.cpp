@@ -38,6 +38,7 @@ namespace mongo {
 namespace {
 
 MONGO_INIT_REGISTER_ERROR_EXTRA_INFO(StaleConfigInfo);
+MONGO_INIT_REGISTER_ERROR_EXTRA_INFO(StaleEpochInfo);
 MONGO_INIT_REGISTER_ERROR_EXTRA_INFO(StaleDbRoutingVersion);
 
 }  // namespace
