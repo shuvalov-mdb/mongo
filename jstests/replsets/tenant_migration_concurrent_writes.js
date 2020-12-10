@@ -183,7 +183,7 @@ function runTest(
     testFunc(testCase, testOpts);
 }
 
-function runCommand(testOpts, expectedError) {
+function runCommand(testOpts, expectedError, expectedErrorLabels = []) {
     let res;
 
     if (testOpts.testInTransaction) {
@@ -217,6 +217,11 @@ function runCommand(testOpts, expectedError) {
 
     if (expectedError) {
         assert.commandFailedWithCode(res, expectedError);
+        if (expectedErrorLabels.length > 0) {
+            assert(res["errorLabels"] != null, "Error labels are absent from " + tojson(res));
+            assert.sameMembers(res["errorLabels"], expectedErrorLabels, "Error labels " + tojson(res["errorLabels"]) +
+                " are different from expected " + expectedErrorLabels);
+        }
     } else {
         assert.commandWorked(res);
     }
@@ -243,7 +248,9 @@ function testWriteIsRejectedIfSentAfterMigrationHasCommitted(testCase, testOpts)
     const stateRes = assert.commandWorked(tenantMigrationTest.runMigration(migrationOpts));
     assert.eq(stateRes.state, TenantMigrationTest.State.kCommitted);
 
-    runCommand(testOpts, ErrorCodes.TenantMigrationCommitted);
+    // The 'TransientTransactionError' label is attached only in a scope of a transaction.
+    runCommand(testOpts, ErrorCodes.TenantMigrationCommitted,
+        testOpts.testInTransaction ? [ 'TransientTransactionError' ] : []);
     testCase.assertCommandFailed(testOpts.primaryDB, testOpts.dbName, testOpts.collName);
 }
 

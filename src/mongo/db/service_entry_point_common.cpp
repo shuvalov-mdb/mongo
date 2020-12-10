@@ -529,7 +529,6 @@ void appendErrorLabelsAndTopologyVersion(OperationContext* opCtx,
                                          bool isInternalClient) {
     auto errorLabels =
         getErrorLabels(opCtx, sessionOptions, commandName, code, wcCode, isInternalClient);
-    std::cerr << "!!!! error labels " << errorLabels << std::endl;
     commandBodyFieldsBob->appendElements(errorLabels);
 
     const auto isNotPrimaryError =
