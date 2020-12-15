@@ -46,6 +46,7 @@ namespace mongo {
 
 namespace tenant_migration_donor {
 
+
 /**
  * Returns a TenantMigrationDonorDocument constructed from the given bson doc and validate the
  * resulting doc.
@@ -64,6 +65,8 @@ std::shared_ptr<executor::TaskExecutor> getTenantMigrationDonorExecutor();
  * timestamp, blocks until the migration is committed or aborted.
  */
 void checkIfCanReadOrBlock(OperationContext* opCtx, StringData dbName);
+
+Future<const ConditionHandle> checkWhenCanRead(OperationContext* opCtx, StringData dbName);
 
 /**
  * If the operation has read concern "linearizable", throws TenantMigrationCommitted error if the

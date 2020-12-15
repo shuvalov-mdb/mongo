@@ -52,6 +52,12 @@ const Backoff kExponentialBackoff(Seconds(1), Milliseconds::max());
 
 }  // namespace
 
+void TenantMigrationAccessBlocker::init() {
+    _repeatableConditionNotification = std::make_unique<
+        tenant_migration_donor::RepeatableConditionNotification<TenantMigrationAccessBlocker>>(
+        std::weak_ptr<TenantMigrationAccessBlocker>(shared_from_this()), _mutex);
+}
+
 void TenantMigrationAccessBlocker::checkIfCanWriteOrThrow() {
     stdx::lock_guard<Latch> lg(_mutex);
 
@@ -73,38 +79,43 @@ void TenantMigrationAccessBlocker::checkIfCanWriteOrThrow() {
 }
 
 Status TenantMigrationAccessBlocker::waitUntilCommittedOrAborted(OperationContext* opCtx) {
-    stdx::unique_lock<Latch> ul(_mutex);
+    return Status::OK();
+    // stdx::unique_lock<Latch> ul(_mutex);
 
-    auto canWrite = [&]() { return _state == State::kAllow || _state == State::kAborted; };
+    // auto canWrite = [&]() { return _state == State::kAllow || _state == State::kAborted; };
 
-    if (!canWrite()) {
-        tenantMigrationBlockWrite.shouldFail();
-    }
+    // if (!canWrite()) {
+    //     tenantMigrationBlockWrite.shouldFail();
+    // }
 
-    opCtx->waitForConditionOrInterrupt(
-        _transitionOutOfBlockingCV, ul, [&]() { return canWrite() || _state == State::kReject; });
-    return onCompletion().getNoThrow();
+    // opCtx->waitForConditionOrInterrupt(
+    //     _transitionOutOfBlockingCV, ul, [&]() { return canWrite() || _state == State::kReject;
+    //     });
+    // return onCompletion().getNoThrow();
 }
 
-void TenantMigrationAccessBlocker::checkIfCanDoClusterTimeReadOrBlock(
+Future<tenant_migration_donor::ConditionHandle> TenantMigrationAccessBlocker::checkIfCanDoClusterTimeReadOrBlock(
     OperationContext* opCtx, const Timestamp& readTimestamp) {
-    stdx::unique_lock<Latch> ul(_mutex);
 
-    auto canRead = [&]() {
-        return _state == State::kAllow || _state == State::kAborted ||
-            _state == State::kBlockWrites || readTimestamp < *_blockTimestamp;
-    };
+    auto waitFunction = [this, opCtx, readTimestamp] (stdx::condition_variable& cv, stdx::unique_lock<Latch>& ul) {
+        auto canRead = [&]() {
+            return _state == State::kAllow || _state == State::kAborted ||
+                _state == State::kBlockWrites || readTimestamp < *_blockTimestamp;
+        };
 
-    if (!canRead()) {
-        tenantMigrationBlockRead.shouldFail();
-    }
+        if (!canRead()) {
+            tenantMigrationBlockRead.shouldFail();
+        }
 
-    opCtx->waitForConditionOrInterrupt(
-        _transitionOutOfBlockingCV, ul, [&]() { return canRead() || _state == State::kReject; });
+        opCtx->waitForConditionOrInterrupt(
+            cv, ul, [&]() { return canRead() || _state == State::kReject; });
 
-    uassert(TenantMigrationCommittedInfo(_tenantId, _recipientConnString),
-            "Read must be re-routed to the new owner of this tenant",
-            canRead());
+        uassert(TenantMigrationCommittedInfo(_tenantId, _recipientConnString),
+                "Read must be re-routed to the new owner of this tenant",
+                canRead());
+        };
+
+    return _repeatableConditionNotification->waitForConditionAndThen(waitFunction, []{});
 }
 
 void TenantMigrationAccessBlocker::checkIfLinearizableReadWasAllowedOrThrow(

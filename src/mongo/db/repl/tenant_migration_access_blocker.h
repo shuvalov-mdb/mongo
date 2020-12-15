@@ -38,6 +38,97 @@
 
 namespace mongo {
 
+namespace tenant_migration_donor {
+
+class ConditionHandle {
+public:
+    virtual ~ConditionHandle() = default;
+
+    virtual void waitForConditionAndThen(std::function<void()> callback) const = 0;
+};
+
+class DummyConditionHandle : public ConditionHandle {
+public:
+    ~DummyConditionHandle() override = default;
+
+    void waitForConditionAndThen(std::function<void()> callback) const override {
+        callback();
+    }
+};
+
+template <typename ConditionOwner>
+class RepeatableConditionNotification;
+
+template <typename ConditionOwner>
+class ConditionHandleImpl : public ConditionHandle {
+public:
+    ConditionHandleImpl(
+        std::weak_ptr<const ConditionOwner> conditionOwner,
+        const RepeatableConditionNotification<ConditionOwner>& conditionNotification,
+        std::function<void(stdx::condition_variable&, stdx::unique_lock<Latch>&)> waitImplementation)
+        : _conditionOwner(conditionOwner),
+          _conditionNotification(conditionNotification),
+          _waitImplementation(waitImplementation) {}
+    ~ConditionHandleImpl() override = default;
+
+    void waitForConditionAndThen(std::function<void()> callback) const override;
+
+private:
+    std::weak_ptr<const ConditionOwner> _conditionOwner;
+    const RepeatableConditionNotification<ConditionOwner>& _conditionNotification;
+    const std::function<void(stdx::condition_variable&, stdx::unique_lock<Latch>&)> _waitImplementation;
+};
+
+template <typename ConditionOwner>
+class RepeatableConditionNotification {
+public:
+    RepeatableConditionNotification(std::weak_ptr<const ConditionOwner> conditionOwner,
+                                    const Mutex& mutex)
+        : _conditionOwner(conditionOwner),
+          _mutex(mutex),
+          _sharedPromise(std::make_unique<SharedPromise<ConditionHandleImpl<ConditionOwner>>>()) {}
+
+    void waitForConditionAndThen(
+        const std::function<void(stdx::condition_variable&, stdx::unique_lock<Latch>&)>& waitImplementation,
+        std::function<void()> callback) const {
+        auto lock = _conditionOwner.lock();
+        if (!lock)
+            return;  // The `_mutex` owner is destroyed.
+        stdx::unique_lock<Latch> ul(_mutex);
+        waitImplementation(_conditionVariable);
+        callback();  // Callback is executed under lock while the condition is still true.
+    }
+
+    SharedSemiFuture<std::shared_ptr<const ConditionHandle>> getFuture() const {
+        stdx::unique_lock<Latch> ul(_mutex);
+        return _sharedPromise->getFuture();
+    }
+
+    void notifyAll(StatusOrStatusWith<ConditionHandle> sosw) noexcept {
+        stdx::unique_lock<Latch> ul(_mutex);
+        _sharedPromise.get()->setFrom(std::move(sosw));
+        // Promise can be set only once, replace it with a new one.
+        _sharedPromise = std::make_unique<SharedPromise<ConditionHandle>>();
+    }
+
+private:
+    std::weak_ptr<const ConditionOwner> _conditionOwner;
+    const Mutex& _mutex;
+    std::unique_ptr<SharedPromise<std::shared_ptr<const ConditionHandle>>> _sharedPromise;
+    stdx::condition_variable _conditionVariable;
+};
+
+template <typename ConditionOwner>
+void ConditionHandleImpl<ConditionOwner>::waitForConditionAndThen(
+    std::function<void()> callback) const {
+    auto lock = _conditionOwner.lock();
+    if (!lock)
+        return;  // The `_conditionNotification` owner is destroyed.
+    _conditionNotification.waitForConditionAndThen(_waitImplementation, callback);
+}
+
+}  // namespace tenant_migration_donor
+
 /**
  * The TenantMigrationAccessBlocker is used to block and eventually reject reads and writes to a
  * database while the Atlas Serverless tenant that owns the database is being migrated from this
@@ -128,6 +219,8 @@ public:
           _tenantId(std::move(tenantId)),
           _recipientConnString(std::move(recipientConnString)) {}
 
+    void init();
+
     //
     // Called by all writes and reads against the database.
     //
@@ -136,8 +229,8 @@ public:
     Status waitUntilCommittedOrAborted(OperationContext* opCtx);
 
     void checkIfLinearizableReadWasAllowedOrThrow(OperationContext* opCtx);
-    void checkIfCanDoClusterTimeReadOrBlock(OperationContext* opCtx,
-                                            const Timestamp& readTimestamp);
+    Future<tenant_migration_donor::ConditionHandle> checkIfCanDoClusterTimeReadOrBlock(
+        OperationContext* opCtx, const Timestamp& readTimestamp);
 
     //
     // Called while donating this database.
@@ -181,8 +274,9 @@ private:
     bool _inShutdown{false};
     OperationContext* _waitForCommitOrAbortToMajorityCommitOpCtx{nullptr};
 
-    stdx::condition_variable _transitionOutOfBlockingCV;
-    SharedPromise<void> _completionPromise;
+    std::unique_ptr<
+        tenant_migration_donor::RepeatableConditionNotification<TenantMigrationAccessBlocker>>
+        _repeatableConditionNotification;
 };
 
 }  // namespace mongo

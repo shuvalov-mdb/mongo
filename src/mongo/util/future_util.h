@@ -541,4 +541,27 @@ SemiFuture<Result> whenAny(std::vector<FutureT>&& futures) {
 
     return std::move(future).semi();
 }
+
+template <typename Result>
+class RepeatableNotification {
+public:
+    RepeatableNotification() : _sharedPromise(std::make_unique<SharedPromise<Result>>()) {}
+
+    SharedSemiFuture<Result> getFuture() const {
+        stdx::unique_lock<Latch> ul(_mutex);
+        return _sharedPromise->getFuture();
+    }
+
+    void notifyAll(StatusOrStatusWith<Result> sosw) noexcept {
+        stdx::unique_lock<Latch> ul(_mutex);
+        _sharedPromise->SetFrom(std::move(sosw));
+        // Promise can be set only once, replace it with a new one.
+        _sharedPromise = std::make_unique<SharedPromise<Result>>();
+    }
+
+private:
+    mutable Mutex _mutex = MONGO_MAKE_LATCH("RepeatableNotification::_mutex");
+    std::unique_ptr<SharedPromise<Result>> _sharedPromise;
+};
+
 }  // namespace mongo

@@ -52,14 +52,11 @@ void onTransitionToDataSync(OperationContext* opCtx,
                             const TenantMigrationDonorDocument& donorStateDoc) {
     invariant(donorStateDoc.getState() == TenantMigrationDonorStateEnum::kDataSync);
 
-    auto mtab = std::make_shared<TenantMigrationAccessBlocker>(
-        opCtx->getServiceContext(),
-        tenant_migration_donor::getTenantMigrationDonorExecutor(),
-        donorStateDoc.getTenantId().toString(),
-        donorStateDoc.getRecipientConnectionString().toString());
-
     TenantMigrationAccessBlockerRegistry::get(opCtx->getServiceContext())
-        .add(donorStateDoc.getTenantId(), mtab);
+        .add(opCtx->getServiceContext(),
+             tenant_migration_donor::getTenantMigrationDonorExecutor(),
+             donorStateDoc.getTenantId().toString(),
+             donorStateDoc.getRecipientConnectionString().toString());
 
     if (opCtx->writesAreReplicated()) {
         // onRollback is not registered on secondaries since secondaries should not fail to apply
