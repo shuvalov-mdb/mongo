@@ -32,6 +32,7 @@
 #include "mongo/platform/basic.h"
 
 #include "mongo/db/client.h"
+#include "mongo/db/repl/read_concern_args.h"
 #include "mongo/db/repl/replication_coordinator.h"
 #include "mongo/db/repl/tenant_migration_access_blocker.h"
 #include "mongo/db/repl/tenant_migration_committed_info.h"
@@ -56,6 +57,12 @@ void TenantMigrationAccessBlocker::init() {
     _repeatableConditionNotification = std::make_unique<
         tenant_migration_donor::RepeatableConditionNotification<TenantMigrationAccessBlocker>>(
         std::weak_ptr<TenantMigrationAccessBlocker>(shared_from_this()), _mutex);
+
+    _canReadOrRejectedFn = [this] (Timestamp opCtxTimestamp) -> bool {
+        return _state == State::kAllow || _state == State::kAborted ||
+                _state == State::kBlockWrites || opCtxTimestamp < *_blockTimestamp ||
+                _state == State::kReject;
+        };
 }
 
 void TenantMigrationAccessBlocker::checkIfCanWriteOrThrow() {
@@ -78,6 +85,11 @@ void TenantMigrationAccessBlocker::checkIfCanWriteOrThrow() {
     }
 }
 
+Future<tenant_migration_donor::ConditionHandle<TenantMigrationAccessBlocker>>
+TenantMigrationAccessBlocker::getTransitionOutOfBlockingFuture() {
+
+}
+
 Status TenantMigrationAccessBlocker::waitUntilCommittedOrAborted(OperationContext* opCtx) {
     return Status::OK();
     // stdx::unique_lock<Latch> ul(_mutex);
@@ -94,28 +106,46 @@ Status TenantMigrationAccessBlocker::waitUntilCommittedOrAborted(OperationContex
     // return onCompletion().getNoThrow();
 }
 
-Future<tenant_migration_donor::ConditionHandle> TenantMigrationAccessBlocker::checkIfCanDoClusterTimeReadOrBlock(
-    OperationContext* opCtx, const Timestamp& readTimestamp) {
+Future<tenant_migration_donor::ConditionHandle<TenantMigrationAccessBlocker>>
+TenantMigrationAccessBlocker::checkIfCanDoClusterTimeReadOrBlock(OperationContext* opCtx,
+                                                                 const Timestamp& readTimestamp) {
 
-    auto waitFunction = [this, opCtx, readTimestamp] (stdx::condition_variable& cv, stdx::unique_lock<Latch>& ul) {
-        auto canRead = [&]() {
-            return _state == State::kAllow || _state == State::kAborted ||
-                _state == State::kBlockWrites || readTimestamp < *_blockTimestamp;
-        };
+    auto canRead = [this, opCtx, readTimestamp]() {
+        return _state == State::kAllow || _state == State::kAborted ||
+            _state == State::kBlockWrites || readTimestamp < *_blockTimestamp;
+    };
 
-        if (!canRead()) {
-            tenantMigrationBlockRead.shouldFail();
+    auto readConcernArgs = repl::ReadConcernArgs::get(opCtx);
+    auto targetTimestamp = [&]() -> boost::optional<Timestamp> {
+        if (auto afterClusterTime = readConcernArgs.getArgsAfterClusterTime()) {
+            return afterClusterTime->asTimestamp();
         }
+        if (auto atClusterTime = readConcernArgs.getArgsAtClusterTime()) {
+            return atClusterTime->asTimestamp();
+        }
+        if (readConcernArgs.getLevel() == repl::ReadConcernLevel::kSnapshotReadConcern) {
+            return repl::StorageInterface::get(opCtx)->getPointInTimeReadTimestamp(opCtx);
+        }
+        return boost::none;
+    }();
 
-        opCtx->waitForConditionOrInterrupt(
-            cv, ul, [&]() { return canRead() || _state == State::kReject; });
+    if (!targetTimestamp) {
 
-        uassert(TenantMigrationCommittedInfo(_tenantId, _recipientConnString),
-                "Read must be re-routed to the new owner of this tenant",
-                canRead());
-        };
+    }
 
-    return _repeatableConditionNotification->waitForConditionAndThen(waitFunction, []{});
+    stdx::unique_lock<Latch> ul(_mutex);
+    if (!canRead()) {
+        tenantMigrationBlockRead.shouldFail();
+    }
+
+    opCtx->waitForConditionOrInterrupt(
+        _repeatableConditionNotification->cv(), ul, [this, &canRead]() { return canRead() || _state == State::kReject; });
+
+    uassert(TenantMigrationCommittedInfo(_tenantId, _recipientConnString),
+            "Read must be re-routed to the new owner of this tenant",
+            canRead());
+
+    return _repeatableConditionNotification->waitForConditionAndThen(waitFunction, [] {});
 }
 
 void TenantMigrationAccessBlocker::checkIfLinearizableReadWasAllowedOrThrow(

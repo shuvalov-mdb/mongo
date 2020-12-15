@@ -136,46 +136,18 @@ void checkIfCanReadOrBlock(OperationContext* opCtx, StringData dbName) {
         return;
     }
 
-    auto readConcernArgs = repl::ReadConcernArgs::get(opCtx);
-    auto targetTimestamp = [&]() -> boost::optional<Timestamp> {
-        if (auto afterClusterTime = readConcernArgs.getArgsAfterClusterTime()) {
-            return afterClusterTime->asTimestamp();
-        }
-        if (auto atClusterTime = readConcernArgs.getArgsAtClusterTime()) {
-            return atClusterTime->asTimestamp();
-        }
-        if (readConcernArgs.getLevel() == repl::ReadConcernLevel::kSnapshotReadConcern) {
-            return repl::StorageInterface::get(opCtx)->getPointInTimeReadTimestamp(opCtx);
-        }
-        return boost::none;
-    }();
-
     if (targetTimestamp) {
         mtab->checkIfCanDoClusterTimeReadOrBlock(opCtx, targetTimestamp.get());
     }
 }
 
-Future<const ConditionHandle> checkWhenCanRead(OperationContext* opCtx, StringData dbName) {
+Future<void> checkWhenCanRead(OperationContext* opCtx, StringData dbName) {
     auto mtab = TenantMigrationAccessBlockerRegistry::get(opCtx->getServiceContext())
                     .getTenantMigrationAccessBlockerForDbName(dbName);
 
     if (!mtab) {
         return makeReadyFutureWith([] {});
     }
-
-    auto readConcernArgs = repl::ReadConcernArgs::get(opCtx);
-    auto targetTimestamp = [&]() -> boost::optional<Timestamp> {
-        if (auto afterClusterTime = readConcernArgs.getArgsAfterClusterTime()) {
-            return afterClusterTime->asTimestamp();
-        }
-        if (auto atClusterTime = readConcernArgs.getArgsAtClusterTime()) {
-            return atClusterTime->asTimestamp();
-        }
-        if (readConcernArgs.getLevel() == repl::ReadConcernLevel::kSnapshotReadConcern) {
-            return repl::StorageInterface::get(opCtx)->getPointInTimeReadTimestamp(opCtx);
-        }
-        return boost::none;
-    }();
 
     if (targetTimestamp) {
         mtab->checkIfCanDoClusterTimeReadOrBlock(opCtx, targetTimestamp.get());

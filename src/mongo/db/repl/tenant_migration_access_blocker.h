@@ -40,92 +40,51 @@ namespace mongo {
 
 namespace tenant_migration_donor {
 
+template <typename ConditionSource>
 class ConditionHandle {
 public:
-    virtual ~ConditionHandle() = default;
+    ConditionHandle(std::weak_ptr<const ConditionSource> conditionSource)
+        : _conditionSource(conditionSource) {}
+    ~ConditionHandle() = default;
 
-    virtual void waitForConditionAndThen(std::function<void()> callback) const = 0;
-};
-
-class DummyConditionHandle : public ConditionHandle {
-public:
-    ~DummyConditionHandle() override = default;
-
-    void waitForConditionAndThen(std::function<void()> callback) const override {
-        callback();
+    std::shared_ptr<const ConditionSource> lockConditionSource() const {
+        return _conditionSource.lock();
     }
-};
-
-template <typename ConditionOwner>
-class RepeatableConditionNotification;
-
-template <typename ConditionOwner>
-class ConditionHandleImpl : public ConditionHandle {
-public:
-    ConditionHandleImpl(
-        std::weak_ptr<const ConditionOwner> conditionOwner,
-        const RepeatableConditionNotification<ConditionOwner>& conditionNotification,
-        std::function<void(stdx::condition_variable&, stdx::unique_lock<Latch>&)> waitImplementation)
-        : _conditionOwner(conditionOwner),
-          _conditionNotification(conditionNotification),
-          _waitImplementation(waitImplementation) {}
-    ~ConditionHandleImpl() override = default;
-
-    void waitForConditionAndThen(std::function<void()> callback) const override;
 
 private:
-    std::weak_ptr<const ConditionOwner> _conditionOwner;
-    const RepeatableConditionNotification<ConditionOwner>& _conditionNotification;
-    const std::function<void(stdx::condition_variable&, stdx::unique_lock<Latch>&)> _waitImplementation;
+    std::weak_ptr<const ConditionSource> _conditionSource;
 };
 
-template <typename ConditionOwner>
+template <typename ConditionSource>
 class RepeatableConditionNotification {
 public:
-    RepeatableConditionNotification(std::weak_ptr<const ConditionOwner> conditionOwner,
+    RepeatableConditionNotification(std::weak_ptr<const ConditionSource> conditionSource,
                                     const Mutex& mutex)
-        : _conditionOwner(conditionOwner),
+        : _conditionSource(conditionSource),
           _mutex(mutex),
-          _sharedPromise(std::make_unique<SharedPromise<ConditionHandleImpl<ConditionOwner>>>()) {}
+          _sharedPromise(std::make_unique<SharedPromise<ConditionHandle<ConditionSource>>>()) {}
 
-    void waitForConditionAndThen(
-        const std::function<void(stdx::condition_variable&, stdx::unique_lock<Latch>&)>& waitImplementation,
-        std::function<void()> callback) const {
-        auto lock = _conditionOwner.lock();
-        if (!lock)
-            return;  // The `_mutex` owner is destroyed.
-        stdx::unique_lock<Latch> ul(_mutex);
-        waitImplementation(_conditionVariable);
-        callback();  // Callback is executed under lock while the condition is still true.
-    }
+    stdx::condition_variable& cv() { return _conditionVariable; }
 
-    SharedSemiFuture<std::shared_ptr<const ConditionHandle>> getFuture() const {
+    SharedSemiFuture<ConditionHandle<ConditionSource>> getFuture() const {
         stdx::unique_lock<Latch> ul(_mutex);
         return _sharedPromise->getFuture();
     }
 
-    void notifyAll(StatusOrStatusWith<ConditionHandle> sosw) noexcept {
+    void notifyAll(StatusOrStatusWith<ConditionHandle<ConditionSource>> sosw) noexcept {
         stdx::unique_lock<Latch> ul(_mutex);
         _sharedPromise.get()->setFrom(std::move(sosw));
+        _conditionVariable.notify_all();
         // Promise can be set only once, replace it with a new one.
-        _sharedPromise = std::make_unique<SharedPromise<ConditionHandle>>();
+        _sharedPromise = std::make_unique<SharedPromise<ConditionHandle<ConditionSource>>>();
     }
 
 private:
-    std::weak_ptr<const ConditionOwner> _conditionOwner;
+    std::weak_ptr<const ConditionSource> _conditionSource;
     const Mutex& _mutex;
-    std::unique_ptr<SharedPromise<std::shared_ptr<const ConditionHandle>>> _sharedPromise;
+    std::unique_ptr<SharedPromise<const ConditionHandle<ConditionSource>>> _sharedPromise;
     stdx::condition_variable _conditionVariable;
 };
-
-template <typename ConditionOwner>
-void ConditionHandleImpl<ConditionOwner>::waitForConditionAndThen(
-    std::function<void()> callback) const {
-    auto lock = _conditionOwner.lock();
-    if (!lock)
-        return;  // The `_conditionNotification` owner is destroyed.
-    _conditionNotification.waitForConditionAndThen(_waitImplementation, callback);
-}
 
 }  // namespace tenant_migration_donor
 
@@ -228,8 +187,11 @@ public:
     void checkIfCanWriteOrThrow();
     Status waitUntilCommittedOrAborted(OperationContext* opCtx);
 
+    Future<tenant_migration_donor::ConditionHandle<TenantMigrationAccessBlocker>>
+    getTransitionOutOfBlockingFuture();
+
     void checkIfLinearizableReadWasAllowedOrThrow(OperationContext* opCtx);
-    Future<tenant_migration_donor::ConditionHandle> checkIfCanDoClusterTimeReadOrBlock(
+    Future<tenant_migration_donor::ConditionHandle<TenantMigrationAccessBlocker>> checkIfCanDoClusterTimeReadOrBlock(
         OperationContext* opCtx, const Timestamp& readTimestamp);
 
     //
@@ -257,6 +219,11 @@ public:
 
 private:
     ExecutorFuture<void> _waitForOpTimeToMajorityCommit(repl::OpTime opTime);
+
+    // 'const' function to be reused to calculate the 'can read or reject state', defined once
+    // in constructor.
+    // Requires the '_mutex' to be locked when invoked.
+    std::function<bool(Timestamp opCtxTimestamp)> _canReadOrRejectedFn;
 
     ServiceContext* _serviceContext;
     std::shared_ptr<executor::TaskExecutor> _executor;

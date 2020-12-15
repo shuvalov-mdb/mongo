@@ -66,7 +66,7 @@ std::shared_ptr<executor::TaskExecutor> getTenantMigrationDonorExecutor();
  */
 void checkIfCanReadOrBlock(OperationContext* opCtx, StringData dbName);
 
-Future<const ConditionHandle> checkWhenCanRead(OperationContext* opCtx, StringData dbName);
+Future<void> checkWhenCanRead(OperationContext* opCtx, StringData dbName);
 
 /**
  * If the operation has read concern "linearizable", throws TenantMigrationCommitted error if the
