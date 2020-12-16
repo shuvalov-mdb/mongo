@@ -136,9 +136,9 @@ void checkIfCanReadOrBlock(OperationContext* opCtx, StringData dbName) {
         return;
     }
 
-    if (targetTimestamp) {
-        mtab->checkIfCanDoClusterTimeReadOrBlock(opCtx, targetTimestamp.get());
-    }
+    // if (targetTimestamp) {
+    //     mtab->checkIfCanDoClusterTimeReadOrBlock(opCtx, targetTimestamp.get());
+    // }
 }
 
 Future<void> checkWhenCanRead(OperationContext* opCtx, StringData dbName) {
@@ -149,9 +149,9 @@ Future<void> checkWhenCanRead(OperationContext* opCtx, StringData dbName) {
         return makeReadyFutureWith([] {});
     }
 
-    if (targetTimestamp) {
-        mtab->checkIfCanDoClusterTimeReadOrBlock(opCtx, targetTimestamp.get());
-    }
+    // if (targetTimestamp) {
+    //     mtab->checkIfCanDoClusterTimeReadOrBlock(opCtx, targetTimestamp.get());
+    // }
     return makeReadyFutureWith([] {});  // tmp
 }
 
@@ -193,7 +193,10 @@ void recoverTenantMigrationAccessBlockers(OperationContext* opCtx) {
             doc.getRecipientConnectionString().toString());
 
         TenantMigrationAccessBlockerRegistry::get(opCtx->getServiceContext())
-            .add(doc.getTenantId(), mtab);
+            .add(opCtx->getServiceContext(),
+                 getTenantMigrationDonorExecutor(),
+                 doc.getTenantId(),
+                 doc.getRecipientConnectionString().toString());
 
         switch (doc.getState()) {
             case TenantMigrationDonorStateEnum::kDataSync:

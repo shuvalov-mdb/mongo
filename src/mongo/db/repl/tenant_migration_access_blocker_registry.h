@@ -48,10 +48,11 @@ public:
      * Adds an entry for (tenantId, mtab). Throws ConflictingOperationInProgress if an entry for
      * tenantId already exists.
      */
-    void add(ServiceContext* serviceContext,
-             std::shared_ptr<executor::TaskExecutor> executor,
-             StringData tenantId,
-             std::string recipientConnString);
+    std::shared_ptr<TenantMigrationAccessBlocker> add(
+        ServiceContext* serviceContext,
+        std::shared_ptr<executor::TaskExecutor> executor,
+        StringData tenantId,
+        std::string recipientConnString);
 
     /**
      * Invariants that an entry for tenantId exists, and then removes the entry for (tenantId, mtab)

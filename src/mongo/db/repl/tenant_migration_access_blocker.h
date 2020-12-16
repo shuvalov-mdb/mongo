@@ -64,7 +64,9 @@ public:
           _mutex(mutex),
           _sharedPromise(std::make_unique<SharedPromise<ConditionHandle<ConditionSource>>>()) {}
 
-    stdx::condition_variable& cv() { return _conditionVariable; }
+    stdx::condition_variable& cv() {
+        return _conditionVariable;
+    }
 
     SharedSemiFuture<ConditionHandle<ConditionSource>> getFuture() const {
         stdx::unique_lock<Latch> ul(_mutex);
@@ -187,12 +189,13 @@ public:
     void checkIfCanWriteOrThrow();
     Status waitUntilCommittedOrAborted(OperationContext* opCtx);
 
-    Future<tenant_migration_donor::ConditionHandle<TenantMigrationAccessBlocker>>
-    getTransitionOutOfBlockingFuture();
-
     void checkIfLinearizableReadWasAllowedOrThrow(OperationContext* opCtx);
-    Future<tenant_migration_donor::ConditionHandle<TenantMigrationAccessBlocker>> checkIfCanDoClusterTimeReadOrBlock(
-        OperationContext* opCtx, const Timestamp& readTimestamp);
+
+    SharedSemiFuture<tenant_migration_donor::ConditionHandle<TenantMigrationAccessBlocker>>
+    getTransitionOutOfBlockingForClusterTimeRead(OperationContext* opCtx);
+
+    SharedSemiFuture<tenant_migration_donor::ConditionHandle<TenantMigrationAccessBlocker>>
+    checkIfCanDoClusterTimeReadOrBlock(OperationContext* opCtx, const Timestamp& readTimestamp);
 
     //
     // Called while donating this database.
@@ -224,6 +227,9 @@ private:
     // in constructor.
     // Requires the '_mutex' to be locked when invoked.
     std::function<bool(Timestamp opCtxTimestamp)> _canReadOrRejectedFn;
+
+    // Calculate the target timestamp for read operation.
+    std::optional<Timestamp> _targetTimestampForRead(OperationContext* opCtx);
 
     ServiceContext* _serviceContext;
     std::shared_ptr<executor::TaskExecutor> _executor;

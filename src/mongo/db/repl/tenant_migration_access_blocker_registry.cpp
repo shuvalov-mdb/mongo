@@ -36,10 +36,11 @@ const ServiceContext::Decoration<TenantMigrationAccessBlockerRegistry>
     TenantMigrationAccessBlockerRegistry::get =
         ServiceContext::declareDecoration<TenantMigrationAccessBlockerRegistry>();
 
-void TenantMigrationAccessBlockerRegistry::add(ServiceContext* serviceContext,
-                                               std::shared_ptr<executor::TaskExecutor> executor,
-                                               StringData tenantId,
-                                               std::string recipientConnString) {
+std::shared_ptr<TenantMigrationAccessBlocker> TenantMigrationAccessBlockerRegistry::add(
+    ServiceContext* serviceContext,
+    std::shared_ptr<executor::TaskExecutor> executor,
+    StringData tenantId,
+    std::string recipientConnString) {
     stdx::lock_guard<Latch> lg(_mutex);
 
     auto mtab = std::make_shared<TenantMigrationAccessBlocker>(
@@ -58,6 +59,7 @@ void TenantMigrationAccessBlockerRegistry::add(ServiceContext* serviceContext,
     }
 
     _tenantMigrationAccessBlockers.emplace(tenantId, mtab);
+    return mtab;
 }
 
 void TenantMigrationAccessBlockerRegistry::remove(StringData tenantId) {
