@@ -64,9 +64,10 @@ std::shared_ptr<executor::TaskExecutor> getTenantMigrationDonorExecutor();
  * in the read blocking state at the given atClusterTime or afterClusterTime or the selected read
  * timestamp, blocks until the migration is committed or aborted.
  */
-void checkIfCanReadOrBlock(OperationContext* opCtx, StringData dbName);
+// void checkIfCanReadOrBlock(OperationContext* opCtx, StringData dbName);
 
-Future<void> checkWhenCanRead(OperationContext* opCtx, StringData dbName);
+SharedSemiFuture<tenant_migration_donor::ConditionHandle<TenantMigrationAccessBlocker>>
+transitionOutOfBlocking(OperationContext* opCtx, StringData dbName);
 
 /**
  * If the operation has read concern "linearizable", throws TenantMigrationCommitted error if the

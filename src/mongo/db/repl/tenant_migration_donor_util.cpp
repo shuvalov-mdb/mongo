@@ -128,31 +128,31 @@ std::shared_ptr<executor::TaskExecutor> getTenantMigrationDonorExecutor() {
     return executor;
 }
 
-void checkIfCanReadOrBlock(OperationContext* opCtx, StringData dbName) {
+// void checkIfCanReadOrBlock(OperationContext* opCtx, StringData dbName) {
+//     auto mtab = TenantMigrationAccessBlockerRegistry::get(opCtx->getServiceContext())
+//                     .getTenantMigrationAccessBlockerForDbName(dbName);
+
+//     if (!mtab) {
+//         return;
+//     }
+
+//     // if (targetTimestamp) {
+//     //     mtab->checkIfCanDoClusterTimeReadOrBlock(opCtx, targetTimestamp.get());
+//     // }
+// }
+
+SharedSemiFuture<tenant_migration_donor::ConditionHandle<TenantMigrationAccessBlocker>>
+transitionOutOfBlocking(OperationContext* opCtx, StringData dbName) {
     auto mtab = TenantMigrationAccessBlockerRegistry::get(opCtx->getServiceContext())
                     .getTenantMigrationAccessBlockerForDbName(dbName);
-
     if (!mtab) {
-        return;
+        // Return a ready future with null pointer, indicating that any further
+        // condition check is not necessary.
+        return SharedSemiFuture(ConditionHandle<TenantMigrationAccessBlocker>{
+            std::weak_ptr<TenantMigrationAccessBlocker>{}});
     }
 
-    // if (targetTimestamp) {
-    //     mtab->checkIfCanDoClusterTimeReadOrBlock(opCtx, targetTimestamp.get());
-    // }
-}
-
-Future<void> checkWhenCanRead(OperationContext* opCtx, StringData dbName) {
-    auto mtab = TenantMigrationAccessBlockerRegistry::get(opCtx->getServiceContext())
-                    .getTenantMigrationAccessBlockerForDbName(dbName);
-
-    if (!mtab) {
-        return makeReadyFutureWith([] {});
-    }
-
-    // if (targetTimestamp) {
-    //     mtab->checkIfCanDoClusterTimeReadOrBlock(opCtx, targetTimestamp.get());
-    // }
-    return makeReadyFutureWith([] {});  // tmp
+    return mtab->getTransitionOutOfBlockingForClusterTimeRead(opCtx);
 }
 
 void checkIfLinearizableReadWasAllowedOrThrow(OperationContext* opCtx, StringData dbName) {

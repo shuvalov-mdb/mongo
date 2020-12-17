@@ -59,7 +59,7 @@ template <typename ConditionSource>
 class RepeatableConditionNotification {
 public:
     RepeatableConditionNotification(std::weak_ptr<const ConditionSource> conditionSource,
-                                    const Mutex& mutex)
+                                    Mutex& mutex)
         : _conditionSource(conditionSource),
           _mutex(mutex),
           _sharedPromise(std::make_unique<SharedPromise<ConditionHandle<ConditionSource>>>()) {}
@@ -68,7 +68,7 @@ public:
         return _conditionVariable;
     }
 
-    SharedSemiFuture<ConditionHandle<ConditionSource>> getFuture() const {
+    SharedSemiFuture<ConditionHandle<ConditionSource>> getFuture() {
         stdx::unique_lock<Latch> ul(_mutex);
         return _sharedPromise->getFuture();
     }
@@ -83,8 +83,8 @@ public:
 
 private:
     std::weak_ptr<const ConditionSource> _conditionSource;
-    const Mutex& _mutex;
-    std::unique_ptr<SharedPromise<const ConditionHandle<ConditionSource>>> _sharedPromise;
+    Mutex& _mutex;
+    std::unique_ptr<SharedPromise<ConditionHandle<ConditionSource>>> _sharedPromise;
     stdx::condition_variable _conditionVariable;
 };
 
@@ -194,8 +194,7 @@ public:
     SharedSemiFuture<tenant_migration_donor::ConditionHandle<TenantMigrationAccessBlocker>>
     getTransitionOutOfBlockingForClusterTimeRead(OperationContext* opCtx);
 
-    SharedSemiFuture<tenant_migration_donor::ConditionHandle<TenantMigrationAccessBlocker>>
-    checkIfCanDoClusterTimeReadOrBlock(OperationContext* opCtx, const Timestamp& readTimestamp);
+    void checkIfCanDoClusterTimeReadOrBlock(OperationContext* opCtx) const;
 
     //
     // Called while donating this database.
@@ -229,7 +228,7 @@ private:
     std::function<bool(Timestamp opCtxTimestamp)> _canReadOrRejectedFn;
 
     // Calculate the target timestamp for read operation.
-    std::optional<Timestamp> _targetTimestampForRead(OperationContext* opCtx);
+    static std::optional<Timestamp> _targetTimestampForRead(OperationContext* opCtx);
 
     ServiceContext* _serviceContext;
     std::shared_ptr<executor::TaskExecutor> _executor;
@@ -246,6 +245,8 @@ private:
 
     bool _inShutdown{false};
     OperationContext* _waitForCommitOrAbortToMajorityCommitOpCtx{nullptr};
+
+    SharedPromise<void> _completionPromise;
 
     std::unique_ptr<
         tenant_migration_donor::RepeatableConditionNotification<TenantMigrationAccessBlocker>>

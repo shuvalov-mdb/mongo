@@ -55,11 +55,12 @@ const Backoff kExponentialBackoff(Seconds(1), Milliseconds::max());
 }  // namespace
 
 using tenant_migration_donor::ConditionHandle;
+using tenant_migration_donor::RepeatableConditionNotification;
 
 void TenantMigrationAccessBlocker::init() {
-    _repeatableConditionNotification = std::make_unique<
-        tenant_migration_donor::RepeatableConditionNotification<TenantMigrationAccessBlocker>>(
-        std::weak_ptr<TenantMigrationAccessBlocker>(shared_from_this()), _mutex);
+    _repeatableConditionNotification =
+        std::make_unique<RepeatableConditionNotification<TenantMigrationAccessBlocker>>(
+            std::weak_ptr<TenantMigrationAccessBlocker>{shared_from_this()}, _mutex);
 
     _canReadOrRejectedFn = [this](Timestamp opCtxTimestamp) -> bool {
         return _state == State::kAllow || _state == State::kAborted ||
@@ -89,79 +90,75 @@ void TenantMigrationAccessBlocker::checkIfCanWriteOrThrow() {
 }
 
 SharedSemiFuture<ConditionHandle<TenantMigrationAccessBlocker>>
-TenantMigrationAccessBlocker::getTransitionOutOfBlockingForClusterTimeRead(OperationContext* opCtx) {
-    auto readConcernArgs = repl::ReadConcernArgs::get(opCtx);
-    auto targetTimestamp = [&readConcernArgs, opCtx]() -> boost::optional<Timestamp> {
-        if (auto afterClusterTime = readConcernArgs.getArgsAfterClusterTime()) {
-            return afterClusterTime->asTimestamp();
-        }
-        if (auto atClusterTime = readConcernArgs.getArgsAtClusterTime()) {
-            return atClusterTime->asTimestamp();
-        }
-        if (readConcernArgs.getLevel() == repl::ReadConcernLevel::kSnapshotReadConcern) {
-            return repl::StorageInterface::get(opCtx)->getPointInTimeReadTimestamp(opCtx);
-        }
-        return boost::none;
-    }();
-
+TenantMigrationAccessBlocker::getTransitionOutOfBlockingForClusterTimeRead(
+    OperationContext* opCtx) {
+    auto targetTimestamp = _targetTimestampForRead(opCtx);
     if (!targetTimestamp) {
-        // Return a ready future.
-        return SharedSemiFuture(
-            tenant_migration_donor::ConditionHandle<TenantMigrationAccessBlocker>(
-                shared_from_this()));
+        // Return a ready future with null pointer, indicating that any further
+        // condition check is not necessary.
+        return SharedSemiFuture(ConditionHandle<TenantMigrationAccessBlocker>{
+            std::weak_ptr<TenantMigrationAccessBlocker>{}});
     }
     stdx::unique_lock<Latch> ul(_mutex);
     if (_canReadOrRejectedFn(*targetTimestamp)) {
-        // Return a ready future.
-        return SharedSemiFuture(
-            tenant_migration_donor::ConditionHandle<TenantMigrationAccessBlocker>(
-                shared_from_this()));
+        // Return a ready future with pointer, so that the condition could be waited for at the
+        // receiving end.
+        return SharedSemiFuture(ConditionHandle<TenantMigrationAccessBlocker>(shared_from_this()));
     }
     return _repeatableConditionNotification->getFuture();
 }
 
-Status TenantMigrationAccessBlocker::waitUntilCommittedOrAborted(OperationContext* opCtx) {
-    return Status::OK();
-    // stdx::unique_lock<Latch> ul(_mutex);
-
-    // auto canWrite = [&]() { return _state == State::kAllow || _state == State::kAborted; };
-
-    // if (!canWrite()) {
-    //     tenantMigrationBlockWrite.shouldFail();
-    // }
-
-    // opCtx->waitForConditionOrInterrupt(
-    //     _transitionOutOfBlockingCV, ul, [&]() { return canWrite() || _state == State::kReject;
-    //     });
-    // return onCompletion().getNoThrow();
+// static
+std::optional<Timestamp> TenantMigrationAccessBlocker::_targetTimestampForRead(
+    OperationContext* opCtx) {
+    auto readConcernArgs = repl::ReadConcernArgs::get(opCtx);
+    if (auto afterClusterTime = readConcernArgs.getArgsAfterClusterTime()) {
+        return afterClusterTime->asTimestamp();
+    }
+    if (auto atClusterTime = readConcernArgs.getArgsAtClusterTime()) {
+        return atClusterTime->asTimestamp();
+    }
+    if (readConcernArgs.getLevel() == repl::ReadConcernLevel::kSnapshotReadConcern) {
+        return repl::StorageInterface::get(opCtx)->getPointInTimeReadTimestamp(opCtx);
+    }
+    return std::nullopt;
 }
 
-SharedSemiFuture<tenant_migration_donor::ConditionHandle<TenantMigrationAccessBlocker>>
-TenantMigrationAccessBlocker::checkIfCanDoClusterTimeReadOrBlock(OperationContext* opCtx,
-                                                                 const Timestamp& readTimestamp) {
-
-    auto canRead = [this, opCtx, readTimestamp]() {
-        return _state == State::kAllow || _state == State::kAborted ||
-            _state == State::kBlockWrites || readTimestamp < *_blockTimestamp;
-    };
-
-    auto readConcernArgs = repl::ReadConcernArgs::get(opCtx);
-
+Status TenantMigrationAccessBlocker::waitUntilCommittedOrAborted(OperationContext* opCtx) {
+    return Status::OK();
     stdx::unique_lock<Latch> ul(_mutex);
-    if (!canRead()) {
+
+    auto canWrite = [&]() { return _state == State::kAllow || _state == State::kAborted; };
+
+    if (!canWrite()) {
+        tenantMigrationBlockWrite.shouldFail();
+    }
+
+    opCtx->waitForConditionOrInterrupt(
+        _repeatableConditionNotification->cv(), ul, [this, &canWrite]() {
+            return canWrite() || _state == State::kReject;
+        });
+    return onCompletion().getNoThrow();
+}
+
+void TenantMigrationAccessBlocker::checkIfCanDoClusterTimeReadOrBlock(
+    OperationContext* opCtx) const {
+    auto targetTimestamp = _targetTimestampForRead(opCtx);
+    invariant(targetTimestamp);  // Verified in getTransitionOutOfBlockingForClusterTimeRead.
+    stdx::unique_lock<Latch> ul(_mutex);
+
+    if (!_canReadOrRejectedFn(*targetTimestamp)) {
         tenantMigrationBlockRead.shouldFail();
     }
 
     opCtx->waitForConditionOrInterrupt(
-        _repeatableConditionNotification->cv(), ul, [this, &canRead]() {
-            return canRead() || _state == State::kReject;
+        _repeatableConditionNotification->cv(), ul, [this, targetTimestamp = *targetTimestamp]() {
+            return _canReadOrRejectedFn(targetTimestamp);
         });
 
     uassert(TenantMigrationCommittedInfo(_tenantId, _recipientConnString),
             "Read must be re-routed to the new owner of this tenant",
-            canRead());
-
-    return _repeatableConditionNotification->waitForConditionAndThen(waitFunction, [] {});
+            _canReadOrRejectedFn(*targetTimestamp));
 }
 
 void TenantMigrationAccessBlocker::checkIfLinearizableReadWasAllowedOrThrow(
@@ -214,7 +211,8 @@ void TenantMigrationAccessBlocker::rollBackStartBlocking() {
 
     _state = State::kAllow;
     _blockTimestamp.reset();
-    _transitionOutOfBlockingCV.notify_all();
+    _repeatableConditionNotification->notifyAll(
+        ConditionHandle<TenantMigrationAccessBlocker>{shared_from_this()});
 }
 
 void TenantMigrationAccessBlocker::commit(repl::OpTime commitOpTime) {
@@ -243,7 +241,8 @@ void TenantMigrationAccessBlocker::commit(repl::OpTime commitOpTime) {
             invariant(!_waitForCommitOrAbortToMajorityCommitOpCtx);
 
             _state = State::kReject;
-            _transitionOutOfBlockingCV.notify_all();
+            _repeatableConditionNotification->notifyAll(
+                ConditionHandle<TenantMigrationAccessBlocker>{shared_from_this()});
             _completionPromise.setError(
                 {ErrorCodes::TenantMigrationCommitted,
                  "Write must be re-routed to the new owner of this tenant",
@@ -280,7 +279,8 @@ void TenantMigrationAccessBlocker::abort(repl::OpTime abortOpTime) {
             invariant(!_waitForCommitOrAbortToMajorityCommitOpCtx);
 
             _state = State::kAborted;
-            _transitionOutOfBlockingCV.notify_all();
+            _repeatableConditionNotification->notifyAll(
+                ConditionHandle<TenantMigrationAccessBlocker>{shared_from_this()});
             _completionPromise.setError(
                 {ErrorCodes::TenantMigrationAborted, "Tenant migration aborted"});
         })

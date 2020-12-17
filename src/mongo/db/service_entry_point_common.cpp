@@ -783,8 +783,19 @@ Future<void> InvokeCommand::run(const bool checkoutSession) {
         return makeReadyFutureWith([] {})
             .then([this, anchor] {
                 auto execContext = _ecd->getExecutionContext();
-                tenant_migration_donor::checkIfCanReadOrBlock(
+                auto unblockedFuture = tenant_migration_donor::transitionOutOfBlocking(
                     execContext->getOpCtx(), execContext->getRequest().getDatabase());
+                if (!unblockedFuture.isReady()) {
+                    unblockedFuture.wait();
+                    auto statusWithAccessBlockerHandle = unblockedFuture.getNoThrow();
+                    if (!statusWithAccessBlockerHandle.isOK()) {
+                        uassertStatusOK(statusWithAccessBlockerHandle.getStatus());
+                    }
+                    auto tenantMigrationAccessBlocker = statusWithAccessBlockerHandle.getValue().lockConditionSource();
+                    if (tenantMigrationAccessBlocker) {
+                        tenantMigrationAccessBlocker->checkIfCanDoClusterTimeReadOrBlock(execContext->getOpCtx());
+                    }
+                }
                 return _runInvocation();
             })
             .onError<ErrorCodes::TenantMigrationConflict>([this, anchor](Status status) {
@@ -804,8 +815,19 @@ Future<void> InvokeCommand::SessionCheckoutPath::run() {
             return makeReadyFutureWith([] {})
                 .then([this, anchor] {
                     auto execContext = _parent->_ecd->getExecutionContext();
-                    tenant_migration_donor::checkIfCanReadOrBlock(
+                    auto unblockedFuture = tenant_migration_donor::transitionOutOfBlocking(
                         execContext->getOpCtx(), execContext->getRequest().getDatabase());
+                    if (!unblockedFuture.isReady()) {
+                        unblockedFuture.wait();
+                        auto statusWithAccessBlockerHandle = unblockedFuture.getNoThrow();
+                        if (!statusWithAccessBlockerHandle.isOK()) {
+                            uassertStatusOK(statusWithAccessBlockerHandle.getStatus());
+                        }
+                        auto tenantMigrationAccessBlocker = statusWithAccessBlockerHandle.getValue().lockConditionSource();
+                        if (tenantMigrationAccessBlocker) {
+                            tenantMigrationAccessBlocker->checkIfCanDoClusterTimeReadOrBlock(execContext->getOpCtx());
+                        }
+                    }
                     return _parent->_runInvocation();
                 })
                 .onError<ErrorCodes::TenantMigrationConflict>([this, anchor](Status status) {
