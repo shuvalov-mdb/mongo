@@ -2,6 +2,7 @@ const mongodb = require("mongodb");
 const processLib = require("process");
 const fs = require("fs");
 const path = require("path");
+const BSON = require('bson');
 import * as assert from "assert";
 import { db_spawner } from "./db_spawner";
 import { MongoClient, Db } from "mongodb";
@@ -108,6 +109,53 @@ namespace postmortem_db {
     ): Promise<JSON> {
       var spawner = new db_spawner.DbSpawner(path, replicaSet + "_" + node);
       await spawner.spawn();
+      await spawner.connect();
+      var dbs: string[] = await spawner.listDbs();
+      for (const db of dbs) {
+        var colls = await spawner.listCollections(db);
+        for (const coll of colls) {
+          var targetCollection = this.incidentDb.collection(coll);
+          await (await spawner.loadData(db, coll)).forEach(
+            function(doc: any) {
+              doc['id'] = doc['_id'];
+              doc['_id'] = doc['_id'] + '_' + replicaSet + '_' + node;
+              doc['replicaSet'] = replicaSet;
+              doc['node'] = node;
+              console.log(doc);
+
+            }
+          );
+        }
+      }
+
+      await this.loadOplogForNode(replicaSet, node, spawner, 'oplog');
+      var shutdownRes = await spawner.shutdown();
+      console.log('Shutdown: ' + JSON.stringify(shutdownRes));
+      return <JSON>{};
+    }
+  
+    async loadOplogForNode(
+      replicaSet: string,
+      node: string,
+      spawner: db_spawner.DbSpawner,
+      targetCollection: string
+    ): Promise<JSON> {
+      var count: number = 1;
+      await (await spawner.loadData('local', 'oplog.rs')).forEach(
+        function(doc: any) {
+          count++;
+          doc['_id'] = replicaSet + '_' + node + '_' + String(count);
+          doc['replicaSet'] = replicaSet;
+          doc['node'] = node;
+          //console.log(doc);
+          if (doc['ui']) {
+            //console.log(doc['ui']['buffer']);
+            //doc['ui_data'] = BSON.deserialize(doc['ui']['buffer']);
+          }
+
+        }
+      )
+
       return <JSON>{};
     }
   }
