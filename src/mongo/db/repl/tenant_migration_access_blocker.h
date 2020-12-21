@@ -133,8 +133,7 @@ public:
     Status waitUntilCommittedOrAborted(OperationContext* opCtx);
 
     void checkIfLinearizableReadWasAllowedOrThrow(OperationContext* opCtx);
-    void checkIfCanDoClusterTimeReadOrBlock(OperationContext* opCtx,
-                                            const Timestamp& readTimestamp);
+    SharedSemiFuture<State> checkIfCanDoClusterTimeRead(OperationContext* opCtx);
 
     //
     // Called while donating this database.

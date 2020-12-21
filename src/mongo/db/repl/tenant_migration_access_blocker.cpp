@@ -32,7 +32,9 @@
 #include "mongo/platform/basic.h"
 
 #include "mongo/db/client.h"
+#include "mongo/db/repl/read_concern_args.h"
 #include "mongo/db/repl/replication_coordinator.h"
+#include "mongo/db/repl/storage_interface.h"
 #include "mongo/db/repl/tenant_migration_access_blocker.h"
 #include "mongo/db/repl/tenant_migration_committed_info.h"
 #include "mongo/db/repl/tenant_migration_conflict_info.h"
@@ -49,6 +51,29 @@ MONGO_FAIL_POINT_DEFINE(tenantMigrationBlockRead);
 MONGO_FAIL_POINT_DEFINE(tenantMigrationBlockWrite);
 
 const Backoff kExponentialBackoff(Seconds(1), Milliseconds::max());
+
+template <typename Payload>
+class RepeatableNotification {
+public:
+    RepeatableNotification()
+        : _sharedPromise(std::make_unique<SharedPromise<const Payload>>()) {}
+
+    SharedSemiFuture<Payload> getFuture() {
+        stdx::unique_lock<Latch> ul(_mutex);
+        return _sharedPromise->getFuture();
+    }
+
+    void notifyAll(StatusOrStatusWith<const Payload> sosw) noexcept {
+        stdx::unique_lock<Latch> ul(_mutex);
+        _sharedPromise.get()->setFrom(std::move(sosw));
+        // Promise can be set only once, replace it with a new one.
+        _sharedPromise = std::make_unique<SharedPromise<const Payload>>();
+    }
+
+private:
+    mutable Mutex _mutex;
+    std::unique_ptr<SharedPromise<const Payload>> _sharedPromise;
+};
 
 }  // namespace
 
@@ -86,8 +111,25 @@ Status TenantMigrationAccessBlocker::waitUntilCommittedOrAborted(OperationContex
     return onCompletion().getNoThrow();
 }
 
-void TenantMigrationAccessBlocker::checkIfCanDoClusterTimeReadOrBlock(
-    OperationContext* opCtx, const Timestamp& readTimestamp) {
+SharedSemiFuture<TenantMigrationAccessBlocker::State> TenantMigrationAccessBlocker::checkIfCanDoClusterTimeRead(
+    OperationContext* opCtx) {
+    auto readConcernArgs = repl::ReadConcernArgs::get(opCtx);
+    auto readTimestamp = [opCtx, &readConcernArgs]() -> boost::optional<Timestamp> {
+        if (auto afterClusterTime = readConcernArgs.getArgsAfterClusterTime()) {
+            return afterClusterTime->asTimestamp();
+        }
+        if (auto atClusterTime = readConcernArgs.getArgsAtClusterTime()) {
+            return atClusterTime->asTimestamp();
+        }
+        if (readConcernArgs.getLevel() == repl::ReadConcernLevel::kSnapshotReadConcern) {
+            return repl::StorageInterface::get(opCtx)->getPointInTimeReadTimestamp(opCtx);
+        }
+        return boost::none;
+    }();
+    if (!readTimestamp) {
+        return SharedSemiFuture(State::kAllow);
+    }
+
     stdx::unique_lock<Latch> ul(_mutex);
 
     auto canRead = [&]() {
@@ -105,6 +147,8 @@ void TenantMigrationAccessBlocker::checkIfCanDoClusterTimeReadOrBlock(
     uassert(TenantMigrationCommittedInfo(_tenantId, _recipientConnString),
             "Read must be re-routed to the new owner of this tenant",
             canRead());
+
+    return SharedSemiFuture(State::kAllow);//tmp
 }
 
 void TenantMigrationAccessBlocker::checkIfLinearizableReadWasAllowedOrThrow(
