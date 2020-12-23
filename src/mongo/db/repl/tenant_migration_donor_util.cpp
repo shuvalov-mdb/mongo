@@ -34,6 +34,7 @@
 
 #include "mongo/db/repl/tenant_migration_donor_util.h"
 
+#include "mongo/db/client_strand.h"
 #include "mongo/db/commands/tenant_migration_recipient_cmds_gen.h"
 #include "mongo/db/namespace_string.h"
 #include "mongo/db/persistent_task_store.h"
@@ -43,9 +44,11 @@
 #include "mongo/executor/network_interface_factory.h"
 #include "mongo/executor/thread_pool_task_executor.h"
 #include "mongo/logv2/log.h"
+#include "mongo/transport/service_executor.h"
 #include "mongo/util/assert_util.h"
 #include "mongo/util/concurrency/thread_pool.h"
 #include "mongo/util/fail_point.h"
+#include "mongo/util/future_util.h"
 
 namespace mongo {
 
@@ -56,9 +59,12 @@ namespace tenant_migration_donor {
 
 namespace {
 
-const char kThreadNamePrefix[] = "TenantMigrationWorker-";
-const char kPoolName[] = "TenantMigrationWorkerThreadPool";
-const char kNetName[] = "TenantMigrationWorkerNetwork";
+constexpr char kThreadNamePrefix[] = "TenantMigrationWorker-";
+constexpr char kPoolName[] = "TenantMigrationWorkerThreadPool";
+constexpr char kNetName[] = "TenantMigrationWorkerNetwork";
+
+// Impose some sane limit on timeouts we handle to avoid unnecessaru steps.
+static constexpr auto kMaxTimeout = Milliseconds(1000LL * 3600 * 10000);
 
 const auto donorStateDocToDeleteDecoration = OperationContext::declareDecoration<BSONObj>();
 
@@ -109,15 +115,45 @@ TenantMigrationDonorDocument parseDonorStateDocument(const BSONObj& doc) {
 }
 
 
-SharedSemiFuture<TenantMigrationAccessBlocker::State> checkIfCanRead(OperationContext* opCtx, StringData dbName) {
+void checkIfCanRead(OperationContext* opCtx, StringData dbName) {
     auto mtab = TenantMigrationAccessBlockerRegistry::get(opCtx->getServiceContext())
                     .getTenantMigrationAccessBlockerForDbName(dbName);
 
     if (!mtab) {
-        return SharedSemiFuture(TenantMigrationAccessBlocker::State::kAllow);
+        return;
     }
 
-    return mtab->checkIfCanDoClusterTimeRead(opCtx);
+    // Source to cancel the timeout if the operation completed in time.
+    CancelationSource cancelTimeoutSource;
+    // Source to cancel if the timeout expires before completion.
+    CancelationSource timeoutSource;
+
+    auto executor = mtab->getAsyncBlockingOperationsExecutor();
+    if (opCtx->getDeadline() - Date_t::now() < kMaxTimeout) {
+        executor->sleepUntil(opCtx->getDeadline(), cancelTimeoutSource.token())
+            .getAsync([cancelTimeoutSource, timeoutSource](Status status) mutable {
+                if (status.isOK() && !cancelTimeoutSource.token().isCanceled()) {
+                    timeoutSource.cancel();
+                }
+            });
+    }
+    auto timeoutFuture = timeoutSource.token().onCancel().thenRunOn(executor);
+    auto readBlockerFuture = mtab->checkIfCanDoClusterTimeRead(opCtx);
+    auto readBlockerFutureCloneNoValue =
+        std::move(readBlockerFuture.split()).semi().ignoreValue().thenRunOn(executor);
+    std::vector<ExecutorFuture<void>> futures;
+    futures.emplace_back(std::move(timeoutFuture));
+    futures.emplace_back(std::move(readBlockerFutureCloneNoValue));
+
+    uassertStatusOK(whenAny(std::move(futures)).getNoThrow().getStatus());
+    if (!readBlockerFuture.isReady() && timeoutSource.token().isCanceled()) {
+        uassertStatusOK(Status(ErrorCodes::MaxTimeMSExpired,
+                               "Read timed out",
+                               mtab->getTenantMigrationCommittedInfo()));
+    }
+    auto statusWithState = readBlockerFuture.getNoThrow();
+    cancelTimeoutSource.cancel();
+    uassertStatusOK(statusWithState.getStatus());
 }
 
 void checkIfLinearizableReadWasAllowedOrThrow(OperationContext* opCtx, StringData dbName) {

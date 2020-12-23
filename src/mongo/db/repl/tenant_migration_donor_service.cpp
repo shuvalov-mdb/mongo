@@ -56,6 +56,11 @@ namespace mongo {
 
 namespace {
 
+// Thread count to schedule ops blocked my migration blocker.
+// It's dangerous to increase this pool size as the simutaneously unblocked
+// operations may flood the server.
+static constexpr int kAsyncBlockedOpsPoolSize = 4;
+
 MONGO_FAIL_POINT_DEFINE(abortTenantMigrationAfterBlockingStarts);
 MONGO_FAIL_POINT_DEFINE(pauseTenantMigrationAfterBlockingStarts);
 MONGO_FAIL_POINT_DEFINE(pauseTenantMigrationAfterDataSync);
@@ -112,6 +117,25 @@ ExecutorFuture<void> TenantMigrationDonorService::_rebuildService(
         .until([token](Status status) { return shouldStopCreatingTTLIndex(status, token); })
         .withBackoffBetweenIterations(kExponentialBackoff)
         .on(**executor, CancelationToken::uncancelable());
+}
+
+std::shared_ptr<executor::TaskExecutor>
+TenantMigrationDonorService::getOrCreateAsyncBlockingOperationsExecutor() {
+    stdx::lock_guard<Latch> lg(_mutex);
+    auto locked = _asyncBlockingOperationsExecutor.lock();
+    if (locked) {
+        return locked;
+    }
+    ThreadPool::Options threadPoolOptions;
+    threadPoolOptions.maxThreads = kAsyncBlockedOpsPoolSize;
+    threadPoolOptions.threadNamePrefix = "TenantMigrationBlockerAsync-";
+    threadPoolOptions.poolName = "TenantMigrationBlockerAsyncThreadPool";
+    auto executor = std::make_shared<executor::ThreadPoolTaskExecutor>(
+        std::make_unique<ThreadPool>(threadPoolOptions),
+        executor::makeNetworkInterface("TenantMigrationBlockerNet"));
+    _asyncBlockingOperationsExecutor = executor;
+    executor->startup();
+    return executor;
 }
 
 TenantMigrationDonorService::Instance::Instance(ServiceContext* serviceContext,
