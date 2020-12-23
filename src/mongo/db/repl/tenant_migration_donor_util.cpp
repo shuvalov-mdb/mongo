@@ -63,7 +63,7 @@ constexpr char kThreadNamePrefix[] = "TenantMigrationWorker-";
 constexpr char kPoolName[] = "TenantMigrationWorkerThreadPool";
 constexpr char kNetName[] = "TenantMigrationWorkerNetwork";
 
-// Impose some sane limit on timeouts we handle to avoid unnecessaru steps.
+// Impose some sane limit on timeouts we handle to avoid unnecessary steps.
 static constexpr auto kMaxTimeout = Milliseconds(1000LL * 3600 * 10000);
 
 const auto donorStateDocToDeleteDecoration = OperationContext::declareDecoration<BSONObj>();

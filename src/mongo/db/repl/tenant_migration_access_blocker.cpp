@@ -54,7 +54,7 @@ MONGO_FAIL_POINT_DEFINE(tenantMigrationBlockWrite);
 
 const Backoff kExponentialBackoff(Seconds(1), Milliseconds::max());
 
-// Impose some sane limit on timeouts we handle to avoid unnecessaru steps.
+// Impose some sane limit on timeouts we handle to avoid unnecessary steps.
 static constexpr auto kMaxTimeout = Milliseconds(1000LL * 3600 * 10000);
 
 }  // namespace
