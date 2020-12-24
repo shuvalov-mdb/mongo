@@ -44,7 +44,8 @@ const ServiceContext::Decoration<TenantMigrationAccessBlockerExecutor>
     TenantMigrationAccessBlockerExecutor::get =
         ServiceContext::declareDecoration<TenantMigrationAccessBlockerExecutor>();
 
-std::shared_ptr<executor::TaskExecutor> TenantMigrationAccessBlockerExecutor::getOrCreateBlockedOperationsExecutor() {
+std::shared_ptr<executor::TaskExecutor>
+TenantMigrationAccessBlockerExecutor::getOrCreateBlockedOperationsExecutor() {
     stdx::lock_guard<Latch> lg(_mutex);
     auto locked = _blockedOperationsExecutor.lock();
     if (locked) {
