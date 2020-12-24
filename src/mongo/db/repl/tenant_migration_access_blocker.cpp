@@ -54,9 +54,6 @@ MONGO_FAIL_POINT_DEFINE(tenantMigrationBlockWrite);
 
 const Backoff kExponentialBackoff(Seconds(1), Milliseconds::max());
 
-// Impose some sane limit on timeouts we handle to avoid unnecessary steps.
-static constexpr auto kMaxTimeout = Milliseconds(1000LL * 3600 * 10000);
-
 }  // namespace
 
 void TenantMigrationAccessBlocker::checkIfCanWriteOrThrow() {
@@ -92,35 +89,35 @@ Status TenantMigrationAccessBlocker::waitUntilCommittedOrAborted(OperationContex
 
     // Source to cancel the timeout if the operation completed in time.
     CancelationSource cancelTimeoutSource;
-    // Source to cancel if the timeout expires before completion.
-    CancelationSource timeoutSource;
-
     auto executor = getAsyncBlockingOperationsExecutor();
-    if (opCtx->getDeadline() - Date_t::now() < kMaxTimeout) {
-        executor->sleepUntil(opCtx->getDeadline(), cancelTimeoutSource.token())
-            .getAsync([cancelTimeoutSource, timeoutSource](Status status) mutable {
-                if (status.isOK() && !cancelTimeoutSource.token().isCanceled()) {
-                    timeoutSource.cancel();
-                }
-            });
-    }
-    auto timeoutFuture = timeoutSource.token().onCancel().thenRunOn(executor);
-    auto blockerFuture = onCompletion();
-    auto blockerExecutorFutureClone = blockerFuture.split().thenRunOn(executor);
     std::vector<ExecutorFuture<void>> futures;
-    futures.emplace_back(std::move(timeoutFuture));
-    futures.emplace_back(std::move(blockerExecutorFutureClone));
 
-    uassertStatusOK(whenAny(std::move(futures)).getNoThrow().getStatus());
-    if (!blockerFuture.isReady() && timeoutSource.token().isCanceled()) {
-        return Status(ErrorCodes::MaxTimeMSExpired,
+    futures.emplace_back(onCompletion().thenRunOn(executor));
+
+    if (opCtx->getDeadline() < Date_t::max()) {
+        auto deadlineReachedFuture =
+            executor->sleepUntil(opCtx->getDeadline(), cancelTimeoutSource.token());
+        // The timeout condtion is optional with index #1.
+        futures.push_back(std::move(deadlineReachedFuture));
+    }
+
+    auto waitResult = whenAny(std::move(futures)).getNoThrow();
+    if (!waitResult.isOK()) {
+        return waitResult.getStatus();
+    }
+    const auto& [status, idx] = waitResult.getValue();
+
+    if (idx == 0) {
+        // onCompletion() finished first.
+        cancelTimeoutSource.cancel();
+        return status;
+    } else if (idx == 1) {
+        // Deadline finished first, return error
+        return Status(opCtx->getTimeoutError(),
                       "Operation timed out waiting for tenant migration blocker",
                       TenantMigrationCommittedInfo(_tenantId, _recipientConnString).toBSON());
     }
-    auto status = blockerFuture.getNoThrow();
-    cancelTimeoutSource.cancel();
-
-    return status;
+    MONGO_UNREACHABLE;
 }
 
 SharedSemiFuture<TenantMigrationAccessBlocker::State>

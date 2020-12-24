@@ -63,9 +63,6 @@ constexpr char kThreadNamePrefix[] = "TenantMigrationWorker-";
 constexpr char kPoolName[] = "TenantMigrationWorkerThreadPool";
 constexpr char kNetName[] = "TenantMigrationWorkerNetwork";
 
-// Impose some sane limit on timeouts we handle to avoid unnecessary steps.
-static constexpr auto kMaxTimeout = Milliseconds(1000LL * 3600 * 10000);
-
 const auto donorStateDocToDeleteDecoration = OperationContext::declareDecoration<BSONObj>();
 
 }  // namespace
@@ -125,35 +122,33 @@ void checkIfCanRead(OperationContext* opCtx, StringData dbName) {
 
     // Source to cancel the timeout if the operation completed in time.
     CancelationSource cancelTimeoutSource;
-    // Source to cancel if the timeout expires before completion.
-    CancelationSource timeoutSource;
+    std::vector<ExecutorFuture<void>> futures;
 
     auto executor = mtab->getAsyncBlockingOperationsExecutor();
-    if (opCtx->getDeadline() - Date_t::now() < kMaxTimeout) {
-        executor->sleepUntil(opCtx->getDeadline(), cancelTimeoutSource.token())
-            .getAsync([cancelTimeoutSource, timeoutSource](Status status) mutable {
-                if (status.isOK() && !cancelTimeoutSource.token().isCanceled()) {
-                    timeoutSource.cancel();
-                }
-            });
-    }
-    auto timeoutFuture = timeoutSource.token().onCancel().thenRunOn(executor);
-    auto readBlockerFuture = mtab->checkIfCanDoClusterTimeRead(opCtx);
-    auto readBlockerFutureCloneNoValue =
-        std::move(readBlockerFuture.split()).semi().ignoreValue().thenRunOn(executor);
-    std::vector<ExecutorFuture<void>> futures;
-    futures.emplace_back(std::move(timeoutFuture));
-    futures.emplace_back(std::move(readBlockerFutureCloneNoValue));
+    futures.emplace_back(
+        mtab->checkIfCanDoClusterTimeRead(opCtx).semi().ignoreValue().thenRunOn(executor));
 
-    uassertStatusOK(whenAny(std::move(futures)).getNoThrow().getStatus());
-    if (!readBlockerFuture.isReady() && timeoutSource.token().isCanceled()) {
-        uassertStatusOK(Status(ErrorCodes::MaxTimeMSExpired,
-                               "Read timed out",
+    if (opCtx->getDeadline() < Date_t::max()) {
+        auto deadlineReachedFuture =
+            executor->sleepUntil(opCtx->getDeadline(), cancelTimeoutSource.token());
+        // The timeout condtion is optional with index #1.
+        futures.push_back(std::move(deadlineReachedFuture));
+    }
+
+    auto waitResult = whenAny(std::move(futures)).getNoThrow();
+    uassertStatusOK(waitResult.getStatus());
+    const auto& [status, idx] = waitResult.getValue();
+
+    if (idx == 0) {
+        // Read unblock condition finished first.
+        cancelTimeoutSource.cancel();
+        uassertStatusOK(status);
+    } else if (idx == 1) {
+        // Deadline finished first, throw error.
+        uassertStatusOK(Status(opCtx->getTimeoutError(),
+                               "Read timed out waiting for tenant migration blocker",
                                mtab->getTenantMigrationCommittedInfo()));
     }
-    auto statusWithState = readBlockerFuture.getNoThrow();
-    cancelTimeoutSource.cancel();
-    uassertStatusOK(statusWithState.getStatus());
 }
 
 void checkIfLinearizableReadWasAllowedOrThrow(OperationContext* opCtx, StringData dbName) {
