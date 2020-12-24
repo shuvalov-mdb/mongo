@@ -69,14 +69,6 @@ public:
                                                                        initialState);
     }
 
-    // Executor to schedule asynchronous read and write operations while the
-    // tenant migration access blocker is in action. This provides migrated tenants isolation
-    // from the non-migrated users. The executor is shared by all access blockers and is
-    // to be destroyed when no access blockers exist.
-    // If this to be migrated to a global executor PM-1809 additional protection from a
-    // thundering herd of simultaneously unblocked operations is required.
-    std::shared_ptr<executor::TaskExecutor> getOrCreateAsyncBlockingOperationsExecutor();
-
     class Instance final : public PrimaryOnlyService::TypedInstance<Instance> {
     public:
         struct DurableState {

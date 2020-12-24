@@ -119,25 +119,6 @@ ExecutorFuture<void> TenantMigrationDonorService::_rebuildService(
         .on(**executor, CancelationToken::uncancelable());
 }
 
-std::shared_ptr<executor::TaskExecutor>
-TenantMigrationDonorService::getOrCreateAsyncBlockingOperationsExecutor() {
-    stdx::lock_guard<Latch> lg(_mutex);
-    auto locked = _asyncBlockingOperationsExecutor.lock();
-    if (locked) {
-        return locked;
-    }
-    ThreadPool::Options threadPoolOptions;
-    threadPoolOptions.maxThreads = kAsyncBlockedOpsPoolSize;
-    threadPoolOptions.threadNamePrefix = "TenantMigrationBlockerAsync-";
-    threadPoolOptions.poolName = "TenantMigrationBlockerAsyncThreadPool";
-    auto executor = std::make_shared<executor::ThreadPoolTaskExecutor>(
-        std::make_unique<ThreadPool>(threadPoolOptions),
-        executor::makeNetworkInterface("TenantMigrationBlockerNet"));
-    _asyncBlockingOperationsExecutor = executor;
-    executor->startup();
-    return executor;
-}
-
 TenantMigrationDonorService::Instance::Instance(ServiceContext* serviceContext,
                                                 const BSONObj& initialState)
     : repl::PrimaryOnlyService::TypedInstance<Instance>(),

@@ -37,9 +37,9 @@
 #include "mongo/db/repl/replication_coordinator.h"
 #include "mongo/db/repl/storage_interface.h"
 #include "mongo/db/repl/tenant_migration_access_blocker.h"
+#include "mongo/db/repl/tenant_migration_access_blocker_executor.h"
 #include "mongo/db/repl/tenant_migration_committed_info.h"
 #include "mongo/db/repl/tenant_migration_conflict_info.h"
-#include "mongo/db/repl/tenant_migration_donor_service.h"
 #include "mongo/logv2/log.h"
 #include "mongo/util/cancelation.h"
 #include "mongo/util/fail_point.h"
@@ -349,11 +349,8 @@ std::string TenantMigrationAccessBlocker::stateToString(State state) const {
 }
 
 void TenantMigrationAccessBlocker::_lockAsyncExecutorInstance(ServiceContext* serviceContext) {
-    auto donorService = repl::PrimaryOnlyServiceRegistry::get(serviceContext)
-                            ->lookupServiceByName(TenantMigrationDonorService::kServiceName);
-    invariant(donorService);
-    _asyncBlockingOperationsExecutor = static_cast<TenantMigrationDonorService*>(donorService)
-                                           ->getOrCreateAsyncBlockingOperationsExecutor();
+    _asyncBlockingOperationsExecutor = TenantMigrationAccessBlockerExecutor::get(serviceContext)
+                                           .getOrCreateBlockedOperationsExecutor();
 }
 
 BSONObj TenantMigrationAccessBlocker::getTenantMigrationCommittedInfo() const {
