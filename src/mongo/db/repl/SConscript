@@ -1332,6 +1332,7 @@ env.Library(
         'tenant_migration_access_blocker_executor.cpp',
     ],
     LIBDEPS=[
+        '$BUILD_DIR/mongo/executor/network_interface_factory',
         '$BUILD_DIR/mongo/executor/thread_pool_task_executor',
     ],
 )
