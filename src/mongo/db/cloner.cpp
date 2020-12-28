@@ -462,11 +462,7 @@ Status Cloner::copyDb(OperationContext* opCtx,
     }
 
     // Set up connection.
-    std::string errmsg;
-    std::unique_ptr<DBClientBase> conn(cs.connect(StringData(), errmsg));
-    if (!conn.get()) {
-        return Status(ErrorCodes::HostUnreachable, errmsg);
-    }
+    MONGO_RETURN_ERROR_OR_ASSIGN(cs.connect(StringData()), conn);
 
     if (auth::isInternalAuthSet()) {
         auto authStatus = conn->authenticateInternalUser();

@@ -378,4 +378,14 @@ bool operator!=(const ErrorCodes::Error code, const StatusWith<T>& sw) {
     return !(code == sw);
 }
 
+// Simple boilerplate helper for StatusWith.
+// If status is not OK return it, otherwise assign the value reference to
+// 'newVariableAlias'.
+#define MONGO_RETURN_ERROR_OR_ASSIGN(statusWithValue, newVariableAlias) \
+    auto newVariableAlias##_helper_{statusWithValue};                   \
+    if (!newVariableAlias##_helper_.isOK()) {                           \
+        return newVariableAlias##_helper_.getStatus();                  \
+    }                                                                   \
+    auto& newVariableAlias = newVariableAlias##_helper_.getValue();
+
 }  // namespace mongo

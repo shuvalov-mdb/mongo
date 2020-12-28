@@ -71,11 +71,11 @@ public:
                        const ClientAPIVersionParameters* apiParameters = nullptr);
 
     /**
-     * Returns false if no member of the set were reachable. This object
-     * can still be used even when false was returned as it will try to
+     * Returns error if no member of the set were reachable. This object
+     * can still be used even when earror was returned as it will try to
      * reconnect when you use it later.
      */
-    bool connect();
+    Status connect();
 
     Status authenticateInternalUser(auth::StepDownBehavior stepDownBehavior) override;
 

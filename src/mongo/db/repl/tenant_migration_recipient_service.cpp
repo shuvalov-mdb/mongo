@@ -268,21 +268,20 @@ OpTime TenantMigrationRecipientService::Instance::waitUntilTimestampIsMajorityCo
 
 std::unique_ptr<DBClientConnection> TenantMigrationRecipientService::Instance::_connectAndAuth(
     const HostAndPort& serverAddress, StringData applicationName, BSONObj authParams) {
-    std::string errMsg;
-    auto clientBase = ConnectionString(serverAddress).connect(applicationName, errMsg);
-    if (!clientBase) {
+    auto clientBase = ConnectionString(serverAddress).connect(applicationName);
+    if (!clientBase.isOK()) {
         LOGV2_ERROR(4880400,
                     "Failed to connect to migration donor",
                     "tenantId"_attr = getTenantId(),
                     "migrationId"_attr = getMigrationUUID(),
                     "serverAddress"_attr = serverAddress,
                     "applicationName"_attr = applicationName,
-                    "error"_attr = errMsg);
-        uasserted(ErrorCodes::HostNotFound, errMsg);
+                    "error"_attr = clientBase.getStatus().toString());
+        uassertStatusOK(clientBase.getStatus());
     }
 
     // Authenticate connection to the donor.
-    uassertStatusOK(replAuthenticate(clientBase.get())
+    uassertStatusOK(replAuthenticate(clientBase.getValue().get())
                         .withContext(str::stream()
                                      << "TenantMigrationRecipientService failed to authenticate to "
                                      << serverAddress));
@@ -290,7 +289,7 @@ std::unique_ptr<DBClientConnection> TenantMigrationRecipientService::Instance::_
     // ConnectionString::connect() always returns a DBClientConnection in a unique_ptr of
     // DBClientBase type.
     std::unique_ptr<DBClientConnection> client(
-        checked_cast<DBClientConnection*>(clientBase.release()));
+        checked_cast<DBClientConnection*>(clientBase.getValue().release()));
     if (!authParams.isEmpty()) {
         client->auth(authParams);
     } else {
