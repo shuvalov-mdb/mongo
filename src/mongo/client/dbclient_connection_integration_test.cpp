@@ -45,15 +45,11 @@ constexpr StringData kAppName = "DBClientConnectionTest"_sd;
 class DBClientConnectionFixture : public unittest::Test {
 public:
     static std::unique_ptr<DBClientConnection> makeConn(StringData name = kAppName) {
-        std::string errMsg;
-        auto connHolder = std::unique_ptr<DBClientBase>(
-            unittest::getFixtureConnectionString().connect(name, errMsg));
-        uassert(ErrorCodes::SocketException, errMsg, connHolder);
+        auto connHolderOrStatus = unittest::getFixtureConnectionString().connect(name);
+        uassertStatusOK(connHolderOrStatus.getStatus());
 
-        auto conn = dynamic_cast<DBClientConnection*>(connHolder.get());
-        invariant(conn);
-        connHolder.release();
-        return std::unique_ptr<DBClientConnection>(conn);
+        auto conn = dynamic_cast<DBClientConnection*>(connHolderOrStatus.getValue().release());
+        return std::unique_ptr<DBClientConnection>{conn};
     }
 
     void tearDown() override {

@@ -53,10 +53,9 @@ const NamespaceString testNSS{"exhaust_cursor_currentop.testColl"};
 
 const StringData testAppName = "curop_exhaust_cursor_test";
 std::unique_ptr<DBClientBase> connect(StringData appName = testAppName) {
-    std::string errMsg;
-    auto conn = unittest::getFixtureConnectionString().connect(appName.toString(), errMsg);
-    uassert(ErrorCodes::SocketException, errMsg, conn);
-    return conn;
+    auto conn = unittest::getFixtureConnectionString().connect(appName.toString());
+    uassertStatusOK(conn.getStatus());
+    return std::move(conn.getValue());
 }
 const StringData testBackgroundAppName = "curop_exhaust_cursor_test_bg";
 
