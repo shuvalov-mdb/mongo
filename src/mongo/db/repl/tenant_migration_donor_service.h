@@ -209,9 +209,5 @@ private:
                                          const CancelationToken& token) override;
 
     ServiceContext* _serviceContext;
-
-    mutable Mutex _mutex;
-    // See getOrCreateAsyncBlockingOperationsExecutor().
-    std::weak_ptr<executor::TaskExecutor> _asyncBlockingOperationsExecutor;
 };
 }  // namespace mongo

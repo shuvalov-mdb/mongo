@@ -44,8 +44,6 @@
 #include "mongo/db/repl/tenant_migration_donor_util.h"
 #include "mongo/db/repl/tenant_migration_state_machine_gen.h"
 #include "mongo/db/repl/wait_for_majority_service.h"
-#include "mongo/executor/network_interface_factory.h"
-#include "mongo/executor/thread_pool_task_executor.h"
 #include "mongo/logv2/log.h"
 #include "mongo/rpc/get_status_from_command_result.h"
 #include "mongo/rpc/metadata/egress_metadata_hook_list.h"
@@ -55,11 +53,6 @@
 namespace mongo {
 
 namespace {
-
-// Thread count to schedule ops blocked my migration blocker.
-// It's dangerous to increase this pool size as the simutaneously unblocked
-// operations may flood the server.
-static constexpr int kAsyncBlockedOpsPoolSize = 4;
 
 MONGO_FAIL_POINT_DEFINE(abortTenantMigrationAfterBlockingStarts);
 MONGO_FAIL_POINT_DEFINE(pauseTenantMigrationAfterBlockingStarts);
