@@ -89,7 +89,7 @@ ExecutorFuture<Response> wrapScheduleCallWithCancelTokenAndFuture(
 
     // Fault point to make this method to wait until the token is canceled.
         std::cerr << "!!!! wrapScheduleCallWithCancelTokenAndFuture 2 " << token.isCanceled() << std::endl;
-    pauseCallWithCancelTokenUntilCanceled.pauseWhileSetAndNotCanceled(&token);
+    pauseCallWithCancelTokenUntilCanceled.pauseWhileSetAndNotCanceled(Interruptible::notInterruptible(), &token);
         std::cerr << "!!!! wrapScheduleCallWithCancelTokenAndFuture 3 " << token.isCanceled() << std::endl;
 
     auto scheduleStatus = wrapCallbackHandleWithCancelToken(

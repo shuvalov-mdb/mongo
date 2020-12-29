@@ -366,13 +366,8 @@ public:
      * Like `pauseWhileSet`, but will also unpause as soon as the cancellation token is canceled.
      * This method does not generate any cancellation related error by itself, it only waits.
      */
-    void pauseWhileSetAndNotCanceled(const CancelationToken* token) {
-        for (auto entryMode = kFirstTimeEntered; 
-             MONGO_unlikely(shouldFail(entryMode)) && !token->isCanceled();
-             entryMode = kEnteredAlready) {
-            // Not using token->onCancel() because we need to handle the fault point unset.
-            sleepFor(Milliseconds(1));
-        }
+    void pauseWhileSetAndNotCanceled(Interruptible* interruptible, const CancelationToken* token) {
+        _impl()->pauseWhileSetAndNotCanceled(interruptible, token);
     }
 
 private:
@@ -422,6 +417,16 @@ private:
             for (auto entryMode = kFirstTimeEntered;
                  MONGO_unlikely(_shouldFail(entryMode, nullptr));
                  entryMode = kEnteredAlready) {
+                interruptible->sleepFor(kWaitGranularity);
+            }
+        }
+
+        /** See `FailPoint::pauseWhileSetAndNotCanceled`. */
+        void pauseWhileSetAndNotCanceled(Interruptible* interruptible, const CancelationToken* token) {
+            for (auto entryMode = kFirstTimeEntered;
+                 MONGO_unlikely(_shouldFail(entryMode, nullptr)) && !token->isCanceled();
+                 entryMode = kEnteredAlready) {
+                // Not using token->onCancel() because we need to handle the fault point unset.
                 interruptible->sleepFor(kWaitGranularity);
             }
         }
