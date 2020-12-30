@@ -81,6 +81,9 @@ structs:
             tenantId:
                 type: string
                 description: "The tenantId for the migration."
+            blockingStateTimeoutMillis:
+                description: 'Period of time, in milliseconds, after which the blocking state should be interrupted'
+                type: safeInt64
             state:
                 type: TenantMigrationDonorState
                 description: "The state of the tenant migration."

@@ -187,6 +187,7 @@ function TenantMigrationTest(
             donorCertificateForRecipient,
             recipientCertificateForDonor
         };
+        jsTest.log(cmdObj);
 
         let donorPrimary = this.getDonorPrimary();
         let stateRes;

@@ -87,7 +87,7 @@ commands:
       blockingStateTimeoutMillis:
         description: 'Period of time, in milliseconds, after which the blocking state should be interrupted'
         type: safeInt64
-        default: 10000
+        default: 60000
 
   donorForgetMigration:
     description: "Parser for the 'donorForgetMigration' command."

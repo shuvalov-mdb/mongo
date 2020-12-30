@@ -49,7 +49,6 @@ Status wrapCallbackHandleWithCancelToken(
     token.onCancel()
         .unsafeToInlineFuture()
         .then([executor, callbackHandle = std::move(swCallbackHandle.getValue())]() mutable {
-            std::cerr << "!!!! token cancels executor" << std::endl;
             executor->cancel(callbackHandle);
         })
         .getAsync([](auto) {});
@@ -88,9 +87,8 @@ ExecutorFuture<Response> wrapScheduleCallWithCancelTokenAndFuture(
     };
 
     // Fault point to make this method to wait until the token is canceled.
-        std::cerr << "!!!! wrapScheduleCallWithCancelTokenAndFuture 2 " << token.isCanceled() << std::endl;
-    pauseCallWithCancelTokenUntilCanceled.pauseWhileSetAndNotCanceled(Interruptible::notInterruptible(), &token);
-        std::cerr << "!!!! wrapScheduleCallWithCancelTokenAndFuture 3 " << token.isCanceled() << std::endl;
+    pauseCallWithCancelTokenUntilCanceled.pauseWhileSetAndNotCanceled(
+        Interruptible::notInterruptible(), &token);
 
     auto scheduleStatus = wrapCallbackHandleWithCancelToken(
         executor,

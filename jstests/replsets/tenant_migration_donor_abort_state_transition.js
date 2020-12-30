@@ -92,6 +92,7 @@ function testTimeoutBlockingState(donorRst) {
         donorRst.nodes, migrationId, tenantId, TenantMigrationTest.State.kAborted);
 
     inCallFp.off();
+    assert.commandWorked(migrationThread.returnData());
 }
 
 /**

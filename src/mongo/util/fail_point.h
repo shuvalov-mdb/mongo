@@ -422,7 +422,8 @@ private:
         }
 
         /** See `FailPoint::pauseWhileSetAndNotCanceled`. */
-        void pauseWhileSetAndNotCanceled(Interruptible* interruptible, const CancelationToken* token) {
+        void pauseWhileSetAndNotCanceled(Interruptible* interruptible,
+                                         const CancelationToken* token) {
             for (auto entryMode = kFirstTimeEntered;
                  MONGO_unlikely(_shouldFail(entryMode, nullptr)) && !token->isCanceled();
                  entryMode = kEnteredAlready) {
