@@ -93,6 +93,7 @@ function testTimeoutBlockingState(donorRst) {
 
     inCallFp.off();
     assert.commandWorked(migrationThread.returnData());
+    assert.commandWorked(tenantMigrationTest.forgetMigration(migrationOpts.migrationIdString));
 }
 
 /**
@@ -114,7 +115,10 @@ function testAbortStateTransition(donorRst, pauseFailPoint, setUpFailPoints, nex
         tenantId,
     };
 
-    setUpFailPoints.forEach(failPoint => configureFailPoint(donorPrimary, failPoint));
+    var failPointsToClear = [];
+    setUpFailPoints.forEach(failPoint => {
+        failPointsToClear.push(configureFailPoint(donorPrimary, failPoint));
+    });
     let pauseFp = configureFailPoint(donorPrimary, pauseFailPoint);
 
     assert.commandWorked(tenantMigrationTest.startMigration(migrationOpts));
@@ -142,33 +146,36 @@ function testAbortStateTransition(donorRst, pauseFailPoint, setUpFailPoints, nex
         tenantMigrationTest.waitForNodesToReachState(
             donorRst.nodes, migrationId, tenantId, TenantMigrationTest.State.kCommitted);
     }
+    failPointsToClear.forEach(failPoint => {
+        failPoint.off();
+    });
 
     assert.commandWorked(tenantMigrationTest.forgetMigration(migrationOpts.migrationIdString));
 }
 
 const donorRst = tenantMigrationTest.getDonorRst();
-// jsTest.log("Test aborting donor's state doc insert");
-// testAbortInitialState(donorRst);
+jsTest.log("Test aborting donor's state doc insert");
+testAbortInitialState(donorRst);
 
 jsTest.log("Test timeout of the blocking state");
 testTimeoutBlockingState(donorRst);
 
-// jsTest.log("Test aborting donor's state doc update");
-// [{
-//     pauseFailPoint: "pauseTenantMigrationAfterDataSync",
-//     nextState: TenantMigrationTest.State.kBlocking
-// },
-//  {
-//      pauseFailPoint: "pauseTenantMigrationAfterBlockingStarts",
-//      nextState: TenantMigrationTest.State.kCommitted
-//  },
-//  {
-//      pauseFailPoint: "pauseTenantMigrationAfterBlockingStarts",
-//      setUpFailPoints: ["abortTenantMigrationAfterBlockingStarts"],
-//      nextState: TenantMigrationTest.State.kAborted
-//  }].forEach(({pauseFailPoint, setUpFailPoints = [], nextState}) => {
-//     testAbortStateTransition(donorRst, pauseFailPoint, setUpFailPoints, nextState);
-// });
+jsTest.log("Test aborting donor's state doc update");
+[{
+    pauseFailPoint: "pauseTenantMigrationAfterDataSync",
+    nextState: TenantMigrationTest.State.kBlocking
+},
+ {
+     pauseFailPoint: "pauseTenantMigrationAfterBlockingStarts",
+     nextState: TenantMigrationTest.State.kCommitted
+ },
+ {
+     pauseFailPoint: "pauseTenantMigrationAfterBlockingStarts",
+     setUpFailPoints: ["abortTenantMigrationAfterBlockingStarts"],
+     nextState: TenantMigrationTest.State.kAborted
+ }].forEach(({pauseFailPoint, setUpFailPoints = [], nextState}) => {
+    testAbortStateTransition(donorRst, pauseFailPoint, setUpFailPoints, nextState);
+});
 
 tenantMigrationTest.stop();
 }());

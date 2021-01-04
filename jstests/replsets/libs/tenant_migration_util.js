@@ -92,7 +92,6 @@ var TenantMigrationUtil = (function() {
                 migrationCertificates.recipientCertificateForDonor,
             blockingStateTimeoutMillis: migrationOpts.blockingStateTimeoutMillis || 10000,
         };
-        jsTestLog(cmdObj);
 
         const donorRst = new ReplSetTest({rstArgs: donorRstArgs});
         let donorPrimary = donorRst.getPrimary();

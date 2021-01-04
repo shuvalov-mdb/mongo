@@ -607,19 +607,20 @@ SemiFuture<void> TenantMigrationDonorService::Instance::run(
                 .thenRunOn(**executor)
                 .then([cancelTimeoutSource,
                        timeoutOrParentSource,
-                       timeout = _stateDoc.getBlockingStateTimeoutMillis()](auto result) mutable {
+                       timeout = _stateDoc.getBlockingStateTimeoutMillis(),
+                       self = shared_from_this()](auto result) mutable {
                     const auto& [status, idx] = result;
 
                     if (idx == 0) {
                         LOGV2(5290301,
                               "Tenant migration blocking stage timeout expired",
                               "timeoutMs"_attr = timeout);
-                        // Deadline reached, aborts the pending '_sendRecipientSyncDataCommand()'...
+                        // Deadline reached, abort the pending '_sendRecipientSyncDataCommand()'...
                         timeoutOrParentSource.cancel();
-                        // ...and returns error.
+                        // ...and return error.
                         uasserted(ErrorCodes::MaxTimeMSExpired, "Blocked state timeout expired");
                     } else if (idx == 1) {
-                        // '_sendRecipientSyncDataCommand()' finished first, cancels the timeout.
+                        // '_sendRecipientSyncDataCommand()' finished first, cancel the timeout.
                         cancelTimeoutSource.cancel();
                         return status;
                     }
