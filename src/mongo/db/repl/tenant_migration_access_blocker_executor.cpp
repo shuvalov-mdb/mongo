@@ -36,7 +36,7 @@
 namespace mongo {
 
 // Thread count to schedule ops blocked my migration blocker.
-// It's dangerous to increase this pool size as the simutaneously unblocked
+// It's dangerous to increase this pool size as the simultaneously unblocked
 // operations may flood the server.
 static constexpr int kBlockedOpsPoolSize = 4;
 

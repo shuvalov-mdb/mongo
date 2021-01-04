@@ -83,7 +83,7 @@ Status TenantMigrationAccessBlocker::waitUntilCommittedOrAborted(OperationContex
         auto canWrite = [&]() { return _state == State::kAllow || _state == State::kAborted; };
 
         if (!canWrite()) {
-            tenantMigrationBlockWrite.shouldFail();
+            tenantMigrationBlockWrite.shouldFail();  // Return value intentionally ignored.
         }
     }
 
@@ -97,7 +97,7 @@ Status TenantMigrationAccessBlocker::waitUntilCommittedOrAborted(OperationContex
     if (opCtx->getDeadline() < Date_t::max()) {
         auto deadlineReachedFuture =
             executor->sleepUntil(opCtx->getDeadline(), cancelTimeoutSource.token());
-        // The timeout condtion is optional with index #1.
+        // The timeout condition is optional with index #1.
         futures.push_back(std::move(deadlineReachedFuture));
     }
 
@@ -145,7 +145,7 @@ TenantMigrationAccessBlocker::checkIfCanDoClusterTimeRead(OperationContext* opCt
         _state == State::kBlockWrites || readTimestamp < *_blockTimestamp;
 
     if (!canRead) {
-        tenantMigrationBlockRead.shouldFail();
+        tenantMigrationBlockRead.shouldFail();  // Return value intentionally ignored.
     }
     if (canRead) {
         return SharedSemiFuture(State::kAllow);

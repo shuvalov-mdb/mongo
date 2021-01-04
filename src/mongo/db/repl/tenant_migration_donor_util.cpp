@@ -135,9 +135,7 @@ void checkIfCanRead(OperationContext* opCtx, StringData dbName) {
         futures.push_back(std::move(deadlineReachedFuture));
     }
 
-    auto waitResult = whenAny(std::move(futures)).getNoThrow();
-    uassertStatusOK(waitResult.getStatus());
-    const auto& [status, idx] = waitResult.getValue();
+    const auto& [status, idx] = whenAny(std::move(futures)).get();
 
     if (idx == 0) {
         // Read unblock condition finished first.

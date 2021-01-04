@@ -35,13 +35,13 @@
 namespace mongo {
 
 class TenantMigrationAccessBlockerExecutor {
-    TenantMigrationAccessBlockerExecutor(const TenantMigrationAccessBlockerExecutor&) = delete;
-    TenantMigrationAccessBlockerExecutor& operator=(const TenantMigrationAccessBlockerExecutor&) =
-        delete;
-
 public:
     TenantMigrationAccessBlockerExecutor() = default;
     static const ServiceContext::Decoration<TenantMigrationAccessBlockerExecutor> get;
+
+    TenantMigrationAccessBlockerExecutor(const TenantMigrationAccessBlockerExecutor&) = delete;
+    TenantMigrationAccessBlockerExecutor& operator=(const TenantMigrationAccessBlockerExecutor&) =
+        delete;
 
     // Executor to schedule asynchronous read and write operations while the
     // tenant migration access blocker is in action. This provides migrated tenants isolation
