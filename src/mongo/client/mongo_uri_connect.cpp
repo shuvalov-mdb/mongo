@@ -51,20 +51,20 @@ DBClientBase* MongoURI::connect(StringData applicationName,
         }
     }
 
-    auto connectionOrStatus = _connectString.connect(
+    auto swConn = _connectString.connect(
         applicationName, socketTimeoutSecs.value_or(0.0), this, apiParameters);
-    if (!connectionOrStatus.isOK()) {
-        errmsg = connectionOrStatus.getStatus().reason();
+    if (!swConn.isOK()) {
+        errmsg = swConn.getStatus().reason();
         return nullptr;
     }
 
     if (!getSetName().empty()) {
         // When performing initial topology discovery, don't bother authenticating
         // since we will be immediately restarting our connect loop to a single node.
-        return connectionOrStatus.getValue().release();
+        return swConn.getValue().release();
     }
 
-    auto connection = std::move(connectionOrStatus.getValue());
+    auto connection = std::move(swConn.getValue());
     if (!connection->authenticatedDuringConnect()) {
         auto optAuthObj = makeAuthObjFromOptions(connection->getMaxWireVersion(),
                                                  connection->getIsPrimarySaslMechanisms());

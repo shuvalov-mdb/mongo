@@ -462,7 +462,11 @@ Status Cloner::copyDb(OperationContext* opCtx,
     }
 
     // Set up connection.
-    MONGO_RETURN_ERROR_OR_ASSIGN(cs.connect(StringData()), conn);
+    auto swConn = cs.connect(StringData());
+    if (!swConn.isOK()) {
+        return swConn.getStatus();
+    }
+    auto& conn = swConn.getValue();
 
     if (auth::isInternalAuthSet()) {
         auto authStatus = conn->authenticateInternalUser();

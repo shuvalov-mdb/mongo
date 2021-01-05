@@ -131,9 +131,9 @@ namespace {
 std::unique_ptr<DBClientBase> benchRunConfigCreateConnectionImplProvider(
     const BenchRunConfig& config) {
     const ConnectionString connectionString = uassertStatusOK(ConnectionString::parse(config.host));
-    auto connectionOrStatus{connectionString.connect("BenchRun")};
-    uassert(16158, connectionOrStatus.getStatus().reason(), connectionOrStatus.isOK());
-    return std::move(connectionOrStatus.getValue());
+    auto swConn{connectionString.connect("BenchRun")};
+    uassert(16158, swConn.getStatus().reason(), swConn.isOK());
+    return std::move(swConn.getValue());
 }
 
 auto benchRunConfigCreateConnectionImplRegistration = MONGO_WEAK_FUNCTION_REGISTRATION(

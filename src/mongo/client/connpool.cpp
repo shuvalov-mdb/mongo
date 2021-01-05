@@ -403,15 +403,14 @@ DBClientBase* DBConnectionPool::get(const string& host, double socketTimeout) {
     auto connect = [&] {
         const ConnectionString cs(uassertStatusOK(ConnectionString::parse(host)));
 
-        auto connectionOrStatus = cs.connect(StringData(), socketTimeout);
-        if (!connectionOrStatus.isOK()) {
+        auto swConn = cs.connect(StringData(), socketTimeout);
+        if (!swConn.isOK()) {
             throwSocketError(SocketErrorKind::CONNECT_ERROR,
                              host,
-                             str::stream()
-                                 << _name << " error: " << connectionOrStatus.getStatus().reason());
+                             str::stream() << _name << " error: " << swConn.getStatus().reason());
         }
 
-        return connectionOrStatus.getValue().release();
+        return swConn.getValue().release();
     };
 
     return Detail::get(this, host, socketTimeout, connect);

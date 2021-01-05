@@ -119,7 +119,7 @@ StatusWith<std::unique_ptr<DBClientBase>> ConnectionString::connect(
             if (replacementConn) {
                 return std::move(replacementConn);
             }
-            return Status(ErrorCodes::InternalError, "Connection hook error: " + errmsg);
+            return Status(ErrorCodes::HostUnreachable, "Connection hook error: " + errmsg);
         }
 
         case ConnectionType::kLocal:

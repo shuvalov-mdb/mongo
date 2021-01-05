@@ -71,8 +71,8 @@ public:
                        const ClientAPIVersionParameters* apiParameters = nullptr);
 
     /**
-     * Returns error if no member of the set were reachable. This object
-     * can still be used even when earror was returned as it will try to
+     * Returns a non-OK status if no member of the set were reachable. This object
+     * can still be used even when non-OK status was returned as it will try to
      * reconnect when you use it later.
      */
     Status connect();

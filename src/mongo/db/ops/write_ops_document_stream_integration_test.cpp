@@ -39,9 +39,9 @@
 namespace mongo {
 
 TEST(WriteOpsDocSeq, InsertDocStreamWorks) {
-    auto connectionOrStatus = unittest::getFixtureConnectionString().connect("integration_test");
-    uassertStatusOK(connectionOrStatus.getStatus());
-    auto conn = std::move(connectionOrStatus.getValue());
+    auto swConn = unittest::getFixtureConnectionString().connect("integration_test");
+    uassertStatusOK(swConn.getStatus());
+    auto conn = std::move(swConn.getValue());
 
     NamespaceString ns("test", "doc_seq");
     conn->dropCollection(ns.ns());

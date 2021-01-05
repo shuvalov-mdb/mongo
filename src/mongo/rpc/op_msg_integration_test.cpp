@@ -78,9 +78,9 @@ std::string getThreadNameByAppName(DBClientBase* conn, StringData appName) {
 }
 
 TEST(OpMsg, UnknownRequiredFlagClosesConnection) {
-    auto connOrStatus = unittest::getFixtureConnectionString().connect("integration_test");
-    uassertStatusOK(connOrStatus.getStatus());
-    auto conn = std::move(connOrStatus.getValue());
+    auto swConn = unittest::getFixtureConnectionString().connect("integration_test");
+    uassertStatusOK(swConn.getStatus());
+    auto conn = std::move(swConn.getValue());
 
     auto request = OpMsgRequest::fromDBAndBody("admin", BSON("ping" << 1)).serialize();
     OpMsg::setFlag(&request, 1u << 15);  // This should be the last required flag to be assigned.
@@ -90,9 +90,9 @@ TEST(OpMsg, UnknownRequiredFlagClosesConnection) {
 }
 
 TEST(OpMsg, UnknownOptionalFlagIsIgnored) {
-    auto connOrStatus = unittest::getFixtureConnectionString().connect("integration_test");
-    uassertStatusOK(connOrStatus.getStatus());
-    auto conn = std::move(connOrStatus.getValue());
+    auto swConn = unittest::getFixtureConnectionString().connect("integration_test");
+    uassertStatusOK(swConn.getStatus());
+    auto conn = std::move(swConn.getValue());
 
     auto request = OpMsgRequest::fromDBAndBody("admin", BSON("ping" << 1)).serialize();
     OpMsg::setFlag(&request, 1u << 31);  // This should be the last optional flag to be assigned.
@@ -104,9 +104,9 @@ TEST(OpMsg, UnknownOptionalFlagIsIgnored) {
 }
 
 TEST(OpMsg, FireAndForgetInsertWorks) {
-    auto connOrStatus = unittest::getFixtureConnectionString().connect("integration_test");
-    uassertStatusOK(connOrStatus.getStatus());
-    auto conn = std::move(connOrStatus.getValue());
+    auto swConn = unittest::getFixtureConnectionString().connect("integration_test");
+    uassertStatusOK(swConn.getStatus());
+    auto conn = std::move(swConn.getValue());
 
     conn->dropCollection("test.collection");
 
@@ -122,9 +122,9 @@ TEST(OpMsg, FireAndForgetInsertWorks) {
 }
 
 TEST(OpMsg, DocumentSequenceLargeDocumentMultiInsertWorks) {
-    auto connOrStatus = unittest::getFixtureConnectionString().connect("integration_test");
-    uassertStatusOK(connOrStatus.getStatus());
-    auto conn = std::move(connOrStatus.getValue());
+    auto swConn = unittest::getFixtureConnectionString().connect("integration_test");
+    uassertStatusOK(swConn.getStatus());
+    auto conn = std::move(swConn.getValue());
 
     conn->dropCollection("test.collection");
 
@@ -155,9 +155,9 @@ TEST(OpMsg, DocumentSequenceLargeDocumentMultiInsertWorks) {
 }
 
 TEST(OpMsg, DocumentSequenceMaxWriteBatchWorks) {
-    auto connOrStatus = unittest::getFixtureConnectionString().connect("integration_test");
-    uassertStatusOK(connOrStatus.getStatus());
-    auto conn = std::move(connOrStatus.getValue());
+    auto swConn = unittest::getFixtureConnectionString().connect("integration_test");
+    uassertStatusOK(swConn.getStatus());
+    auto conn = std::move(swConn.getValue());
 
     conn->dropCollection("test.collection");
 
@@ -277,9 +277,9 @@ TEST(OpMsg, CloseConnectionOnFireAndForgetNotWritablePrimaryError) {
 }
 
 TEST(OpMsg, DocumentSequenceReturnsWork) {
-    auto connOrStatus = unittest::getFixtureConnectionString().connect("integration_test");
-    uassertStatusOK(connOrStatus.getStatus());
-    auto conn = std::move(connOrStatus.getValue());
+    auto swConn = unittest::getFixtureConnectionString().connect("integration_test");
+    uassertStatusOK(swConn.getStatus());
+    auto conn = std::move(swConn.getValue());
 
     auto opMsgRequest = OpMsgRequest::fromDBAndBody("admin", BSON("echo" << 1));
     opMsgRequest.sequences.push_back({"example", {BSON("a" << 1), BSON("b" << 2)}});
@@ -320,9 +320,9 @@ void enableClientChecksum() {
 }
 
 void exhaustGetMoreTest(bool enableChecksum) {
-    auto connOrStatus = unittest::getFixtureConnectionString().connect("integration_test");
-    uassertStatusOK(connOrStatus.getStatus());
-    auto conn = std::move(connOrStatus.getValue());
+    auto swConn = unittest::getFixtureConnectionString().connect("integration_test");
+    uassertStatusOK(swConn.getStatus());
+    auto conn = std::move(swConn.getValue());
 
     // Only test exhaust against a standalone.
     if (conn->isReplicaSetMember() || conn->isMongos()) {
@@ -414,9 +414,9 @@ TEST(OpMsg, ServerHandlesExhaustGetMoreCorrectlyWithChecksum) {
 }
 
 TEST(OpMsg, FindIgnoresExhaust) {
-    auto connOrStatus = unittest::getFixtureConnectionString().connect("integration_test");
-    uassertStatusOK(connOrStatus.getStatus());
-    auto conn = std::move(connOrStatus.getValue());
+    auto swConn = unittest::getFixtureConnectionString().connect("integration_test");
+    uassertStatusOK(swConn.getStatus());
+    auto conn = std::move(swConn.getValue());
 
     // Only test exhaust against a standalone.
     if (conn->isReplicaSetMember() || conn->isMongos()) {
@@ -448,9 +448,9 @@ TEST(OpMsg, FindIgnoresExhaust) {
 }
 
 TEST(OpMsg, ServerDoesNotSetMoreToComeOnErrorInGetMore) {
-    auto connOrStatus = unittest::getFixtureConnectionString().connect("integration_test");
-    uassertStatusOK(connOrStatus.getStatus());
-    auto conn = std::move(connOrStatus.getValue());
+    auto swConn = unittest::getFixtureConnectionString().connect("integration_test");
+    uassertStatusOK(swConn.getStatus());
+    auto conn = std::move(swConn.getValue());
 
     // Only test exhaust against a standalone.
     if (conn->isReplicaSetMember() || conn->isMongos()) {
@@ -497,9 +497,9 @@ TEST(OpMsg, ServerDoesNotSetMoreToComeOnErrorInGetMore) {
 }
 
 TEST(OpMsg, MongosIgnoresExhaustForGetMore) {
-    auto connOrStatus = unittest::getFixtureConnectionString().connect("integration_test");
-    uassertStatusOK(connOrStatus.getStatus());
-    auto conn = std::move(connOrStatus.getValue());
+    auto swConn = unittest::getFixtureConnectionString().connect("integration_test");
+    uassertStatusOK(swConn.getStatus());
+    auto conn = std::move(swConn.getValue());
 
     if (!conn->isMongos()) {
         return;
@@ -548,9 +548,9 @@ TEST(OpMsg, MongosIgnoresExhaustForGetMore) {
 }
 
 TEST(OpMsg, ServerHandlesExhaustIsMasterCorrectly) {
-    auto connOrStatus = unittest::getFixtureConnectionString().connect("integration_test");
-    uassertStatusOK(connOrStatus.getStatus());
-    auto fixtureConn = std::move(connOrStatus.getValue());
+    auto swConn = unittest::getFixtureConnectionString().connect("integration_test");
+    uassertStatusOK(swConn.getStatus());
+    auto fixtureConn = std::move(swConn.getValue());
     DBClientBase* conn = fixtureConn.get();
 
     if (fixtureConn->isReplicaSetMember()) {
@@ -610,9 +610,9 @@ TEST(OpMsg, ServerHandlesExhaustIsMasterCorrectly) {
 }
 
 TEST(OpMsg, ServerHandlesExhaustIsMasterWithTopologyChange) {
-    auto connOrStatus = unittest::getFixtureConnectionString().connect("integration_test");
-    uassertStatusOK(connOrStatus.getStatus());
-    auto fixtureConn = std::move(connOrStatus.getValue());
+    auto swConn = unittest::getFixtureConnectionString().connect("integration_test");
+    uassertStatusOK(swConn.getStatus());
+    auto fixtureConn = std::move(swConn.getValue());
     DBClientBase* conn = fixtureConn.get();
 
     if (fixtureConn->isReplicaSetMember()) {
@@ -675,9 +675,9 @@ TEST(OpMsg, ServerHandlesExhaustIsMasterWithTopologyChange) {
 }
 
 TEST(OpMsg, ServerRejectsExhaustIsMasterWithoutMaxAwaitTimeMS) {
-    auto connOrStatus = unittest::getFixtureConnectionString().connect("integration_test");
-    uassertStatusOK(connOrStatus.getStatus());
-    auto fixtureConn = std::move(connOrStatus.getValue());
+    auto swConn = unittest::getFixtureConnectionString().connect("integration_test");
+    uassertStatusOK(swConn.getStatus());
+    auto fixtureConn = std::move(swConn.getValue());
     DBClientBase* conn = fixtureConn.get();
 
     if (fixtureConn->isReplicaSetMember()) {
@@ -699,9 +699,9 @@ TEST(OpMsg, ServerRejectsExhaustIsMasterWithoutMaxAwaitTimeMS) {
 }
 
 void serverStatusCorrectlyShowsExhaustMetrics(std::string commandName) {
-    auto connOrStatus = unittest::getFixtureConnectionString().connect("integration_test");
-    uassertStatusOK(connOrStatus.getStatus());
-    auto conn = std::move(connOrStatus.getValue());
+    auto swConn = unittest::getFixtureConnectionString().connect("integration_test");
+    uassertStatusOK(swConn.getStatus());
+    auto conn = std::move(swConn.getValue());
 
     if (conn->isReplicaSetMember()) {
         // Don't run on replica sets as the RSM will use the streamable hello or isMaster protocol
@@ -1150,9 +1150,9 @@ TEST(OpMsg, ExhaustWithDBClientCursorBehavesCorrectly) {
     // correctly. The externally visible behavior should technically be the same as a non-exhaust
     // cursor. The exhaust cursor should ideally provide a performance win over non-exhaust, but we
     // don't measure that here.
-    auto connOrStatus = unittest::getFixtureConnectionString().connect("integration_test");
-    uassertStatusOK(connOrStatus.getStatus());
-    auto conn = std::move(connOrStatus.getValue());
+    auto swConn = unittest::getFixtureConnectionString().connect("integration_test");
+    uassertStatusOK(swConn.getStatus());
+    auto conn = std::move(swConn.getValue());
 
     // Only test exhaust against a standalone.
     if (conn->isReplicaSetMember() || conn->isMongos()) {
@@ -1202,9 +1202,9 @@ TEST(OpMsg, ExhaustWithDBClientCursorBehavesCorrectly) {
 
 void checksumTest(bool enableChecksum) {
     // The server replies with a checksum if and only if the request has a checksum.
-    auto connOrStatus = unittest::getFixtureConnectionString().connect("integration_test");
-    uassertStatusOK(connOrStatus.getStatus());
-    auto conn = std::move(connOrStatus.getValue());
+    auto swConn = unittest::getFixtureConnectionString().connect("integration_test");
+    uassertStatusOK(swConn.getStatus());
+    auto conn = std::move(swConn.getValue());
 
     if (!enableChecksum) {
         disableClientChecksum();
@@ -1231,9 +1231,9 @@ TEST(OpMsg, ServerRepliesWithChecksumToRequestWithChecksum) {
 }
 
 TEST(OpMsg, ServerHandlesReallyLargeMessagesGracefully) {
-    auto connOrStatus = unittest::getFixtureConnectionString().connect("integration_test");
-    uassertStatusOK(connOrStatus.getStatus());
-    auto conn = std::move(connOrStatus.getValue());
+    auto swConn = unittest::getFixtureConnectionString().connect("integration_test");
+    uassertStatusOK(swConn.getStatus());
+    auto conn = std::move(swConn.getValue());
 
     auto buildInfo = conn->runCommand(OpMsgRequest::fromDBAndBody("admin", BSON("buildInfo" << 1)))
                          ->getCommandReply();
