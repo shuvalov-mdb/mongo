@@ -204,7 +204,6 @@ boost::optional<BSONObj> TenantMigrationDonorService::Instance::reportForCurrent
     bob.append("recipientConnectionString", _stateDoc.getRecipientConnectionString());
     bob.append("readPreference", _stateDoc.getReadPreference().toInnerBSON());
     bob.append("lastDurableState", _durableState.state);
-    bob.append("blockingStateTimeoutMillis", _stateDoc.getBlockingStateTimeoutMillis());
     if (_stateDoc.getExpireAt()) {
         bob.append("expireAt", _stateDoc.getExpireAt()->toString());
     }
@@ -592,33 +591,33 @@ SemiFuture<void> TenantMigrationDonorService::Instance::run(
             CancelationSource cancelTimeoutSource;
             // Source to cancel if the timeout expires before completion, as a child of parent
             // token.
-            CancelationSource timeoutOrParentSource(token);
+            CancelationSource recipientSyncDataCommandCancelSource(token);
 
-            auto deadlineReachedFuture =
-                (*executor)->sleepFor(Milliseconds(_stateDoc.getBlockingStateTimeoutMillis()),
-                                      cancelTimeoutSource.token());
+            auto deadlineReachedFuture = (*executor)->sleepFor(
+                Milliseconds(repl::tenantMigrationBlockingStateTimeoutMS.load()),
+                cancelTimeoutSource.token());
             std::vector<ExecutorFuture<void>> futures;
 
             futures.push_back(std::move(deadlineReachedFuture));
             futures.push_back(_sendRecipientSyncDataCommand(
-                executor, recipientTargeterRS, timeoutOrParentSource.token()));
+                executor, recipientTargeterRS, recipientSyncDataCommandCancelSource.token()));
 
             return whenAny(std::move(futures))
                 .thenRunOn(**executor)
                 .then([cancelTimeoutSource,
-                       timeoutOrParentSource,
-                       timeout = _stateDoc.getBlockingStateTimeoutMillis(),
+                       recipientSyncDataCommandCancelSource,
                        self = shared_from_this()](auto result) mutable {
                     const auto& [status, idx] = result;
 
                     if (idx == 0) {
                         LOGV2(5290301,
                               "Tenant migration blocking stage timeout expired",
-                              "timeoutMs"_attr = timeout);
-                        // Deadline reached, abort the pending '_sendRecipientSyncDataCommand()'...
-                        timeoutOrParentSource.cancel();
+                              "timeoutMs"_attr =
+                                  repl::tenantMigrationGarbageCollectionDelayMS.load());
+                        // Deadline reached, cancel the pending '_sendRecipientSyncDataCommand()'...
+                        recipientSyncDataCommandCancelSource.cancel();
                         // ...and return error.
-                        uasserted(ErrorCodes::MaxTimeMSExpired, "Blocked state timeout expired");
+                        uasserted(ErrorCodes::ExceededTimeLimit, "Blocking state timeout expired");
                     } else if (idx == 1) {
                         // '_sendRecipientSyncDataCommand()' finished first, cancel the timeout.
                         cancelTimeoutSource.cancel();
@@ -651,7 +650,7 @@ SemiFuture<void> TenantMigrationDonorService::Instance::run(
                         uasserted(ErrorCodes::InternalError, "simulate a tenant migration error");
                     });
                 })
-                .then([this, self = shared_from_this(), executor, token, cancelTimeoutSource] {
+                .then([this, self = shared_from_this(), executor, token] {
                     // Enter "commit" state.
                     return _updateStateDocument(
                                executor, TenantMigrationDonorStateEnum::kCommitted, token)

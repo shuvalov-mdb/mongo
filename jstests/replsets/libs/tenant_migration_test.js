@@ -56,6 +56,7 @@ function TenantMigrationTest(
         nodeOptions["setParameter"] = setParameterOpts;
 
         const rstName = `${name}_${(isDonor ? "donor" : "recipient")}`;
+        jsTestLog("name " + rstName);
         const rst = new ReplSetTest({name: rstName, nodes: 2, nodeOptions});
         rst.startSet();
         rst.initiateWithHighElectionTimeout();

@@ -427,7 +427,7 @@ private:
             for (auto entryMode = kFirstTimeEntered;
                  MONGO_unlikely(_shouldFail(entryMode, nullptr)) && !token->isCanceled();
                  entryMode = kEnteredAlready) {
-                // Not using token->onCancel() because we need to handle the fault point unset.
+                // Not using token->onCancel() because we need to handle the fail point unset.
                 interruptible->sleepFor(kWaitGranularity);
             }
         }
