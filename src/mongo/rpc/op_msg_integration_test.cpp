@@ -46,6 +46,7 @@
 #include "mongo/util/scopeguard.h"
 
 namespace mongo {
+namespace {
 
 template <typename F>
 bool waitForCondition(F&& f) {
@@ -63,6 +64,13 @@ bool waitForCondition(F&& f) {
     return false;
 }
 
+std::unique_ptr<DBClientBase> getIntegrationTestConnection() {
+    auto swConn = unittest::getFixtureConnectionString().connect("integration_test");
+    uassertStatusOK(swConn.getStatus());
+    return std::move(swConn.getValue());
+}
+
+
 // Returns the connection name by filtering on the appName of a $currentOp command. If no result is
 // found, return an empty string.
 std::string getThreadNameByAppName(DBClientBase* conn, StringData appName) {
@@ -78,9 +86,7 @@ std::string getThreadNameByAppName(DBClientBase* conn, StringData appName) {
 }
 
 TEST(OpMsg, UnknownRequiredFlagClosesConnection) {
-    auto swConn = unittest::getFixtureConnectionString().connect("integration_test");
-    uassertStatusOK(swConn.getStatus());
-    auto conn = std::move(swConn.getValue());
+    auto conn = getIntegrationTestConnection();
 
     auto request = OpMsgRequest::fromDBAndBody("admin", BSON("ping" << 1)).serialize();
     OpMsg::setFlag(&request, 1u << 15);  // This should be the last required flag to be assigned.
@@ -90,9 +96,7 @@ TEST(OpMsg, UnknownRequiredFlagClosesConnection) {
 }
 
 TEST(OpMsg, UnknownOptionalFlagIsIgnored) {
-    auto swConn = unittest::getFixtureConnectionString().connect("integration_test");
-    uassertStatusOK(swConn.getStatus());
-    auto conn = std::move(swConn.getValue());
+    auto conn = getIntegrationTestConnection();
 
     auto request = OpMsgRequest::fromDBAndBody("admin", BSON("ping" << 1)).serialize();
     OpMsg::setFlag(&request, 1u << 31);  // This should be the last optional flag to be assigned.
@@ -104,9 +108,7 @@ TEST(OpMsg, UnknownOptionalFlagIsIgnored) {
 }
 
 TEST(OpMsg, FireAndForgetInsertWorks) {
-    auto swConn = unittest::getFixtureConnectionString().connect("integration_test");
-    uassertStatusOK(swConn.getStatus());
-    auto conn = std::move(swConn.getValue());
+    auto conn = getIntegrationTestConnection();
 
     conn->dropCollection("test.collection");
 
@@ -122,9 +124,7 @@ TEST(OpMsg, FireAndForgetInsertWorks) {
 }
 
 TEST(OpMsg, DocumentSequenceLargeDocumentMultiInsertWorks) {
-    auto swConn = unittest::getFixtureConnectionString().connect("integration_test");
-    uassertStatusOK(swConn.getStatus());
-    auto conn = std::move(swConn.getValue());
+    auto conn = getIntegrationTestConnection();
 
     conn->dropCollection("test.collection");
 
@@ -155,9 +155,7 @@ TEST(OpMsg, DocumentSequenceLargeDocumentMultiInsertWorks) {
 }
 
 TEST(OpMsg, DocumentSequenceMaxWriteBatchWorks) {
-    auto swConn = unittest::getFixtureConnectionString().connect("integration_test");
-    uassertStatusOK(swConn.getStatus());
-    auto conn = std::move(swConn.getValue());
+    auto conn = getIntegrationTestConnection();
 
     conn->dropCollection("test.collection");
 
@@ -277,9 +275,7 @@ TEST(OpMsg, CloseConnectionOnFireAndForgetNotWritablePrimaryError) {
 }
 
 TEST(OpMsg, DocumentSequenceReturnsWork) {
-    auto swConn = unittest::getFixtureConnectionString().connect("integration_test");
-    uassertStatusOK(swConn.getStatus());
-    auto conn = std::move(swConn.getValue());
+    auto conn = getIntegrationTestConnection();
 
     auto opMsgRequest = OpMsgRequest::fromDBAndBody("admin", BSON("echo" << 1));
     opMsgRequest.sequences.push_back({"example", {BSON("a" << 1), BSON("b" << 2)}});
@@ -320,9 +316,7 @@ void enableClientChecksum() {
 }
 
 void exhaustGetMoreTest(bool enableChecksum) {
-    auto swConn = unittest::getFixtureConnectionString().connect("integration_test");
-    uassertStatusOK(swConn.getStatus());
-    auto conn = std::move(swConn.getValue());
+    auto conn = getIntegrationTestConnection();
 
     // Only test exhaust against a standalone.
     if (conn->isReplicaSetMember() || conn->isMongos()) {
@@ -414,9 +408,7 @@ TEST(OpMsg, ServerHandlesExhaustGetMoreCorrectlyWithChecksum) {
 }
 
 TEST(OpMsg, FindIgnoresExhaust) {
-    auto swConn = unittest::getFixtureConnectionString().connect("integration_test");
-    uassertStatusOK(swConn.getStatus());
-    auto conn = std::move(swConn.getValue());
+    auto conn = getIntegrationTestConnection();
 
     // Only test exhaust against a standalone.
     if (conn->isReplicaSetMember() || conn->isMongos()) {
@@ -448,9 +440,7 @@ TEST(OpMsg, FindIgnoresExhaust) {
 }
 
 TEST(OpMsg, ServerDoesNotSetMoreToComeOnErrorInGetMore) {
-    auto swConn = unittest::getFixtureConnectionString().connect("integration_test");
-    uassertStatusOK(swConn.getStatus());
-    auto conn = std::move(swConn.getValue());
+    auto conn = getIntegrationTestConnection();
 
     // Only test exhaust against a standalone.
     if (conn->isReplicaSetMember() || conn->isMongos()) {
@@ -497,9 +487,7 @@ TEST(OpMsg, ServerDoesNotSetMoreToComeOnErrorInGetMore) {
 }
 
 TEST(OpMsg, MongosIgnoresExhaustForGetMore) {
-    auto swConn = unittest::getFixtureConnectionString().connect("integration_test");
-    uassertStatusOK(swConn.getStatus());
-    auto conn = std::move(swConn.getValue());
+    auto conn = getIntegrationTestConnection();
 
     if (!conn->isMongos()) {
         return;
@@ -699,9 +687,7 @@ TEST(OpMsg, ServerRejectsExhaustIsMasterWithoutMaxAwaitTimeMS) {
 }
 
 void serverStatusCorrectlyShowsExhaustMetrics(std::string commandName) {
-    auto swConn = unittest::getFixtureConnectionString().connect("integration_test");
-    uassertStatusOK(swConn.getStatus());
-    auto conn = std::move(swConn.getValue());
+    auto conn = getIntegrationTestConnection();
 
     if (conn->isReplicaSetMember()) {
         // Don't run on replica sets as the RSM will use the streamable hello or isMaster protocol
@@ -774,8 +760,9 @@ TEST(OpMsg, ServerStatusCorrectlyShowsExhaustIsMasterMetricsWithIsMasterAlias) {
 
 void exhaustMetricSwitchingCommandNames(bool useLegacyCommandNameAtStart) {
     const auto conn1AppName = "integration_test";
-    auto conn1 = std::move(unittest::getFixtureConnectionString().connect(conn1AppName).getValue());
-    uassert(ErrorCodes::SocketException, "connection failed", conn1);
+    auto swConn1 = unittest::getFixtureConnectionString().connect(conn1AppName);
+    uassertStatusOK(swConn1.getStatus());
+    auto conn1 = std::move(swConn1.getValue());
 
     if (conn1->isReplicaSetMember()) {
         // Don't run on replica sets as the RSM will use the streamable hello or isMaster protocol
@@ -910,7 +897,9 @@ TEST(OpMsg, ExhaustHelloMetricSwitchingCommandNames) {
 
 void exhaustMetricDecrementsOnNewOpAfterTerminatingExhaustStream(bool useLegacyCommandName) {
     const auto conn1AppName = "integration_test";
-    auto conn1 = std::move(unittest::getFixtureConnectionString().connect(conn1AppName).getValue());
+    auto swConn1 = unittest::getFixtureConnectionString().connect(conn1AppName);
+    uassertStatusOK(swConn1.getStatus());
+    auto conn1 = std::move(swConn1.getValue());
 
     if (conn1->isReplicaSetMember()) {
         // Don't run on replica sets as the RSM will use the streamable hello or isMaster protocol
@@ -1021,8 +1010,9 @@ TEST(OpMsg, ExhaustHelloMetricDecrementsOnNewOpAfterTerminatingExhaustStream) {
 
 void exhaustMetricOnNewExhaustAfterTerminatingExhaustStream(bool useLegacyCommandName) {
     const auto conn1AppName = "integration_test";
-    auto conn1 = std::move(unittest::getFixtureConnectionString().connect(conn1AppName).getValue());
-    uassert(ErrorCodes::SocketException, "connection failed", conn1);
+    auto swConn1 = unittest::getFixtureConnectionString().connect(conn1AppName);
+    uassertStatusOK(swConn1.getStatus());
+    auto conn1 = std::move(swConn1.getValue());
 
     if (conn1->isReplicaSetMember()) {
         // Don't run on replica sets as the RSM will use the streamable hello or isMaster protocol
@@ -1150,9 +1140,7 @@ TEST(OpMsg, ExhaustWithDBClientCursorBehavesCorrectly) {
     // correctly. The externally visible behavior should technically be the same as a non-exhaust
     // cursor. The exhaust cursor should ideally provide a performance win over non-exhaust, but we
     // don't measure that here.
-    auto swConn = unittest::getFixtureConnectionString().connect("integration_test");
-    uassertStatusOK(swConn.getStatus());
-    auto conn = std::move(swConn.getValue());
+    auto conn = getIntegrationTestConnection();
 
     // Only test exhaust against a standalone.
     if (conn->isReplicaSetMember() || conn->isMongos()) {
@@ -1202,9 +1190,7 @@ TEST(OpMsg, ExhaustWithDBClientCursorBehavesCorrectly) {
 
 void checksumTest(bool enableChecksum) {
     // The server replies with a checksum if and only if the request has a checksum.
-    auto swConn = unittest::getFixtureConnectionString().connect("integration_test");
-    uassertStatusOK(swConn.getStatus());
-    auto conn = std::move(swConn.getValue());
+    auto conn = getIntegrationTestConnection();
 
     if (!enableChecksum) {
         disableClientChecksum();
@@ -1231,9 +1217,7 @@ TEST(OpMsg, ServerRepliesWithChecksumToRequestWithChecksum) {
 }
 
 TEST(OpMsg, ServerHandlesReallyLargeMessagesGracefully) {
-    auto swConn = unittest::getFixtureConnectionString().connect("integration_test");
-    uassertStatusOK(swConn.getStatus());
-    auto conn = std::move(swConn.getValue());
+    auto conn = getIntegrationTestConnection();
 
     auto buildInfo = conn->runCommand(OpMsgRequest::fromDBAndBody("admin", BSON("buildInfo" << 1)))
                          ->getCommandReply();
@@ -1272,7 +1256,9 @@ public:
             uri.setHelloOk(helloOk.get());
         }
 
-        auto conn = std::move(connStr.connect(_appName, 0, &uri).getValue());
+        auto swConn = connStr.connect(_appName, 0, &uri);
+        uassertStatusOK(swConn.getStatus());
+        auto conn = std::move(swConn.getValue());
         uassert(ErrorCodes::SocketException, "connection failed", conn);
 
         _configureFailPoint(conn.get());
@@ -1332,4 +1318,5 @@ TEST(OpMsg, HelloOkCanBeDisabled) {
     ASSERT(!isHelloOk);
 }
 
+}  // namespace
 }  // namespace mongo

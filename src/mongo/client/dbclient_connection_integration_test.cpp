@@ -45,10 +45,10 @@ constexpr StringData kAppName = "DBClientConnectionTest"_sd;
 class DBClientConnectionFixture : public unittest::Test {
 public:
     static std::unique_ptr<DBClientConnection> makeConn(StringData name = kAppName) {
-        auto swConnHolder = unittest::getFixtureConnectionString().connect(name);
-        uassertStatusOK(swConnHolder.getStatus());
+        auto swConn = unittest::getFixtureConnectionString().connect(name);
+        uassertStatusOK(swConn.getStatus());
 
-        auto conn = dynamic_cast<DBClientConnection*>(swConnHolder.getValue().release());
+        auto conn = dynamic_cast<DBClientConnection*>(swConn.getValue().release());
         return std::unique_ptr<DBClientConnection>{conn};
     }
 

@@ -276,7 +276,7 @@ std::unique_ptr<DBClientConnection> TenantMigrationRecipientService::Instance::_
                     "migrationId"_attr = getMigrationUUID(),
                     "serverAddress"_attr = serverAddress,
                     "applicationName"_attr = applicationName,
-                    "error"_attr = clientBase.getStatus().toString());
+                    "error"_attr = clientBase.getStatus());
         uassertStatusOK(clientBase.getStatus());
     }
 

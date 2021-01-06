@@ -391,7 +391,8 @@ DBClientBase* DBConnectionPool::get(const ConnectionString& url, double socketTi
     auto connect = [&]() {
         auto c = url.connect(StringData(), socketTimeout);
         uassert(13328,
-                _name + ": connect failed " + url.toString() + " : " + c.getStatus().reason(),
+                fmt::format(
+                    "{}: connect failed {} : {}", _name, url.toString(), c.getStatus().reason()),
                 c.isOK());
         return c.getValue().release();
     };
@@ -407,7 +408,7 @@ DBClientBase* DBConnectionPool::get(const string& host, double socketTimeout) {
         if (!swConn.isOK()) {
             throwSocketError(SocketErrorKind::CONNECT_ERROR,
                              host,
-                             str::stream() << _name << " error: " << swConn.getStatus().reason());
+                             fmt::format("{} error: {}", _name, swConn.getStatus().reason()));
         }
 
         return swConn.getValue().release();
@@ -420,7 +421,7 @@ DBClientBase* DBConnectionPool::get(const MongoURI& uri, double socketTimeout) {
     auto connect = [&] {
         string errmsg;
         std::unique_ptr<DBClientBase> c(uri.connect(uri.getAppName().get(), errmsg, socketTimeout));
-        uassert(40356, _name + ": connect failed " + uri.toString() + " : " + errmsg, c);
+        uassert(40356, fmt::format("{}: connect failed {} : {}", _name, uri.toString(), errmsg), c);
         return c.release();
     };
 

@@ -58,7 +58,9 @@ StatusWith<std::unique_ptr<DBClientBase>> ConnectionString::connect(
 
     switch (_type) {
         case ConnectionType::kStandalone: {
-            Status lastError = Status(ErrorCodes::HostUnreachable, "No valid hosts found");
+            Status lastError = Status(ErrorCodes::BadValue,
+                                      "Unexpected error, server list is empty. The initialization "
+                                      "was expected to throw FailedToParse exception before.");
             for (const auto& server : _servers) {
                 auto c = std::make_unique<DBClientConnection>(
                     true, 0, newURI, DBClientConnection::HandshakeValidationHook(), apiParameters);
