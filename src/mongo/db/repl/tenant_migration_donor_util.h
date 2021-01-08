@@ -58,7 +58,7 @@ TenantMigrationDonorDocument parseDonorStateDocument(const BSONObj& doc);
  * timestamp, blocks until the migration is committed or aborted.
  * TODO SERVER-53505: Change this to return SharedSemiFuture<TenantMigrationAccessBlocker::State>.
  */
-void checkIfCanRead(OperationContext* opCtx, StringData dbName);
+void checkIfCanReadOrBlock(OperationContext* opCtx, StringData dbName);
 
 /**
  * If the operation has read concern "linearizable", throws TenantMigrationCommitted error if the

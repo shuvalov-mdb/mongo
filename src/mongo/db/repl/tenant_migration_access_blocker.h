@@ -41,20 +41,30 @@ namespace mongo {
 // Safe wrapper for a SharedPromise that allows setting the promise more than once.
 template <typename Payload>
 class RepeatableSharedPromise {
-public:
-    RepeatableSharedPromise(Payload valueAtTermination)
-        : _sharedPromise(std::make_unique<SharedPromise<Payload>>()),
-          _valueAtTermination(valueAtTermination) {}
+    using Payload_unless_void =
+        std::conditional_t<std::is_void_v<Payload>, future_details::FakeVoid, Payload>;
 
-    ~RepeatableSharedPromise() {
-        _sharedPromise->setFrom(StatusOrStatusWith<Payload>(_valueAtTermination));
+public:
+    RepeatableSharedPromise(Payload_unless_void valueAtTermination)
+        : _sharedPromise(std::make_unique<SharedPromise<Payload>>()),
+          _valueAtTermination(valueAtTermination) {
+        static_assert(!std::is_void_v<Payload>);
     }
+
+    RepeatableSharedPromise()
+        : _sharedPromise(std::make_unique<SharedPromise<Payload>>()), _valueAtTermination({}) {
+        static_assert(std::is_void_v<Payload>);
+    }
+
+    ~RepeatableSharedPromise();
 
     SharedSemiFuture<Payload> getFuture() {
         stdx::unique_lock<Latch> ul(_mutex);
         return _sharedPromise->getFuture();
     }
 
+    // Set promise with value for non-void Payload or with Status.
+    // In case of void Payload always use Status with or without error code.
     void setFrom(StatusOrStatusWith<const Payload> sosw) noexcept {
         stdx::unique_lock<Latch> ul(_mutex);
         _sharedPromise->setFrom(std::move(sosw));
@@ -66,8 +76,9 @@ private:
     mutable Mutex _mutex;
     std::unique_ptr<SharedPromise<Payload>> _sharedPromise;
     // In destructor, set the final payload value to this.
-    const Payload _valueAtTermination;
+    const Payload_unless_void _valueAtTermination;
 };
+
 
 /**
  * The TenantMigrationAccessBlocker is used to block and eventually reject reads and writes to a
@@ -152,13 +163,7 @@ public:
 
     TenantMigrationAccessBlocker(ServiceContext* serviceContext,
                                  std::string tenantId,
-                                 std::string recipientConnString)
-        : _serviceContext(serviceContext),
-          _tenantId(std::move(tenantId)),
-          _recipientConnString(std::move(recipientConnString)),
-          _transitionOutOfBlockingPromise(State::kAllow) {
-        _lockAsyncExecutorInstance(serviceContext);
-    }
+                                 std::string recipientConnString);
 
     //
     // Called by all writes and reads against the database.
@@ -168,7 +173,7 @@ public:
     Status waitUntilCommittedOrAborted(OperationContext* opCtx);
 
     void checkIfLinearizableReadWasAllowedOrThrow(OperationContext* opCtx);
-    SharedSemiFuture<State> checkIfCanDoClusterTimeRead(OperationContext* opCtx);
+    SharedSemiFuture<void> checkIfCanDoClusterTimeRead(OperationContext* opCtx);
 
     //
     // Called while donating this database.
@@ -207,7 +212,8 @@ public:
 
     std::string stateToString(State state) const;
 
-    BSONObj getTenantMigrationCommittedInfo() const;
+    // Returns structured info with current tenant ID and connection string.
+    BSONObj getDebugInfo() const;
 
 private:
     void _onMajorityCommitCommitOpTime(stdx::unique_lock<Latch>& lk);
@@ -230,7 +236,7 @@ private:
 
     SharedPromise<void> _completionPromise;
 
-    RepeatableSharedPromise<State> _transitionOutOfBlockingPromise;
+    RepeatableSharedPromise<void> _transitionOutOfBlockingPromise;
 
     std::shared_ptr<executor::TaskExecutor> _asyncBlockingOperationsExecutor;
 };

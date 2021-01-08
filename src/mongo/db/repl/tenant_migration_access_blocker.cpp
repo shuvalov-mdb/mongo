@@ -55,6 +55,24 @@ const Backoff kExponentialBackoff(Seconds(1), Milliseconds::max());
 
 }  // namespace
 
+template <typename Payload>
+RepeatableSharedPromise<Payload>::~RepeatableSharedPromise() {
+    _sharedPromise->setFrom(StatusOrStatusWith<Payload>(_valueAtTermination));
+}
+
+template <>
+RepeatableSharedPromise<void>::~RepeatableSharedPromise() {}
+
+TenantMigrationAccessBlocker::TenantMigrationAccessBlocker(ServiceContext* serviceContext,
+                                                           std::string tenantId,
+                                                           std::string recipientConnString)
+    : _serviceContext(serviceContext),
+      _tenantId(std::move(tenantId)),
+      _recipientConnString(std::move(recipientConnString)) {
+    _asyncBlockingOperationsExecutor = TenantMigrationAccessBlockerExecutor::get(serviceContext)
+                                           .getOrCreateBlockedOperationsExecutor();
+}
+
 void TenantMigrationAccessBlocker::checkIfCanWriteOrThrow() {
     stdx::lock_guard<Latch> lg(_mutex);
 
@@ -93,7 +111,7 @@ Status TenantMigrationAccessBlocker::waitUntilCommittedOrAborted(OperationContex
 
     futures.emplace_back(onCompletion().thenRunOn(executor));
 
-    if (opCtx->getDeadline() < Date_t::max()) {
+    if (opCtx->hasDeadline()) {
         auto deadlineReachedFuture =
             executor->sleepUntil(opCtx->getDeadline(), cancelTimeoutSource.token());
         // The timeout condition is optional with index #1.
@@ -113,14 +131,14 @@ Status TenantMigrationAccessBlocker::waitUntilCommittedOrAborted(OperationContex
     } else if (idx == 1) {
         // Deadline finished first, return error
         return Status(opCtx->getTimeoutError(),
-                      "Operation timed out waiting for tenant migration blocker",
-                      TenantMigrationCommittedInfo(_tenantId, _recipientConnString).toBSON());
+                      "Operation timed out waiting for tenant migration to commit or abort",
+                      getDebugInfo());
     }
     MONGO_UNREACHABLE;
 }
 
-SharedSemiFuture<TenantMigrationAccessBlocker::State>
-TenantMigrationAccessBlocker::checkIfCanDoClusterTimeRead(OperationContext* opCtx) {
+SharedSemiFuture<void> TenantMigrationAccessBlocker::checkIfCanDoClusterTimeRead(
+    OperationContext* opCtx) {
     auto readConcernArgs = repl::ReadConcernArgs::get(opCtx);
     auto readTimestamp = [opCtx, &readConcernArgs]() -> boost::optional<Timestamp> {
         if (auto afterClusterTime = readConcernArgs.getArgsAfterClusterTime()) {
@@ -135,7 +153,7 @@ TenantMigrationAccessBlocker::checkIfCanDoClusterTimeRead(OperationContext* opCt
         return boost::none;
     }();
     if (!readTimestamp) {
-        return SharedSemiFuture(State::kAllow);
+        return SharedSemiFuture<void>();
     }
 
     stdx::unique_lock<Latch> ul(_mutex);
@@ -147,10 +165,10 @@ TenantMigrationAccessBlocker::checkIfCanDoClusterTimeRead(OperationContext* opCt
         tenantMigrationBlockRead.shouldFail();  // Return value intentionally ignored.
     }
     if (canRead) {
-        return SharedSemiFuture(State::kAllow);
+        return SharedSemiFuture<void>();
     }
     if (_state == State::kReject) {
-        return SharedSemiFuture<State>(
+        return SharedSemiFuture<void>(
             Status(ErrorCodes::TenantMigrationCommitted,
                    "Write or read must be re-routed to the new owner of this tenant",
                    TenantMigrationCommittedInfo(_tenantId, _recipientConnString).toBSON()));
@@ -206,7 +224,7 @@ void TenantMigrationAccessBlocker::rollBackStartBlocking() {
 
     _state = State::kAllow;
     _blockTimestamp.reset();
-    _transitionOutOfBlockingPromise.setFrom(_state);
+    _transitionOutOfBlockingPromise.setFrom(Status::OK());
 }
 
 void TenantMigrationAccessBlocker::setCommitOpTime(OperationContext* opCtx, repl::OpTime opTime) {
@@ -280,8 +298,8 @@ void TenantMigrationAccessBlocker::_onMajorityCommitCommitOpTime(stdx::unique_lo
 
     _state = State::kReject;
     Status error{ErrorCodes::TenantMigrationCommitted,
-         "Write must be re-routed to the new owner of this tenant",
-         TenantMigrationCommittedInfo(_tenantId, _recipientConnString).toBSON()};
+                 "Write must be re-routed to the new owner of this tenant",
+                 TenantMigrationCommittedInfo(_tenantId, _recipientConnString).toBSON()};
     _completionPromise.setError(error);
     _transitionOutOfBlockingPromise.setFrom(error);
 
@@ -296,7 +314,7 @@ void TenantMigrationAccessBlocker::_onMajorityCommitAbortOpTime(stdx::unique_loc
     invariant(_abortOpTime);
 
     _state = State::kAborted;
-    _transitionOutOfBlockingPromise.setFrom(_state);
+    _transitionOutOfBlockingPromise.setFrom(Status::OK());
     _completionPromise.setError({ErrorCodes::TenantMigrationAborted, "Tenant migration aborted"});
 
     lk.unlock();
@@ -344,12 +362,9 @@ std::string TenantMigrationAccessBlocker::stateToString(State state) const {
     }
 }
 
-void TenantMigrationAccessBlocker::_lockAsyncExecutorInstance(ServiceContext* serviceContext) {
-    _asyncBlockingOperationsExecutor = TenantMigrationAccessBlockerExecutor::get(serviceContext)
-                                           .getOrCreateBlockedOperationsExecutor();
-}
-
-BSONObj TenantMigrationAccessBlocker::getTenantMigrationCommittedInfo() const {
+BSONObj TenantMigrationAccessBlocker::getDebugInfo() const {
+    // This class is convenient to generate a debug info, this doesn't mean that the migration was
+    // committed.
     return TenantMigrationCommittedInfo(_tenantId, _recipientConnString).toBSON();
 }
 

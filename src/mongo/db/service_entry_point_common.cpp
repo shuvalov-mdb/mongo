@@ -792,8 +792,8 @@ Future<void> InvokeCommand::run(const bool checkoutSession) {
         return makeReadyFutureWith([] {})
             .then([this, anchor] {
                 auto execContext = _ecd->getExecutionContext();
-                tenant_migration_donor::checkIfCanRead(execContext->getOpCtx(),
-                                                       execContext->getRequest().getDatabase());
+                tenant_migration_donor::checkIfCanReadOrBlock(
+                    execContext->getOpCtx(), execContext->getRequest().getDatabase());
                 return _runInvocation();
             })
             .onError<ErrorCodes::TenantMigrationConflict>([this, anchor](Status status) {
@@ -813,8 +813,8 @@ Future<void> InvokeCommand::SessionCheckoutPath::run() {
             return makeReadyFutureWith([] {})
                 .then([this, anchor] {
                     auto execContext = _parent->_ecd->getExecutionContext();
-                    tenant_migration_donor::checkIfCanRead(execContext->getOpCtx(),
-                                                           execContext->getRequest().getDatabase());
+                    tenant_migration_donor::checkIfCanReadOrBlock(
+                        execContext->getOpCtx(), execContext->getRequest().getDatabase());
                     return _parent->_runInvocation();
                 })
                 .onError<ErrorCodes::TenantMigrationConflict>([this, anchor](Status status) {

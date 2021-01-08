@@ -34,7 +34,6 @@
 
 #include "mongo/db/repl/tenant_migration_donor_util.h"
 
-#include "mongo/db/client_strand.h"
 #include "mongo/db/commands/tenant_migration_recipient_cmds_gen.h"
 #include "mongo/db/namespace_string.h"
 #include "mongo/db/persistent_task_store.h"
@@ -112,7 +111,7 @@ TenantMigrationDonorDocument parseDonorStateDocument(const BSONObj& doc) {
 }
 
 
-void checkIfCanRead(OperationContext* opCtx, StringData dbName) {
+void checkIfCanReadOrBlock(OperationContext* opCtx, StringData dbName) {
     auto mtab = TenantMigrationAccessBlockerRegistry::get(opCtx->getServiceContext())
                     .getTenantMigrationAccessBlockerForDbName(dbName);
 
@@ -125,10 +124,14 @@ void checkIfCanRead(OperationContext* opCtx, StringData dbName) {
     std::vector<ExecutorFuture<void>> futures;
 
     auto executor = mtab->getAsyncBlockingOperationsExecutor();
-    futures.emplace_back(
-        mtab->checkIfCanDoClusterTimeRead(opCtx).semi().ignoreValue().thenRunOn(executor));
+    futures.emplace_back(mtab->checkIfCanDoClusterTimeRead(opCtx).semi().thenRunOn(executor));
 
-    if (opCtx->getDeadline() < Date_t::max()) {
+    // Optimisation: if the future is already ready, we are done.
+    if (futures[0].isReady()) {
+        return;
+    }
+
+    if (opCtx->hasDeadline()) {
         auto deadlineReachedFuture =
             executor->sleepUntil(opCtx->getDeadline(), cancelTimeoutSource.token());
         // The timeout condtion is optional with index #1.
@@ -145,7 +148,7 @@ void checkIfCanRead(OperationContext* opCtx, StringData dbName) {
         // Deadline finished first, throw error.
         uassertStatusOK(Status(opCtx->getTimeoutError(),
                                "Read timed out waiting for tenant migration blocker",
-                               mtab->getTenantMigrationCommittedInfo()));
+                               mtab->getDebugInfo()));
     }
 }
 
