@@ -41,11 +41,11 @@ namespace mongo {
 // Safe wrapper for a SharedPromise that allows setting the promise more than once.
 template <typename Payload>
 class RepeatableSharedPromise {
-    using Payload_unless_void =
+    using payload_unless_void =
         std::conditional_t<std::is_void_v<Payload>, future_details::FakeVoid, Payload>;
 
 public:
-    RepeatableSharedPromise(Payload_unless_void valueAtTermination)
+    RepeatableSharedPromise(payload_unless_void valueAtTermination)
         : _sharedPromise(std::make_unique<SharedPromise<Payload>>()),
           _valueAtTermination(valueAtTermination) {
         static_assert(!std::is_void_v<Payload>);
@@ -76,7 +76,7 @@ private:
     mutable Mutex _mutex;
     std::unique_ptr<SharedPromise<Payload>> _sharedPromise;
     // In destructor, set the final payload value to this.
-    const Payload_unless_void _valueAtTermination;
+    const payload_unless_void _valueAtTermination;
 };
 
 
@@ -173,7 +173,7 @@ public:
     Status waitUntilCommittedOrAborted(OperationContext* opCtx);
 
     void checkIfLinearizableReadWasAllowedOrThrow(OperationContext* opCtx);
-    SharedSemiFuture<void> checkIfCanDoClusterTimeRead(OperationContext* opCtx);
+    SharedSemiFuture<void> getCanReadFuture(OperationContext* opCtx);
 
     //
     // Called while donating this database.
@@ -220,6 +220,10 @@ private:
     void _onMajorityCommitAbortOpTime(stdx::unique_lock<Latch>& lk);
 
     void _lockAsyncExecutorInstance(ServiceContext* serviceContext);
+
+    // Helper for the method 'getCanReadFuture()'.
+    SharedSemiFuture<void> _checkIfCanDoClusterTimeRead(OperationContext* opCtx,
+                                                        Timestamp readTimestamp);
 
     ServiceContext* _serviceContext;
     const std::string _tenantId;

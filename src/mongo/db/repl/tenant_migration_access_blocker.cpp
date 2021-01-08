@@ -137,10 +137,9 @@ Status TenantMigrationAccessBlocker::waitUntilCommittedOrAborted(OperationContex
     MONGO_UNREACHABLE;
 }
 
-SharedSemiFuture<void> TenantMigrationAccessBlocker::checkIfCanDoClusterTimeRead(
-    OperationContext* opCtx) {
+SharedSemiFuture<void> TenantMigrationAccessBlocker::getCanReadFuture(OperationContext* opCtx) {
     auto readConcernArgs = repl::ReadConcernArgs::get(opCtx);
-    auto readTimestamp = [opCtx, &readConcernArgs]() -> boost::optional<Timestamp> {
+    auto readTimestamp = [opCtx, &readConcernArgs]() -> std::optional<Timestamp> {
         if (auto afterClusterTime = readConcernArgs.getArgsAfterClusterTime()) {
             return afterClusterTime->asTimestamp();
         }
@@ -150,12 +149,16 @@ SharedSemiFuture<void> TenantMigrationAccessBlocker::checkIfCanDoClusterTimeRead
         if (readConcernArgs.getLevel() == repl::ReadConcernLevel::kSnapshotReadConcern) {
             return repl::StorageInterface::get(opCtx)->getPointInTimeReadTimestamp(opCtx);
         }
-        return boost::none;
+        return std::nullopt;
     }();
     if (!readTimestamp) {
         return SharedSemiFuture<void>();
     }
+    return _checkIfCanDoClusterTimeRead(opCtx, *readTimestamp);
+}
 
+SharedSemiFuture<void> TenantMigrationAccessBlocker::_checkIfCanDoClusterTimeRead(
+    OperationContext* opCtx, Timestamp readTimestamp) {
     stdx::unique_lock<Latch> ul(_mutex);
 
     auto canRead = _state == State::kAllow || _state == State::kAborted ||
@@ -298,7 +301,7 @@ void TenantMigrationAccessBlocker::_onMajorityCommitCommitOpTime(stdx::unique_lo
 
     _state = State::kReject;
     Status error{ErrorCodes::TenantMigrationCommitted,
-                 "Write must be re-routed to the new owner of this tenant",
+                 "Write or read must be re-routed to the new owner of this tenant",
                  TenantMigrationCommittedInfo(_tenantId, _recipientConnString).toBSON()};
     _completionPromise.setError(error);
     _transitionOutOfBlockingPromise.setFrom(error);
@@ -363,9 +366,7 @@ std::string TenantMigrationAccessBlocker::stateToString(State state) const {
 }
 
 BSONObj TenantMigrationAccessBlocker::getDebugInfo() const {
-    // This class is convenient to generate a debug info, this doesn't mean that the migration was
-    // committed.
-    return TenantMigrationCommittedInfo(_tenantId, _recipientConnString).toBSON();
+    return BSON("tenantId" << _tenantId << "recipientConnectionString" << _recipientConnString);
 }
 
 }  // namespace mongo

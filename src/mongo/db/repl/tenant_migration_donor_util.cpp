@@ -124,7 +124,7 @@ void checkIfCanReadOrBlock(OperationContext* opCtx, StringData dbName) {
     std::vector<ExecutorFuture<void>> futures;
 
     auto executor = mtab->getAsyncBlockingOperationsExecutor();
-    futures.emplace_back(mtab->checkIfCanDoClusterTimeRead(opCtx).semi().thenRunOn(executor));
+    futures.emplace_back(mtab->getCanReadFuture(opCtx).semi().thenRunOn(executor));
 
     // Optimisation: if the future is already ready, we are done.
     if (futures[0].isReady()) {
