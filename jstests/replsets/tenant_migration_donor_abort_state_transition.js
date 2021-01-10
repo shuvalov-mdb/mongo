@@ -14,20 +14,7 @@ load("jstests/replsets/libs/tenant_migration_util.js");
 
 const kTenantIdPrefix = "testTenantId";
 
-const donorRst = new ReplSetTest({
-    nodes: 2,
-    name: jsTestName() + "_donor",
-    nodeOptions: {
-        setParameter: {
-            // To support blocking state timing out test.
-            tenantMigrationBlockingStateTimeoutMS: 5000,
-        }
-    }
-});
-donorRst.startSet();
-donorRst.initiateWithHighElectionTimeout();
-
-const tenantMigrationTest = new TenantMigrationTest({name: jsTestName(), donorRst: donorRst});
+const tenantMigrationTest = new TenantMigrationTest({name: jsTestName()});
 if (!tenantMigrationTest.isFeatureFlagEnabled()) {
     jsTestLog("Skipping test because the tenant migrations feature flag is disabled");
     return;
@@ -37,7 +24,7 @@ if (!tenantMigrationTest.isFeatureFlagEnabled()) {
  * Starts a migration and forces the write to insert the donor's state doc to abort on the first few
  * tries. Asserts that the migration still completes successfully.
  */
-function testAbortInitialState() {
+function testAbortInitialState(donorRst) {
     const donorPrimary = donorRst.getPrimary();
 
     // Force the storage transaction for the insert to abort prior to inserting the WiredTiger
@@ -53,7 +40,6 @@ function testAbortInitialState() {
     };
 
     const donorRstArgs = TenantMigrationUtil.createRstArgs(donorRst);
-    jsTestLog(donorRstArgs);
 
     // Run the migration in its own thread, since the initial 'donorStartMigration' command will
     // hang due to the failpoint.
@@ -71,7 +57,6 @@ function testAbortInitialState() {
 
     // Verify that the migration completes successfully.
     let threadResult = migrationThread.returnData();
-    jsTestLog(threadResult);
     assert.commandWorked(threadResult);
     tenantMigrationTest.waitForNodesToReachState(
         donorRst.nodes, migrationId, tenantId, TenantMigrationTest.State.kCommitted);
@@ -79,8 +64,12 @@ function testAbortInitialState() {
     assert.commandWorked(tenantMigrationTest.forgetMigration(migrationOpts.migrationIdString));
 }
 
-function testTimeoutBlockingState() {
+function testTimeoutBlockingState(donorRst) {
     const donorPrimary = donorRst.getPrimary();
+    let savedTimeoutParam = assert.commandWorked(donorPrimary.adminCommand({getParameter: 1, tenantMigrationBlockingStateTimeoutMS: 1}))
+                 ['tenantMigrationBlockingStateTimeoutMS'];
+
+    assert.commandWorked(donorPrimary.adminCommand({setParameter: 1, tenantMigrationBlockingStateTimeoutMS: 5000}));
 
     const tenantId = `${kTenantIdPrefix}-blockingTimeout`;
     const migrationId = UUID();
@@ -119,6 +108,7 @@ function testTimeoutBlockingState() {
     // the 'forget migration' command to work.
     inCallFp.off();
     assert.commandWorked(tenantMigrationTest.forgetMigration(migrationOpts.migrationIdString));
+    assert.commandWorked(donorPrimary.adminCommand({setParameter: 1, tenantMigrationBlockingStateTimeoutMS: savedTimeoutParam}));
 }
 
 /**
@@ -127,7 +117,7 @@ function testTimeoutBlockingState() {
  * reaching 'pauseFailPoint' to abort on the first few tries. Asserts that the migration still
  * completes successfully.
  */
-function testAbortStateTransition(pauseFailPoint, setUpFailPoints, nextState) {
+function testAbortStateTransition(donorRst, pauseFailPoint, setUpFailPoints, nextState) {
     jsTest.log(`Test aborting the write to transition to state "${
         nextState}" after reaching failpoint "${pauseFailPoint}"`);
 
@@ -178,11 +168,12 @@ function testAbortStateTransition(pauseFailPoint, setUpFailPoints, nextState) {
     assert.commandWorked(tenantMigrationTest.forgetMigration(migrationOpts.migrationIdString));
 }
 
+const donorRst = tenantMigrationTest.getDonorRst();
 jsTest.log("Test aborting donor's state doc insert");
-testAbortInitialState();
+testAbortInitialState(donorRst);
 
 jsTest.log("Test timeout of the blocking state");
-testTimeoutBlockingState();
+testTimeoutBlockingState(donorRst);
 
 jsTest.log("Test aborting donor's state doc update");
 [{
@@ -198,9 +189,8 @@ jsTest.log("Test aborting donor's state doc update");
      setUpFailPoints: ["abortTenantMigrationAfterBlockingStarts"],
      nextState: TenantMigrationTest.State.kAborted
  }].forEach(({pauseFailPoint, setUpFailPoints = [], nextState}) => {
-    testAbortStateTransition(pauseFailPoint, setUpFailPoints, nextState);
+    testAbortStateTransition(donorRst, pauseFailPoint, setUpFailPoints, nextState);
 });
 
 tenantMigrationTest.stop();
-donorRst.stopSet();
 }());
