@@ -128,13 +128,14 @@ void checkIfCanReadOrBlock(OperationContext* opCtx, StringData dbName) {
 
     // Optimisation: if the future is already ready, we are done.
     if (futures[0].isReady()) {
+        futures[0].get();  // Throw if error.
         return;
     }
 
     if (opCtx->hasDeadline()) {
         auto deadlineReachedFuture =
             executor->sleepUntil(opCtx->getDeadline(), cancelTimeoutSource.token());
-        // The timeout condtion is optional with index #1.
+        // The timeout condition is optional with index #1.
         futures.push_back(std::move(deadlineReachedFuture));
     }
 

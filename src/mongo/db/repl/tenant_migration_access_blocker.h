@@ -56,7 +56,7 @@ public:
         static_assert(std::is_void_v<Payload>);
     }
 
-    ~RepeatableSharedPromise();
+    inline ~RepeatableSharedPromise();
 
     SharedSemiFuture<Payload> getFuture() {
         stdx::unique_lock<Latch> ul(_mutex);
@@ -78,6 +78,14 @@ private:
     // In destructor, set the final payload value to this.
     const payload_unless_void _valueAtTermination;
 };
+
+template <typename Payload>
+inline RepeatableSharedPromise<Payload>::~RepeatableSharedPromise() {
+    _sharedPromise->setFrom(StatusOrStatusWith<Payload>(_valueAtTermination));
+}
+
+template <>
+inline RepeatableSharedPromise<void>::~RepeatableSharedPromise() {}
 
 
 /**

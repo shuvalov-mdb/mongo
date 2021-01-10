@@ -55,14 +55,6 @@ const Backoff kExponentialBackoff(Seconds(1), Milliseconds::max());
 
 }  // namespace
 
-template <typename Payload>
-RepeatableSharedPromise<Payload>::~RepeatableSharedPromise() {
-    _sharedPromise->setFrom(StatusOrStatusWith<Payload>(_valueAtTermination));
-}
-
-template <>
-RepeatableSharedPromise<void>::~RepeatableSharedPromise() {}
-
 TenantMigrationAccessBlocker::TenantMigrationAccessBlocker(ServiceContext* serviceContext,
                                                            std::string tenantId,
                                                            std::string recipientConnString)
