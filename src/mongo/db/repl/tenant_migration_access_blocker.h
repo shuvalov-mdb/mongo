@@ -85,7 +85,9 @@ inline RepeatableSharedPromise<Payload>::~RepeatableSharedPromise() {
 }
 
 template <>
-inline RepeatableSharedPromise<void>::~RepeatableSharedPromise() {}
+inline RepeatableSharedPromise<void>::~RepeatableSharedPromise() {
+    _sharedPromise->setFrom(Status::OK());
+}
 
 
 /**
