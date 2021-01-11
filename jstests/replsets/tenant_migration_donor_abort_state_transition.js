@@ -56,59 +56,11 @@ function testAbortInitialState(donorRst) {
     opObserverFp.off();
 
     // Verify that the migration completes successfully.
-    let threadResult = migrationThread.returnData();
-    assert.commandWorked(threadResult);
+    assert.commandWorked(migrationThread.returnData());
     tenantMigrationTest.waitForNodesToReachState(
         donorRst.nodes, migrationId, tenantId, TenantMigrationTest.State.kCommitted);
 
     assert.commandWorked(tenantMigrationTest.forgetMigration(migrationOpts.migrationIdString));
-}
-
-function testTimeoutBlockingState(donorRst) {
-    const donorPrimary = donorRst.getPrimary();
-    let savedTimeoutParam = assert.commandWorked(donorPrimary.adminCommand({getParameter: 1, tenantMigrationBlockingStateTimeoutMS: 1}))
-                 ['tenantMigrationBlockingStateTimeoutMS'];
-
-    assert.commandWorked(donorPrimary.adminCommand({setParameter: 1, tenantMigrationBlockingStateTimeoutMS: 5000}));
-
-    const tenantId = `${kTenantIdPrefix}-blockingTimeout`;
-    const migrationId = UUID();
-    const migrationOpts = {
-        migrationIdString: extractUUIDFromObject(migrationId),
-        tenantId,
-        recipientConnString: tenantMigrationTest.getRecipientConnString(),
-    };
-
-    const donorRstArgs = TenantMigrationUtil.createRstArgs(donorRst);
-
-    // Fail point to pause right before entering the blocking mode.
-    let afterDataSyncFp = configureFailPoint(donorPrimary, "pauseTenantMigrationAfterDataSync");
-
-    // Run the migration in its own thread, since the initial 'donorStartMigration' command will
-    // hang due to the fail point.
-    let migrationThread =
-        new Thread(TenantMigrationUtil.runMigrationAsync, migrationOpts, donorRstArgs);
-    migrationThread.start();
-
-    afterDataSyncFp.wait();
-    // Fail point to pause the '_sendRecipientSyncDataCommand()' call inside the blocked
-    // section until the cancellation token for the method is cancelled.
-    let inCallFp =
-        configureFailPoint(donorPrimary, "pauseScheduleCallWithCancelTokenUntilCanceled");
-    afterDataSyncFp.off();
-
-    tenantMigrationTest.waitForNodesToReachState(
-        donorRst.nodes, migrationId, tenantId, TenantMigrationTest.State.kAborted);
-
-    const stateRes = assert.commandWorked(migrationThread.returnData());
-    assert.eq(stateRes.state, TenantMigrationTest.State.kAborted);
-    assert.eq(stateRes.abortReason.code, ErrorCodes.ExceededTimeLimit);
-
-    // This fail point is pausing all calls to recipient, so it has to be disabled to make
-    // the 'forget migration' command to work.
-    inCallFp.off();
-    assert.commandWorked(tenantMigrationTest.forgetMigration(migrationOpts.migrationIdString));
-    assert.commandWorked(donorPrimary.adminCommand({setParameter: 1, tenantMigrationBlockingStateTimeoutMS: savedTimeoutParam}));
 }
 
 /**
@@ -171,9 +123,6 @@ function testAbortStateTransition(donorRst, pauseFailPoint, setUpFailPoints, nex
 const donorRst = tenantMigrationTest.getDonorRst();
 jsTest.log("Test aborting donor's state doc insert");
 testAbortInitialState(donorRst);
-
-jsTest.log("Test timeout of the blocking state");
-testTimeoutBlockingState(donorRst);
 
 jsTest.log("Test aborting donor's state doc update");
 [{
