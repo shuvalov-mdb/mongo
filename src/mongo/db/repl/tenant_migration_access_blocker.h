@@ -119,7 +119,7 @@ inline RepeatableSharedPromise<void>::~RepeatableSharedPromise() {
  * checkIfCanWriteOrBlock returns successfully and the write is retried in the loop). This loop is
  * used because writes must not block after being assigned an OpTime but before committing.
  *
- * Reads with afterClusterTime or atClusterTime call checkIfCanRead at some point after
+ * Reads with afterClusterTime or atClusterTime call getCanReadFuture at some point after
  * waiting for readConcern, that is, after waiting to reach their clusterTime, which includes
  * waiting for all earlier oplog holes to be filled.
  *
@@ -142,10 +142,10 @@ inline RepeatableSharedPromise<void>::~RepeatableSharedPromise() {
  * "blockTimestamp".
  *
  * At this point:
- * - Reads on the node that have already passed checkIfCanRead must have a clusterTime before
+ * - Reads on the node that have already passed getCanReadFuture must have a clusterTime before
  *   the blockTimestamp, since the write at blockTimestamp hasn't committed yet (i.e., there's still
  *   an oplog hole at blockTimestamp).
- * - Reads on the node that have not yet passed checkIfCanRead will end up blocking.
+ * - Reads on the node that have not yet passed getCanReadFuture will end up blocking.
  *
  * If the "start blocking" write aborts or the write rolls back via replication rollback, the node
  * calls rollBackStartBlocking.
