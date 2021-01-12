@@ -29,6 +29,7 @@
 
 #pragma once
 
+#include "mongo/db/client_strand.h"
 #include "mongo/db/commands.h"
 #include "mongo/db/commands/tenant_migration_donor_cmds_gen.h"
 #include "mongo/db/operation_context.h"
@@ -59,6 +60,8 @@ TenantMigrationDonorDocument parseDonorStateDocument(const BSONObj& doc);
  * TODO SERVER-53505: Change this to return SharedSemiFuture<TenantMigrationAccessBlocker::State>.
  */
 void checkIfCanReadOrBlock(OperationContext* opCtx, StringData dbName);
+ExecutorFuture<void> getCanReadFuture(OperationContext* opCtx, StringData dbName,
+boost::intrusive_ptr<ClientStrand> strand);
 
 /**
  * If the operation has read concern "linearizable", throws TenantMigrationCommitted error if the

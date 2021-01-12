@@ -64,6 +64,19 @@ constexpr char kNetName[] = "TenantMigrationWorkerNetwork";
 
 const auto donorStateDocToDeleteDecoration = OperationContext::declareDecoration<BSONObj>();
 
+class InlineExecutor final : public OutOfLineExecutor {
+public:
+    InlineExecutor() = default;
+
+    void schedule(Task task) noexcept override {
+        task(Status::OK());
+    }
+
+    static auto make() {
+        return std::make_shared<InlineExecutor>();
+    }
+};
+
 }  // namespace
 
 TenantMigrationDonorDocument parseDonorStateDocument(const BSONObj& doc) {
@@ -150,6 +163,58 @@ void checkIfCanReadOrBlock(OperationContext* opCtx, StringData dbName) {
                                "Read timed out waiting for tenant migration blocker",
                                mtab->getDebugInfo()));
     }
+}
+
+ExecutorFuture<void> getCanReadFuture(OperationContext* opCtx, StringData dbName,
+boost::intrusive_ptr<ClientStrand> strand) {
+    auto mtab = TenantMigrationAccessBlockerRegistry::get(opCtx->getServiceContext())
+                    .getTenantMigrationAccessBlockerForDbName(dbName);
+
+    if (!mtab) {
+        return ExecutorFuture<void>(InlineExecutor::make(), Status::OK());
+    }
+
+    // Source to cancel the timeout if the operation completed in time.
+    CancelationSource cancelTimeoutSource;
+
+    auto canReadFuture = mtab->getCanReadFuture(opCtx);
+
+    // Optimisation: if the future is already ready, we are done.
+    if (canReadFuture.isReady()) {
+        canReadFuture.get();  // Throw if error.
+        return ExecutorFuture<void>(InlineExecutor::make(), Status::OK());
+    }
+
+    auto executor = mtab->getAsyncBlockingOperationsExecutor();
+    std::vector<ExecutorFuture<void>> futures;
+    futures.emplace_back(std::move(canReadFuture).semi().thenRunOn(executor));
+
+    if (opCtx->hasDeadline()) {
+        auto deadlineReachedFuture =
+            executor->sleepUntil(opCtx->getDeadline(), cancelTimeoutSource.token());
+        // The timeout condition is optional with index #1.
+        futures.push_back(std::move(deadlineReachedFuture));
+    }
+
+    return whenAny(std::move(futures))
+        .thenRunOn(executor)
+        .then([cancelTimeoutSource, opCtx, mtab, executor,
+                strand] (WhenAnyResult<void> result) mutable {
+            auto strandBindToThread = strand->bind();
+            const auto& [status, idx] = result;
+            if (idx == 0) {
+                // Read unblock condition finished first.
+                std::cerr << "!!!! continuation in getCanReadFuture t " << std::this_thread::get_id() << std::endl;
+                cancelTimeoutSource.cancel();
+                uassertStatusOK(status);
+            } else if (idx == 1) {
+                // Deadline finished first, throw error.
+                std::cerr << "!!!! timeout in getCanReadFuture t " << std::this_thread::get_id() << std::endl;
+                uassertStatusOK(Status(opCtx->getTimeoutError(),
+                                    "Read timed out waiting for tenant migration blocker",
+                                    mtab->getDebugInfo()));
+            }
+        });
 }
 
 void checkIfLinearizableReadWasAllowedOrThrow(OperationContext* opCtx, StringData dbName) {

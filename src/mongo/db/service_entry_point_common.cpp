@@ -43,6 +43,7 @@
 #include "mongo/db/auth/authorization_session.h"
 #include "mongo/db/auth/impersonation_session.h"
 #include "mongo/db/client.h"
+#include "mongo/db/client_strand.h"
 #include "mongo/db/command_can_run_here.h"
 #include "mongo/db/commands.h"
 #include "mongo/db/commands/txn_cmds_gen.h"
@@ -563,6 +564,7 @@ public:
         : _execContext(std::move(execContext)) {}
 
     static Future<void> run(std::shared_ptr<HandleRequest::ExecutionContext> execContext) {
+        std::cerr << "!!!! ExecCommandDatabase::run " << __LINE__ << std::endl;
         return std::make_shared<ExecCommandDatabase>(std::move(execContext))->_makeFutureChain();
     }
 
@@ -683,6 +685,7 @@ public:
                                          LogicalOp::opGetMore) {}
 
     static Future<void> run(std::shared_ptr<ExecCommandDatabase> ecd) {
+        std::cerr << "!!!! RunCommandImpl::run line " << __LINE__ << " t " << std::this_thread::get_id() << std::endl;
         return std::make_shared<RunCommandImpl>(std::move(ecd))->_makeFutureChain();
     }
 
@@ -783,26 +786,37 @@ private:
 
 Future<void> InvokeCommand::run(const bool checkoutSession) {
     auto anchor = shared_from_this();
-    auto [past, present] = makePromiseFuture<void>();
-    auto future = std::move(present).then([this, checkoutSession, anchor] {
-        if (checkoutSession) {
-            return std::make_shared<SessionCheckoutPath>(std::move(anchor))->run();
-        }
 
-        return makeReadyFutureWith([] {})
-            .then([this, anchor] {
-                auto execContext = _ecd->getExecutionContext();
-                tenant_migration_donor::checkIfCanReadOrBlock(
-                    execContext->getOpCtx(), execContext->getRequest().getDatabase());
-                return _runInvocation();
-            })
-            .onError<ErrorCodes::TenantMigrationConflict>([this, anchor](Status status) {
-                tenant_migration_donor::handleTenantMigrationConflict(
-                    _ecd->getExecutionContext()->getOpCtx(), std::move(status));
-            });
-    });
-    past.emplaceValue();
-    return future;
+    if (checkoutSession) {
+        return std::make_shared<SessionCheckoutPath>(std::move(anchor))->run();
+    }
+
+    std::cerr << "!!!! check " << __LINE__ << " t " << std::this_thread::get_id() << std::endl;
+    auto execContext = _ecd->getExecutionContext();
+    auto strand = ClientStrand::get(execContext->getOpCtx()->getClient());
+    std::cerr << "!!!! strand is " << (strand ? (void*)strand.get() : (void*)0) << std::dec << std::endl;
+    ExecutorFuture<void> execFuture = tenant_migration_donor::getCanReadFuture(
+        execContext->getOpCtx(), execContext->getRequest().getDatabase(), strand);
+    if (execFuture.isReady()) {
+        execFuture.wait();
+        return _runInvocation();
+    }
+    std::cerr << "!!!! wait... " << __LINE__ << " t " << std::this_thread::get_id() << std::endl;
+
+    return std::move(execFuture)
+        .onError([anchor, strand] (Status status) {
+            std::cerr << "!!!! onError t " << std::this_thread::get_id() << std::endl;
+            return status;
+        })
+        .then([this, anchor, execContext, strand] {
+            std::cerr << "!!!! unblocked? " << __LINE__ << " t " << std::this_thread::get_id() << std::endl;
+            ClientStrand::Guard strandBindToThread;
+            if (strand) {
+                strandBindToThread = strand->bind();
+            }
+            return _runInvocation();
+        })
+        .unsafeToInlineFuture();
 }
 
 Future<void> InvokeCommand::SessionCheckoutPath::run() {
@@ -1282,6 +1296,7 @@ Future<void> RunCommandImpl::_makeFutureChain() {
                     return Status::OK();
 
                 auto execContext = _ecd->getExecutionContext();
+                std::cerr << "!!!! _makeFutureChain t " << std::this_thread::get_id() << std::endl;
                 execContext->getCommand()->incrementCommandsFailed();
                 if (status.code() == ErrorCodes::Unauthorized) {
                     CommandHelpers::auditLogAuthEvent(execContext->getOpCtx(),
