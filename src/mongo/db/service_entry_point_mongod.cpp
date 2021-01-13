@@ -250,8 +250,8 @@ public:
     }
 };
 
-Future<DbResponse> ServiceEntryPointMongod::handleRequest(OperationContext* opCtx,
-                                                          const Message& m) noexcept {
+ExecutorFuture<DbResponse> ServiceEntryPointMongod::handleRequest(OperationContext* opCtx,
+                                                                  const Message& m) noexcept {
     return ServiceEntryPointCommon::handleRequest(opCtx, m, std::make_unique<Hooks>());
 }
 

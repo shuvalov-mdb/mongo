@@ -103,9 +103,9 @@ struct ServiceEntryPointCommon {
                                          BSONObjBuilder* metadataBob) const = 0;
     };
 
-    static Future<DbResponse> handleRequest(OperationContext* opCtx,
-                                            const Message& m,
-                                            std::unique_ptr<const Hooks> hooks) noexcept;
+    static ExecutorFuture<DbResponse> handleRequest(OperationContext* opCtx,
+                                                    const Message& m,
+                                                    std::unique_ptr<const Hooks> hooks) noexcept;
 
     /**
      * Produce a new object based on cmdObj, but with redactions applied as specified by

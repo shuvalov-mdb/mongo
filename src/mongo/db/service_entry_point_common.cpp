@@ -184,7 +184,7 @@ struct HandleRequest {
     struct OpRunner {
         explicit OpRunner(HandleRequest* hr) : executionContext{hr->executionContext} {}
         virtual ~OpRunner() = default;
-        virtual Future<DbResponse> run() = 0;
+        virtual ExecutorFuture<DbResponse> run() = 0;
         std::shared_ptr<ExecutionContext> executionContext;
     };
 
@@ -200,6 +200,19 @@ struct HandleRequest {
     Future<void> completeOperation();
 
     std::shared_ptr<ExecutionContext> executionContext;
+};
+
+class InlineExecutor final : public OutOfLineExecutor {
+public:
+    InlineExecutor() = default;
+
+    void schedule(Task task) noexcept override {
+        task(Status::OK());
+    }
+
+    static auto make() {
+        return std::make_shared<InlineExecutor>();
+    }
 };
 
 void generateLegacyQueryErrorResponse(const AssertionException& exception,
@@ -563,7 +576,7 @@ public:
     explicit ExecCommandDatabase(std::shared_ptr<HandleRequest::ExecutionContext> execContext)
         : _execContext(std::move(execContext)) {}
 
-    static Future<void> run(std::shared_ptr<HandleRequest::ExecutionContext> execContext) {
+    static ExecutorFuture<void> run(std::shared_ptr<HandleRequest::ExecutionContext> execContext) {
         std::cerr << "!!!! ExecCommandDatabase::run " << __LINE__ << std::endl;
         return std::make_shared<ExecCommandDatabase>(std::move(execContext))->_makeFutureChain();
     }
@@ -595,19 +608,22 @@ private:
     // also checks that the command is permissible to run on the node given its current replication
     // state. All the logic here is independent of any particular command; any functionality
     // relevant to a specific command should be confined to its run() method.
-    Future<void> _makeFutureChain() {
-        return _parseCommand().then([this, anchor = shared_from_this()] {
-            return _initiateCommand()
-                .then([this] { return _commandExec(); })
-                .onCompletion([this, anchor = shared_from_this()](Status status) {
-                    // Ensure the lifetime of `_scopedMetrics` ends here.
-                    _scopedMetrics = boost::none;
+    ExecutorFuture<void> _makeFutureChain() {
+        return _parseCommand()
+            .then([this, anchor = shared_from_this()] {
+                return _initiateCommand()
+                    .then([this] { return _commandExec(); })
+                    .thenRunOn(InlineExecutor::make())
+                    .onCompletion([this, anchor = shared_from_this()](Status status) {
+                        // Ensure the lifetime of `_scopedMetrics` ends here.
+                        _scopedMetrics = boost::none;
 
-                    if (status.isOK())
-                        return;
-                    _handleFailure(std::move(status));
-                });
-        });
+                        if (status.isOK())
+                            return;
+                        _handleFailure(std::move(status));
+                    });
+            })
+            .thenRunOn(InlineExecutor::make());
     }
 
     Future<void> _parseCommand() {
@@ -648,7 +664,7 @@ private:
     Future<void> _initiateCommand();
 
     // Returns the future chain that executes the parsed command against the database.
-    Future<void> _commandExec();
+    ExecutorFuture<void> _commandExec();
 
     // Any error-handling logic that must be performed if the command initiation/execution fails.
     void _handleFailure(Status status);
@@ -684,13 +700,14 @@ public:
                                      _ecd->getInvocation()->definition()->getLogicalOp() ==
                                          LogicalOp::opGetMore) {}
 
-    static Future<void> run(std::shared_ptr<ExecCommandDatabase> ecd) {
-        std::cerr << "!!!! RunCommandImpl::run line " << __LINE__ << " t " << std::this_thread::get_id() << std::endl;
+    static ExecutorFuture<void> run(std::shared_ptr<ExecCommandDatabase> ecd) {
+        std::cerr << "!!!! RunCommandImpl::run line " << __LINE__ << " t "
+                  << std::this_thread::get_id() << std::endl;
         return std::make_shared<RunCommandImpl>(std::move(ecd))->_makeFutureChain();
     }
 
 private:
-    Future<void> _makeFutureChain();
+    ExecutorFuture<void> _makeFutureChain();
 
     // Anchor for references to attributes defined in `ExecCommandDatabase` (e.g., sessionOptions).
     const std::shared_ptr<ExecCommandDatabase> _ecd;
@@ -699,7 +716,7 @@ private:
     Future<void> _prologue();
 
     // Runs the command without waiting for write concern
-    Future<void> _runCommand();
+    ExecutorFuture<void> _runCommand();
 
     class RunCommandAndWaitForWriteConcern {
     public:
@@ -712,13 +729,13 @@ private:
             _execContext->getOpCtx()->setWriteConcern(_oldWriteConcern);
         }
 
-        static Future<void> run(std::shared_ptr<RunCommandImpl>);
+        static ExecutorFuture<void> run(std::shared_ptr<RunCommandImpl>);
 
     private:
         void _waitForWriteConcern(BSONObjBuilder& bb);
 
         void _setup();
-        Future<void> _run();
+        ExecutorFuture<void> _run();
         Future<void> _onRunCompletion(Status);
 
         const std::shared_ptr<RunCommandImpl> _rci;
@@ -753,7 +770,7 @@ class InvokeCommand : public std::enable_shared_from_this<InvokeCommand> {
 public:
     explicit InvokeCommand(std::shared_ptr<ExecCommandDatabase> ecd) : _ecd(std::move(ecd)) {}
 
-    Future<void> run(bool checkoutSession);
+    ExecutorFuture<void> run(bool checkoutSession);
 
 private:
     class SessionCheckoutPath;
@@ -768,7 +785,7 @@ class InvokeCommand::SessionCheckoutPath
 public:
     SessionCheckoutPath(std::shared_ptr<InvokeCommand> parent) : _parent(std::move(parent)) {}
 
-    Future<void> run();
+    ExecutorFuture<void> run();
 
 private:
     void _cleanupIncompleteTxn();
@@ -784,7 +801,7 @@ private:
     boost::optional<ScopeGuard<std::function<void()>>> _guard;
 };
 
-Future<void> InvokeCommand::run(const bool checkoutSession) {
+ExecutorFuture<void> InvokeCommand::run(const bool checkoutSession) {
     auto anchor = shared_from_this();
 
     if (checkoutSession) {
@@ -794,42 +811,48 @@ Future<void> InvokeCommand::run(const bool checkoutSession) {
     std::cerr << "!!!! check " << __LINE__ << " t " << std::this_thread::get_id() << std::endl;
     auto execContext = _ecd->getExecutionContext();
     auto strand = ClientStrand::get(execContext->getOpCtx()->getClient());
-    std::cerr << "!!!! strand is " << (strand ? (void*)strand.get() : (void*)0) << std::dec << std::endl;
+    std::cerr << "!!!! strand is " << (strand ? (void*)strand.get() : (void*)0) << std::dec
+              << std::endl;
     ExecutorFuture<void> execFuture = tenant_migration_donor::getCanReadFuture(
         execContext->getOpCtx(), execContext->getRequest().getDatabase(), strand);
     if (execFuture.isReady()) {
         execFuture.wait();
-        return _runInvocation();
+        return _runInvocation().thenRunOn(InlineExecutor::make());
     }
     std::cerr << "!!!! wait... " << __LINE__ << " t " << std::this_thread::get_id() << std::endl;
 
     return std::move(execFuture)
-        .onError([anchor, strand] (Status status) {
+        .onError([anchor, strand](Status status) {
             std::cerr << "!!!! onError t " << std::this_thread::get_id() << std::endl;
             return status;
         })
         .then([this, anchor, execContext, strand] {
-            std::cerr << "!!!! unblocked? " << __LINE__ << " t " << std::this_thread::get_id() << std::endl;
+            std::cerr << "!!!! unblocked? " << __LINE__ << " t " << std::this_thread::get_id()
+                      << std::endl;
             ClientStrand::Guard strandBindToThread;
             if (strand) {
                 strandBindToThread = strand->bind();
             }
             return _runInvocation();
-        })
-        .unsafeToInlineFuture();
+        });
 }
 
-Future<void> InvokeCommand::SessionCheckoutPath::run() {
+ExecutorFuture<void> InvokeCommand::SessionCheckoutPath::run() {
     auto anchor = shared_from_this();
-    return makeReadyFutureWith([] {})
-        .then([this, anchor] { return _checkOutSession(); })
-        .then([this, anchor] {
-            return makeReadyFutureWith([] {})
-                .then([this, anchor] {
-                    auto execContext = _parent->_ecd->getExecutionContext();
-                    tenant_migration_donor::checkIfCanReadOrBlock(
-                        execContext->getOpCtx(), execContext->getRequest().getDatabase());
-                    return _parent->_runInvocation();
+    return _checkOutSession()
+        .then([this, anchor]() -> ExecutorFuture<void> {
+            auto execContext = _parent->_ecd->getExecutionContext();
+            auto strand = ClientStrand::get(execContext->getOpCtx()->getClient());
+            ExecutorFuture<void> execFuture = tenant_migration_donor::getCanReadFuture(
+                execContext->getOpCtx(), execContext->getRequest().getDatabase(), strand);
+
+            return std::move(execFuture)
+                .onError([this, anchor, strand](Status status) {
+                    std::cerr << "!!!! onError2 t " << std::this_thread::get_id() << std::endl;
+                    return status;
+                })
+                .then([this, anchor, strand] {
+                    return _parent->_runInvocation().thenRunOn(InlineExecutor::make());
                 })
                 .onError<ErrorCodes::TenantMigrationConflict>([this, anchor](Status status) {
                     // Abort transaction and clean up transaction resources before blocking the
@@ -839,8 +862,9 @@ Future<void> InvokeCommand::SessionCheckoutPath::run() {
                     tenant_migration_donor::handleTenantMigrationConflict(
                         _parent->_ecd->getExecutionContext()->getOpCtx(), std::move(status));
                 })
-                .tapError([this, anchor](Status status) { return _tapError(std::move(status)); });
+                .onError([this, anchor](Status status) { return _tapError(std::move(status)); });
         })
+        .thenRunOn(InlineExecutor::make())
         .then([this, anchor] { return _commitInvocation(); });
 }
 
@@ -1127,7 +1151,7 @@ Future<bool> RunCommandImpl::_epilogue() {
     return ok;
 }
 
-Future<void> RunCommandImpl::_runCommand() {
+ExecutorFuture<void> RunCommandImpl::_runCommand() {
     auto execContext = _ecd->getExecutionContext();
     invariant(!_shouldWaitForWriteConcern);
     execContext->behaviors->uassertCommandDoesNotSpecifyWriteConcern(
@@ -1160,7 +1184,7 @@ void RunCommandImpl::RunCommandAndWaitForWriteConcern::_waitForWriteConcern(BSON
     _execContext->behaviors->waitForWriteConcern(opCtx, invocation, _lastOpBeforeRun.get(), bb);
 }
 
-Future<void> RunCommandImpl::RunCommandAndWaitForWriteConcern::run(
+ExecutorFuture<void> RunCommandImpl::RunCommandAndWaitForWriteConcern::run(
     std::shared_ptr<RunCommandImpl> rci) {
     auto instance = std::make_shared<RunCommandAndWaitForWriteConcern>(std::move(rci));
     // `_setup()` runs inline as part of preparing the future-chain, which will run the command and
@@ -1169,6 +1193,7 @@ Future<void> RunCommandImpl::RunCommandAndWaitForWriteConcern::run(
     auto pf = makePromiseFuture<void>();
     auto future = std::move(pf.future)
                       .then([instance] { return instance->_run(); })
+                      .thenRunOn(InlineExecutor::make())
                       .onCompletion([instance](Status status) {
                           return instance->_onRunCompletion(std::move(status));
                       });
@@ -1230,7 +1255,7 @@ void RunCommandImpl::RunCommandAndWaitForWriteConcern::_setup() {
     }
 }
 
-Future<void> RunCommandImpl::RunCommandAndWaitForWriteConcern::_run() {
+ExecutorFuture<void> RunCommandImpl::RunCommandAndWaitForWriteConcern::_run() {
     if (auto scoped = failWithErrorCodeInRunCommand.scoped(); MONGO_unlikely(scoped.isActive())) {
         const auto errorCode = scoped.getData()["errorCode"].numberInt();
         LOGV2(21960,
@@ -1243,7 +1268,7 @@ Future<void> RunCommandImpl::RunCommandAndWaitForWriteConcern::_run() {
         errorBuilder.append("code", errorCode);
         errorBuilder.append("errmsg", "failWithErrorCodeInRunCommand enabled.");
         _execContext->getReplyBuilder()->setCommandReply(errorBuilder.obj());
-        return Status::OK();
+        return ExecutorFuture<void>{InlineExecutor::make(), Status::OK()};
     }
     return std::make_shared<InvokeCommand>(_rci->_ecd)->run(_rci->_shouldCheckOutSession);
 }
@@ -1277,7 +1302,7 @@ Future<void> RunCommandImpl::RunCommandAndWaitForWriteConcern::_onRunCompletion(
     return status;
 }
 
-Future<void> RunCommandImpl::_makeFutureChain() {
+ExecutorFuture<void> RunCommandImpl::_makeFutureChain() {
     return _prologue()
         .then([this] {
             if (_shouldWaitForWriteConcern)
@@ -1285,6 +1310,7 @@ Future<void> RunCommandImpl::_makeFutureChain() {
             else
                 return _runCommand();
         })
+        .thenRunOn(InlineExecutor::make())
         .then([this] { return _epilogue(); })
         .onCompletion(
             [this, anchor = shared_from_this()](StatusWith<bool> ranSuccessfully) -> Future<void> {
@@ -1610,7 +1636,7 @@ Future<void> ExecCommandDatabase::_initiateCommand() try {
     return ex.toStatus();
 }
 
-Future<void> ExecCommandDatabase::_commandExec() {
+ExecutorFuture<void> ExecCommandDatabase::_commandExec() {
     auto opCtx = _execContext->getOpCtx();
     auto& request = _execContext->getRequest();
 
@@ -1620,7 +1646,7 @@ Future<void> ExecCommandDatabase::_commandExec() {
 
     return RunCommandImpl::run(shared_from_this())
         .onError<ErrorCodes::StaleDbVersion>(
-            [this, anchor = shared_from_this()](Status s) -> Future<void> {
+            [this, anchor = shared_from_this()](Status s) -> ExecutorFuture<void> {
                 auto opCtx = _execContext->getOpCtx();
 
                 if (!opCtx->getClient()->isInDirectClient() &&
@@ -1637,28 +1663,29 @@ Future<void> ExecCommandDatabase::_commandExec() {
                     }
                 }
 
-                return s;
+                return ExecutorFuture<void>{InlineExecutor::make(), s};
             })
-        .onErrorCategory<ErrorCategory::StaleShardVersionError>([this, anchor = shared_from_this()](
-                                                                    Status s) -> Future<void> {
-            auto opCtx = _execContext->getOpCtx();
+        .onErrorCategory<ErrorCategory::StaleShardVersionError>(
+            [this, anchor = shared_from_this()](Status s) -> ExecutorFuture<void> {
+                auto opCtx = _execContext->getOpCtx();
 
-            if (!opCtx->getClient()->isInDirectClient() &&
-                serverGlobalParams.clusterRole != ClusterRole::ConfigServer &&
-                !_refreshedCollection) {
-                if (auto sce = s.extraInfo<StaleConfigInfo>()) {
-                    // TODO SERVER-52784 refresh only if wantedVersion is empty or less then
-                    // received
-                    const auto refreshed = _execContext->behaviors->refreshCollection(opCtx, *sce);
-                    if (refreshed) {
-                        _refreshedCollection = true;
-                        return _commandExec();
+                if (!opCtx->getClient()->isInDirectClient() &&
+                    serverGlobalParams.clusterRole != ClusterRole::ConfigServer &&
+                    !_refreshedCollection) {
+                    if (auto sce = s.extraInfo<StaleConfigInfo>()) {
+                        // TODO SERVER-52784 refresh only if wantedVersion is empty or less then
+                        // received
+                        const auto refreshed =
+                            _execContext->behaviors->refreshCollection(opCtx, *sce);
+                        if (refreshed) {
+                            _refreshedCollection = true;
+                            return _commandExec();
+                        }
                     }
                 }
-            }
 
-            return s;
-        });
+                return ExecutorFuture<void>{InlineExecutor::make(), s};
+            });
 }
 
 void ExecCommandDatabase::_handleFailure(Status status) {
@@ -1763,7 +1790,7 @@ Future<void> parseCommand(std::shared_ptr<HandleRequest::ExecutionContext> execC
     return ex.toStatus();
 }
 
-Future<void> executeCommand(std::shared_ptr<HandleRequest::ExecutionContext> execContext) {
+ExecutorFuture<void> executeCommand(std::shared_ptr<HandleRequest::ExecutionContext> execContext) {
     auto [past, present] = makePromiseFuture<void>();
     auto future =
         std::move(present)
@@ -1812,7 +1839,8 @@ Future<void> executeCommand(std::shared_ptr<HandleRequest::ExecutionContext> exe
                 return Status::OK();
             })
             .then([execContext] { return ExecCommandDatabase::run(std::move(execContext)); })
-            .tapError([execContext](Status status) {
+            .thenRunOn(InlineExecutor::make())
+            .onError([execContext](Status status) {
                 LOGV2_DEBUG(
                     21966,
                     1,
@@ -1865,11 +1893,13 @@ DbResponse makeCommandResponse(std::shared_ptr<HandleRequest::ExecutionContext> 
     return dbResponse;
 }
 
-Future<DbResponse> receivedCommands(std::shared_ptr<HandleRequest::ExecutionContext> execContext) {
+ExecutorFuture<DbResponse> receivedCommands(
+    std::shared_ptr<HandleRequest::ExecutionContext> execContext) {
     execContext->setReplyBuilder(
         rpc::makeReplyBuilder(rpc::protocolForMessage(execContext->getMessage())));
     return parseCommand(execContext)
         .then([execContext]() { return executeCommand(std::move(execContext)); })
+        .thenRunOn(InlineExecutor::make())
         .onError([execContext](Status status) {
             if (ErrorCodes::isConnectionFatalMessageParseError(status.code())) {
                 // If this error needs to fail the connection, propagate it out.
@@ -2113,7 +2143,7 @@ DbResponse receivedGetMore(OperationContext* opCtx,
 
 struct CommandOpRunner : HandleRequest::OpRunner {
     using HandleRequest::OpRunner::OpRunner;
-    Future<DbResponse> run() override {
+    ExecutorFuture<DbResponse> run() override {
         return receivedCommands(executionContext);
     }
 };
@@ -2122,8 +2152,10 @@ struct CommandOpRunner : HandleRequest::OpRunner {
 struct SynchronousOpRunner : HandleRequest::OpRunner {
     using HandleRequest::OpRunner::OpRunner;
     virtual DbResponse runSync() = 0;
-    Future<DbResponse> run() final try { return runSync(); } catch (const DBException& ex) {
-        return ex.toStatus();
+    ExecutorFuture<DbResponse> run() final try {
+        return ExecutorFuture<DbResponse>{InlineExecutor::make(), runSync()};
+    } catch (const DBException& ex) {
+        return ExecutorFuture<DbResponse>{InlineExecutor::make(), ex.toStatus()};
     }
 };
 
@@ -2350,14 +2382,14 @@ BSONObj ServiceEntryPointCommon::getRedactedCopyForLogging(const Command* comman
     return bob.obj();
 }
 
-Future<DbResponse> ServiceEntryPointCommon::handleRequest(
+ExecutorFuture<DbResponse> ServiceEntryPointCommon::handleRequest(
     OperationContext* opCtx,
     const Message& m,
     std::unique_ptr<const Hooks> behaviors) noexcept try {
     auto hr = std::make_shared<HandleRequest>(opCtx, m, std::move(behaviors));
 
     return hr->startOperation()
-        .then([hr]() -> Future<void> {
+        .then([hr]() -> ExecutorFuture<void> {
             auto opRunner = hr->makeOpRunner();
             invariant(opRunner);
             return opRunner->run().then(
@@ -2382,6 +2414,7 @@ Future<DbResponse> ServiceEntryPointCommon::handleRequest(
                     }
                 });
         })
+        .thenRunOn(InlineExecutor::make())
         .then([hr] { return hr->completeOperation(); })
         .onCompletion([hr](Status status) -> Future<DbResponse> {
             if (!status.isOK()) {
@@ -2391,7 +2424,7 @@ Future<DbResponse> ServiceEntryPointCommon::handleRequest(
             return hr->executionContext->getResponse();
         });
 } catch (const DBException& ex) {
-    return ex.toStatus();
+    return ExecutorFuture<DbResponse>{InlineExecutor::make(), ex.toStatus()};
 }
 
 ServiceEntryPointCommon::Hooks::~Hooks() = default;

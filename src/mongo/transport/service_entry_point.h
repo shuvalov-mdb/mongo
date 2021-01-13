@@ -92,8 +92,8 @@ public:
     /**
      * Processes a request and fills out a DbResponse.
      */
-    virtual Future<DbResponse> handleRequest(OperationContext* opCtx,
-                                             const Message& request) noexcept = 0;
+    virtual ExecutorFuture<DbResponse> handleRequest(OperationContext* opCtx,
+                                                     const Message& request) noexcept = 0;
 
     /**
      * Optional handler which is invoked after a session ends.

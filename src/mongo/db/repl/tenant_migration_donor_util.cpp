@@ -165,8 +165,9 @@ void checkIfCanReadOrBlock(OperationContext* opCtx, StringData dbName) {
     }
 }
 
-ExecutorFuture<void> getCanReadFuture(OperationContext* opCtx, StringData dbName,
-boost::intrusive_ptr<ClientStrand> strand) {
+ExecutorFuture<void> getCanReadFuture(OperationContext* opCtx,
+                                      StringData dbName,
+                                      boost::intrusive_ptr<ClientStrand> strand) {
     auto mtab = TenantMigrationAccessBlockerRegistry::get(opCtx->getServiceContext())
                     .getTenantMigrationAccessBlockerForDbName(dbName);
 
@@ -198,21 +199,23 @@ boost::intrusive_ptr<ClientStrand> strand) {
 
     return whenAny(std::move(futures))
         .thenRunOn(executor)
-        .then([cancelTimeoutSource, opCtx, mtab, executor,
-                strand] (WhenAnyResult<void> result) mutable {
+        .then([cancelTimeoutSource, opCtx, mtab, executor, strand](
+                  WhenAnyResult<void> result) mutable {
             auto strandBindToThread = strand->bind();
             const auto& [status, idx] = result;
             if (idx == 0) {
                 // Read unblock condition finished first.
-                std::cerr << "!!!! continuation in getCanReadFuture t " << std::this_thread::get_id() << std::endl;
+                std::cerr << "!!!! continuation in getCanReadFuture t "
+                          << std::this_thread::get_id() << std::endl;
                 cancelTimeoutSource.cancel();
                 uassertStatusOK(status);
             } else if (idx == 1) {
                 // Deadline finished first, throw error.
-                std::cerr << "!!!! timeout in getCanReadFuture t " << std::this_thread::get_id() << std::endl;
+                std::cerr << "!!!! timeout in getCanReadFuture t " << std::this_thread::get_id()
+                          << std::endl;
                 uassertStatusOK(Status(opCtx->getTimeoutError(),
-                                    "Read timed out waiting for tenant migration blocker",
-                                    mtab->getDebugInfo()));
+                                       "Read timed out waiting for tenant migration blocker",
+                                       mtab->getDebugInfo()));
             }
         });
 }

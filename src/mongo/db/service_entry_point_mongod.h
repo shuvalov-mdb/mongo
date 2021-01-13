@@ -42,8 +42,8 @@ class ServiceEntryPointMongod final : public ServiceEntryPointImpl {
 
 public:
     using ServiceEntryPointImpl::ServiceEntryPointImpl;
-    Future<DbResponse> handleRequest(OperationContext* opCtx,
-                                     const Message& request) noexcept override;
+    ExecutorFuture<DbResponse> handleRequest(OperationContext* opCtx,
+                                             const Message& request) noexcept override;
 
 private:
     class Hooks;

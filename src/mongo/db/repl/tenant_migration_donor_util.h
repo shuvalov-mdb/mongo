@@ -60,8 +60,9 @@ TenantMigrationDonorDocument parseDonorStateDocument(const BSONObj& doc);
  * TODO SERVER-53505: Change this to return SharedSemiFuture<TenantMigrationAccessBlocker::State>.
  */
 void checkIfCanReadOrBlock(OperationContext* opCtx, StringData dbName);
-ExecutorFuture<void> getCanReadFuture(OperationContext* opCtx, StringData dbName,
-boost::intrusive_ptr<ClientStrand> strand);
+ExecutorFuture<void> getCanReadFuture(OperationContext* opCtx,
+                                      StringData dbName,
+                                      boost::intrusive_ptr<ClientStrand> strand);
 
 /**
  * If the operation has read concern "linearizable", throws TenantMigrationCommitted error if the
