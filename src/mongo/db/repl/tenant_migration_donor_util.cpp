@@ -64,6 +64,7 @@ constexpr char kNetName[] = "TenantMigrationWorkerNetwork";
 
 const auto donorStateDocToDeleteDecoration = OperationContext::declareDecoration<BSONObj>();
 
+// Helper class to use in the ExecutorFuture that is immediately ready.
 class InlineExecutor final : public OutOfLineExecutor {
 public:
     InlineExecutor() = default;
@@ -123,50 +124,7 @@ TenantMigrationDonorDocument parseDonorStateDocument(const BSONObj& doc) {
     return donorStateDoc;
 }
 
-void checkIfCanReadOrBlock(OperationContext* opCtx, StringData dbName) {
-    auto mtab = TenantMigrationAccessBlockerRegistry::get(opCtx->getServiceContext())
-                    .getTenantMigrationAccessBlockerForDbName(dbName);
-
-    if (!mtab) {
-        return;
-    }
-
-    // Source to cancel the timeout if the operation completed in time.
-    CancelationSource cancelTimeoutSource;
-    std::vector<ExecutorFuture<void>> futures;
-
-    auto executor = mtab->getAsyncBlockingOperationsExecutor();
-    futures.emplace_back(mtab->getCanReadFuture(opCtx).semi().thenRunOn(executor));
-
-    // Optimisation: if the future is already ready, we are done.
-    if (futures[0].isReady()) {
-        futures[0].get();  // Throw if error.
-        return;
-    }
-
-    if (opCtx->hasDeadline()) {
-        auto deadlineReachedFuture =
-            executor->sleepUntil(opCtx->getDeadline(), cancelTimeoutSource.token());
-        // The timeout condition is optional with index #1.
-        futures.push_back(std::move(deadlineReachedFuture));
-    }
-
-    const auto& [status, idx] = whenAny(std::move(futures)).get();
-
-    if (idx == 0) {
-        // Read unblock condition finished first.
-        cancelTimeoutSource.cancel();
-        uassertStatusOK(status);
-    } else if (idx == 1) {
-        // Deadline finished first, throw error.
-        uassertStatusOK(Status(opCtx->getTimeoutError(),
-                               "Read timed out waiting for tenant migration blocker",
-                               mtab->getDebugInfo()));
-    }
-}
-
-ExecutorFuture<void> getCanReadFuture(OperationContext* opCtx, StringData dbName,
-boost::intrusive_ptr<ClientStrand> strand) {
+ExecutorFuture<void> getCanReadFuture(OperationContext* opCtx, StringData dbName) {
     auto mtab = TenantMigrationAccessBlockerRegistry::get(opCtx->getServiceContext())
                     .getTenantMigrationAccessBlockerForDbName(dbName);
 
@@ -198,21 +156,17 @@ boost::intrusive_ptr<ClientStrand> strand) {
 
     return whenAny(std::move(futures))
         .thenRunOn(executor)
-        .then([cancelTimeoutSource, opCtx, mtab, executor,
-                strand] (WhenAnyResult<void> result) mutable {
-            auto strandBindToThread = strand->bind();
+        .then([cancelTimeoutSource, opCtx, mtab, executor](WhenAnyResult<void> result) mutable {
             const auto& [status, idx] = result;
             if (idx == 0) {
                 // Read unblock condition finished first.
-                std::cerr << "!!!! continuation in getCanReadFuture t " << std::this_thread::get_id() << std::endl;
                 cancelTimeoutSource.cancel();
                 uassertStatusOK(status);
             } else if (idx == 1) {
                 // Deadline finished first, throw error.
-                std::cerr << "!!!! timeout in getCanReadFuture t " << std::this_thread::get_id() << std::endl;
                 uassertStatusOK(Status(opCtx->getTimeoutError(),
-                                    "Read timed out waiting for tenant migration blocker",
-                                    mtab->getDebugInfo()));
+                                       "Read timed out waiting for tenant migration blocker",
+                                       mtab->getDebugInfo()));
             }
         });
 }
