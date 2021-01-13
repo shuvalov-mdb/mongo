@@ -29,7 +29,6 @@
 
 #pragma once
 
-#include "mongo/db/client_strand.h"
 #include "mongo/db/commands.h"
 #include "mongo/db/commands/tenant_migration_donor_cmds_gen.h"
 #include "mongo/db/operation_context.h"
