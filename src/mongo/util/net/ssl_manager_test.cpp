@@ -540,8 +540,6 @@ TEST(SSLManager, RotateClusterCertificatesFromFile) {
     uassertStatusOK(tla.rotateCertificates(manager, false /* asyncOCSPStaple */));
 }
 
-#if MONGO_CONFIG_SSL_PROVIDER == MONGO_CONFIG_SSL_PROVIDER_OPENSSL
-
 TEST(SSLManager, InitContextFromFile) {
     SSLParams params;
     params.sslMode.store(::mongo::sslGlobalParams.SSLMode_requireSSL);
@@ -630,8 +628,6 @@ TEST(SSLManager, TransientSSLParams) {
     result = tla.createTransientSSLContext(transientSSLParams);
     uassertStatusOK(result.getStatus());
 }
-
-#endif
 
 }  // namespace
 }  // namespace mongo
