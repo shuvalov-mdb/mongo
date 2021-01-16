@@ -124,12 +124,15 @@ TenantMigrationDonorDocument parseDonorStateDocument(const BSONObj& doc) {
     return donorStateDoc;
 }
 
-ExecutorFuture<void> getCanReadFuture(OperationContext* opCtx, StringData dbName) {
+void setPromiseWhenCanRead(OperationContext* opCtx,
+                           StringData dbName,
+                           Promise<void>&& promise) noexcept {
     auto mtab = TenantMigrationAccessBlockerRegistry::get(opCtx->getServiceContext())
                     .getTenantMigrationAccessBlockerForDbName(dbName);
 
     if (!mtab) {
-        return ExecutorFuture<void>(InlineExecutor::make(), Status::OK());
+        promise.setFrom(Status::OK());
+        return;
     }
 
     // Source to cancel the timeout if the operation completed in time.
@@ -139,8 +142,8 @@ ExecutorFuture<void> getCanReadFuture(OperationContext* opCtx, StringData dbName
 
     // Optimisation: if the future is already ready, we are done.
     if (canReadFuture.isReady()) {
-        canReadFuture.get();  // Throw if error.
-        return ExecutorFuture<void>(InlineExecutor::make(), Status::OK());
+        promise.setFrom(canReadFuture.getNoThrow());
+        return;
     }
 
     auto executor = mtab->getAsyncBlockingOperationsExecutor();
@@ -154,17 +157,22 @@ ExecutorFuture<void> getCanReadFuture(OperationContext* opCtx, StringData dbName
         futures.push_back(std::move(deadlineReachedFuture));
     }
 
-    return whenAny(std::move(futures))
+    whenAny(std::move(futures))
         .thenRunOn(executor)
-        .then([cancelTimeoutSource, opCtx, mtab, executor](WhenAnyResult<void> result) mutable {
-            const auto& [status, idx] = result;
+        .getAsync([cancelTimeoutSource, opCtx, mtab, executor, promise{std::move(promise)}](
+                      StatusWith<WhenAnyResult<void>> swResult) mutable {
+            if (!swResult.isOK()) {
+                promise.setFrom(swResult.getStatus());
+                return;
+            }
+            const auto& [status, idx] = swResult.getValue();
             if (idx == 0) {
                 // Read unblock condition finished first.
                 cancelTimeoutSource.cancel();
-                uassertStatusOK(status);
+                promise.setFrom(status);
             } else if (idx == 1) {
                 // Deadline finished first, throw error.
-                uassertStatusOK(Status(opCtx->getTimeoutError(),
+                promise.setFrom(Status(opCtx->getTimeoutError(),
                                        "Read timed out waiting for tenant migration blocker",
                                        mtab->getDebugInfo()));
             }

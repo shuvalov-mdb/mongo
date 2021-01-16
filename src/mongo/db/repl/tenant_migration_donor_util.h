@@ -55,11 +55,14 @@ TenantMigrationDonorDocument parseDonorStateDocument(const BSONObj& doc);
 /**
  * If the operation has read concern "snapshot" or includes afterClusterTime, and the database is
  * in the read blocking state at the given atClusterTime or afterClusterTime or the selected read
- * timestamp, the future will be ready when the migration is committed or aborted.
- * Note: for better performance, check if the returned future is immediately ready and continue
- * inline.
+ * timestamp, the promise will be set when the migration is committed or aborted.
+ * The method does not throw, it sets the promise error when the migration commits and read cannot
+ * be made. Note: for better performance, check if the promise's future is immediately ready and
+ * continue inline.
  */
-ExecutorFuture<void> getCanReadFuture(OperationContext* opCtx, StringData dbName);
+void setPromiseWhenCanRead(OperationContext* opCtx,
+                           StringData dbName,
+                           Promise<void>&& promise) noexcept;
 
 /**
  * If the operation has read concern "linearizable", throws TenantMigrationCommitted error if the

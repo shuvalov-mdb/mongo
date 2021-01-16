@@ -783,28 +783,24 @@ private:
 
 Future<void> InvokeCommand::run(const bool checkoutSession) {
     auto anchor = shared_from_this();
-    auto [past, present] = makePromiseFuture<void>();
-    auto future = std::move(present).then([this, checkoutSession, anchor] {
-        if (checkoutSession) {
-            return std::make_shared<SessionCheckoutPath>(std::move(anchor))->run();
-        }
 
-        return makeReadyFutureWith([] {})
-            .then([this, anchor] {
-                // TODO SERVER-53761: find out if we can do this more asynchronously.
-                auto execContext = _ecd->getExecutionContext();
-                ExecutorFuture<void> execFuture = tenant_migration_donor::getCanReadFuture(
-                    execContext->getOpCtx(), execContext->getRequest().getDatabase());
-                execFuture.get();  // Throws if migration is committed.
-                return _runInvocation();
-            })
-            .onError<ErrorCodes::TenantMigrationConflict>([this, anchor](Status status) {
-                tenant_migration_donor::handleTenantMigrationConflict(
-                    _ecd->getExecutionContext()->getOpCtx(), std::move(status));
-            });
-    });
-    past.emplaceValue();
-    return future;
+    if (checkoutSession) {
+        return std::make_shared<SessionCheckoutPath>(std::move(anchor))->run();
+    }
+
+    auto [promise, future] = makePromiseFuture<void>();
+    // TODO SERVER-53761: find out if we can do this more asynchronously.
+    auto execContext = _ecd->getExecutionContext();
+    tenant_migration_donor::setPromiseWhenCanRead(
+        execContext->getOpCtx(), execContext->getRequest().getDatabase(), std::move(promise));
+
+    return std::move(future)
+        .onError([this, anchor](Status status) { uassertStatusOK(status); })
+        .then([this, anchor]() -> Future<void> { return _runInvocation(); })
+        .onError<ErrorCodes::TenantMigrationConflict>([this, anchor](Status status) {
+            tenant_migration_donor::handleTenantMigrationConflict(
+                _ecd->getExecutionContext()->getOpCtx(), std::move(status));
+        });
 }
 
 Future<void> InvokeCommand::SessionCheckoutPath::run() {
@@ -812,23 +808,29 @@ Future<void> InvokeCommand::SessionCheckoutPath::run() {
     return makeReadyFutureWith([] {})
         .then([this, anchor] { return _checkOutSession(); })
         .then([this, anchor] {
-            return makeReadyFutureWith([] {})
-                .then([this, anchor] {
-                    auto execContext = _parent->_ecd->getExecutionContext();
-                    ExecutorFuture<void> execFuture = tenant_migration_donor::getCanReadFuture(
-                        execContext->getOpCtx(), execContext->getRequest().getDatabase());
-                    execFuture.get();  // Throws if migration is committed.
-                    return _parent->_runInvocation();
-                })
-                .onError<ErrorCodes::TenantMigrationConflict>([this, anchor](Status status) {
-                    // Abort transaction and clean up transaction resources before blocking the
-                    // command to allow the stable timestamp on the node to advance.
-                    _guard.reset();
+            return makeReadyFutureWith([] {}).then([this, anchor] {
+                auto [promise, future] = makePromiseFuture<void>();
+                // TODO SERVER-53761: find out if we can do this more asynchronously.
+                auto execContext = _parent->_ecd->getExecutionContext();
+                tenant_migration_donor::setPromiseWhenCanRead(
+                    execContext->getOpCtx(),
+                    execContext->getRequest().getDatabase(),
+                    std::move(promise));
 
-                    tenant_migration_donor::handleTenantMigrationConflict(
-                        _parent->_ecd->getExecutionContext()->getOpCtx(), std::move(status));
-                })
-                .tapError([this, anchor](Status status) { return _tapError(std::move(status)); });
+                return std::move(future)
+                    .onError([this, anchor](Status status) { uassertStatusOK(status); })
+                    .then([this, anchor]() -> Future<void> { return _parent->_runInvocation(); })
+                    .onError<ErrorCodes::TenantMigrationConflict>([this, anchor](Status status) {
+                        // Abort transaction and clean up transaction resources before blocking the
+                        // command to allow the stable timestamp on the node to advance.
+                        _guard.reset();
+
+                        tenant_migration_donor::handleTenantMigrationConflict(
+                            _parent->_ecd->getExecutionContext()->getOpCtx(), std::move(status));
+                    })
+                    .tapError(
+                        [this, anchor](Status status) { return _tapError(std::move(status)); });
+            });
         })
         .then([this, anchor] { return _commitInvocation(); });
 }
