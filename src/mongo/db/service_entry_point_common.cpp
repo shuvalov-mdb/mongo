@@ -789,13 +789,15 @@ Future<void> InvokeCommand::run(const bool checkoutSession) {
     }
 
     auto [promise, future] = makePromiseFuture<void>();
-    // TODO SERVER-53761: find out if we can do this more asynchronously.
     auto execContext = _ecd->getExecutionContext();
     tenant_migration_donor::setPromiseWhenCanRead(
         execContext->getOpCtx(), execContext->getRequest().getDatabase(), std::move(promise));
+    // TODO SERVER-53761: find out if we can do this more asynchronously. The client Strand is
+    // locked to current thread in ServiceStateMachine::Impl::startNewLoop().
+    auto status = future.getNoThrow();
 
-    return std::move(future)
-        .onError([this, anchor](Status status) { uassertStatusOK(status); })
+    return makeReadyFutureWith([] {})
+        .then([status] { uassertStatusOK(status); })
         .then([this, anchor]() -> Future<void> { return _runInvocation(); })
         .onError<ErrorCodes::TenantMigrationConflict>([this, anchor](Status status) {
             tenant_migration_donor::handleTenantMigrationConflict(
@@ -810,15 +812,16 @@ Future<void> InvokeCommand::SessionCheckoutPath::run() {
         .then([this, anchor] {
             return makeReadyFutureWith([] {}).then([this, anchor] {
                 auto [promise, future] = makePromiseFuture<void>();
-                // TODO SERVER-53761: find out if we can do this more asynchronously.
                 auto execContext = _parent->_ecd->getExecutionContext();
                 tenant_migration_donor::setPromiseWhenCanRead(
                     execContext->getOpCtx(),
                     execContext->getRequest().getDatabase(),
                     std::move(promise));
+                // TODO SERVER-53761: find out if we can do this more asynchronously.
+                auto status = future.getNoThrow();
 
-                return std::move(future)
-                    .onError([this, anchor](Status status) { uassertStatusOK(status); })
+                return makeReadyFutureWith([] {})
+                    .then([status] { uassertStatusOK(status); })
                     .then([this, anchor]() -> Future<void> { return _parent->_runInvocation(); })
                     .onError<ErrorCodes::TenantMigrationConflict>([this, anchor](Status status) {
                         // Abort transaction and clean up transaction resources before blocking the
