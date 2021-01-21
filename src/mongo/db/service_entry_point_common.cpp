@@ -793,8 +793,12 @@ private:
 Future<void> InvokeCommand::run() {
     return makeReadyFutureWith([&] {
                auto execContext = _ecd->getExecutionContext();
-               tenant_migration_access_blocker::checkIfCanReadOrBlock(
-                   execContext->getOpCtx(), execContext->getRequest().getDatabase());
+               // TODO SERVER-53761: find out if we can do this more asynchronously. The client
+               // Strand is locked to current thread in ServiceStateMachine::Impl::startNewLoop().
+               auto status = tenant_migration_donor::checkIfCanReadOrBlock(
+                                 execContext->getOpCtx(), execContext->getRequest().getDatabase())
+                                 .getNoThrow();
+               uassertStatusOK(status);
                return CommandHelpers::runCommandInvocationAsync(_ecd->getExecutionContext(),
                                                                 _ecd->getInvocation());
            })
@@ -810,8 +814,11 @@ Future<void> CheckoutSessionAndInvokeCommand::run() {
                _checkOutSession();
 
                auto execContext = _ecd->getExecutionContext();
-               tenant_migration_access_blocker::checkIfCanReadOrBlock(
-                   execContext->getOpCtx(), execContext->getRequest().getDatabase());
+               // TODO SERVER-53761: find out if we can do this more asynchronously.
+               auto status = tenant_migration_donor::checkIfCanReadOrBlock(
+                                 execContext->getOpCtx(), execContext->getRequest().getDatabase())
+                                 .getNoThrow();
+               uassertStatusOK(status);
                return CommandHelpers::runCommandInvocationAsync(_ecd->getExecutionContext(),
                                                                 _ecd->getInvocation());
            })
