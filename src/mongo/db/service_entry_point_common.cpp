@@ -771,7 +771,9 @@ public:
         _cleanupTransaction();
     }
 
-    Future<void> run();
+        void _checkOutSession();
+        void _tapError(Status);
+        Future<void> _commitInvocation();
 
 private:
     void _stashTransaction();
