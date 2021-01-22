@@ -89,6 +89,23 @@ assert.eq("5,8", s(), "C6");
 
 t.drop();
 
+// Same as above but more updates for one command to increase the probability of a
+// race during special conditions (e.g. tenant migration).
+
+for (let i = 0; i < 100; ++i) {
+    t.save({_id: i, x: -1, a: [1, 2]});
+}
+
+for (let i = 0; i < 100; ++i) {
+    t.update({a: 2}, {$inc: {x: 1}}, false, true);
+    let result = s();
+    for (let j = 0; j < 100; ++j) {
+        assert.eq(i, result[j], "C11");
+    }
+}
+
+t.drop();
+
 t.save({_id: 1, x: 1, a: [1, 2]});
 t.save({_id: 2, x: 5, a: [2, 3]});
 t.createIndex({a: 1});
