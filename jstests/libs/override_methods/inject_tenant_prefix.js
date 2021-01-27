@@ -391,6 +391,9 @@ Mongo.prototype.runCommand = function(dbName, cmdObj, options) {
                 `Got TenantMigrationAborted for command against database ` +
                 `"${dbName}" with response ${tojson(resObj)} after trying ${numAttempts} times, ` +
                 `retrying the command`);
+            jsTest.log('!!!! case 1');
+            console.trace();
+            return resObj;//tmp
         } else {
             // Modify the resObj before returning the result.
             if (resObj.n) {
@@ -517,6 +520,7 @@ Mongo.prototype.runCommandWithMetadata = function(dbName, metadata, commandArgs)
                 `Got TenantMigrationAborted for command against database ` +
                 `"${dbName}" with response ${tojson(resObj)} after trying ${numAttempts} times, ` +
                 `retrying the command`);
+            jsTest.log('!!!! case 2');
         } else {
             // Modify the resObj before returning the result.
             if (resObj.n) {

@@ -394,6 +394,12 @@ public:
      */
     virtual void appendConnectionStats(ConnectionPoolStats* stats) const = 0;
 
+    virtual int idleThreads() const {
+        std::cerr << "!!!!! tex interf " << typeid(*this).name() << std::endl;
+        return -1;
+    }
+
+
 protected:
     // Retrieves the Callback from a given CallbackHandle
     static CallbackState* getCallbackFromHandle(const CallbackHandle& cbHandle);

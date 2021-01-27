@@ -133,6 +133,10 @@ thread_local std::unique_ptr<ServiceExecutorFixed::ExecutorThreadContext>
 ServiceExecutorFixed::ServiceExecutorFixed(ServiceContext* ctx, ThreadPool::Limits limits)
     : _svcCtx{ctx}, _options(std::move(limits)) {
     _options.poolName = "ServiceExecutorFixed";
+    _options.minThreads = 100;
+    if (_options.maxThreads < 100) {
+        _options.maxThreads = 100;
+    }
     _options.onCreateThread = [this](const auto&) {
         _executorContext = std::make_unique<ExecutorThreadContext>(this);
     };

@@ -128,7 +128,9 @@ Status ServiceExecutorSynchronous::scheduleTask(Task task, ScheduleFlags flags) 
             _localWorkQueue.emplace_back(std::move(task));
             while (!_localWorkQueue.empty() && _stillRunning.loadRelaxed()) {
                 _localRecursionDepth = 1;
+                //std::cerr << "!!!!! service exec sync before job, threads " << _numRunningWorkerThreads.load() << std::endl;
                 _localWorkQueue.front()();
+                //std::cerr << "!!!!! service exec sync after job, threads " << _numRunningWorkerThreads.load() << std::endl;
                 _localWorkQueue.pop_front();
             }
 

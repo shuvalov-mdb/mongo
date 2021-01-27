@@ -82,6 +82,8 @@
 #include "mongo/util/log_and_backoff.h"
 #include "mongo/util/scopeguard.h"
 
+#include "mongo/util/stacktrace.h"//tmp
+
 namespace mongo::write_ops_exec {
 
 // Convention in this file: generic helpers go in the anonymous namespace. Helpers that are for a
@@ -694,32 +696,38 @@ static SingleWriteResult performSingleUpdateOp(OperationContext* opCtx,
         CurOp::get(opCtx)->setPlanSummary_inlock(exec->getPlanExplainer().getPlanSummary());
     }
 
-    auto updateResult = exec->executeUpdate();
-
-    PlanSummaryStats summary;
-    auto&& explainer = exec->getPlanExplainer();
-    explainer.getSummaryStats(&summary);
-    if (const auto& coll = collection->getCollection()) {
-        CollectionQueryInfo::get(coll).notifyOfQuery(opCtx, coll, summary);
-    }
-
-    if (curOp.shouldDBProfile(opCtx)) {
-        auto&& [stats, _] = explainer.getWinningPlanStats(ExplainOptions::Verbosity::kExecStats);
-        curOp.debug().execStats = std::move(stats);
-    }
-
-    recordUpdateResultInOpDebug(updateResult, &curOp.debug());
-    curOp.debug().setPlanSummaryMetrics(summary);
-
-    const bool didInsert = !updateResult.upsertedId.isEmpty();
-    const long long nMatchedOrInserted = didInsert ? 1 : updateResult.numMatched;
-    LastError::get(opCtx->getClient())
-        .recordUpdate(updateResult.existing, nMatchedOrInserted, updateResult.upsertedId);
-
     SingleWriteResult result;
-    result.setN(nMatchedOrInserted);
-    result.setNModified(updateResult.numDocsModified);
-    result.setUpsertedId(updateResult.upsertedId);
+    try {
+        auto updateResult = exec->executeUpdate();
+
+        PlanSummaryStats summary;
+        auto&& explainer = exec->getPlanExplainer();
+        explainer.getSummaryStats(&summary);
+        if (const auto& coll = collection->getCollection()) {
+            CollectionQueryInfo::get(coll).notifyOfQuery(opCtx, coll, summary);
+        }
+
+        if (curOp.shouldDBProfile(opCtx)) {
+            auto&& [stats, _] = explainer.getWinningPlanStats(ExplainOptions::Verbosity::kExecStats);
+            curOp.debug().execStats = std::move(stats);
+        }
+
+        recordUpdateResultInOpDebug(updateResult, &curOp.debug());
+        curOp.debug().setPlanSummaryMetrics(summary);
+
+        const bool didInsert = !updateResult.upsertedId.isEmpty();
+        const long long nMatchedOrInserted = didInsert ? 1 : updateResult.numMatched;
+        LastError::get(opCtx->getClient())
+            .recordUpdate(updateResult.existing, nMatchedOrInserted, updateResult.upsertedId);
+
+        result.setN(nMatchedOrInserted);
+        result.setNModified(updateResult.numDocsModified);
+        result.setUpsertedId(updateResult.upsertedId);
+    } catch (const DBException& e) {
+        std::cerr << "!!!! got exception " << e.toStatus() << std::endl;
+        printStackTrace();
+        throw;
+    }
 
     return result;
 }

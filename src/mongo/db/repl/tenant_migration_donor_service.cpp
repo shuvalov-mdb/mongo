@@ -52,6 +52,7 @@
 #include "mongo/rpc/metadata/egress_metadata_hook_list.h"
 #include "mongo/util/cancelation.h"
 #include "mongo/util/future_util.h"
+#include "mongo/util/stacktrace.h"
 
 namespace mongo {
 
@@ -162,6 +163,8 @@ TenantMigrationDonorService::Instance::Instance(ServiceContext* serviceContext,
         TransientSSLParams{_recipientUri.connectionString(), std::move(donorSSLClusterPEMPayload)};
 #endif
 
+    threadPoolOptions.minThreads = 20;
+    threadPoolOptions.maxThreads = 20;
     _recipientCmdExecutor = std::make_shared<executor::ThreadPoolTaskExecutor>(
         std::make_unique<ThreadPool>(threadPoolOptions),
         executor::makeNetworkInterface(
@@ -498,6 +501,7 @@ ExecutorFuture<void> TenantMigrationDonorService::Instance::_sendCommandToRecipi
 
                        request.sslMode = transport::kEnableSSL;
 
+                 std::cerr << "!!!! migration recipient command, threads " << _recipientCmdExecutor->idleThreads() << std::endl;
                        return (_recipientCmdExecutor)
                            ->scheduleRemoteCommand(std::move(request),
                                                    _instanceCancelationSource.token())
@@ -569,8 +573,11 @@ SemiFuture<void> TenantMigrationDonorService::Instance::run(
     auto recipientTargeterRS = std::make_shared<RemoteCommandTargeterRS>(
         _recipientUri.getSetName(), _recipientUri.getServers());
 
+     std::cerr << "!!!! migration p0, threads " << executor->idleThreads() << std::endl;
+     printStackTrace();
     return ExecutorFuture<void>(**executor)
         .then([this, self = shared_from_this(), executor, token] {
+            std::cerr << "!!!! migration p1, threads " << executor->idleThreads() << std::endl;
             if (_stateDoc.getState() > TenantMigrationDonorStateEnum::kUninitialized) {
                 return ExecutorFuture<void>(**executor, Status::OK());
             }
@@ -585,6 +592,7 @@ SemiFuture<void> TenantMigrationDonorService::Instance::run(
                 });
         })
         .then([this, self = shared_from_this(), executor, recipientTargeterRS, token] {
+                std::cerr << "!!!! migration p2, threads " << executor->idleThreads() << std::endl;
             if (_stateDoc.getState() > TenantMigrationDonorStateEnum::kDataSync) {
                 return ExecutorFuture<void>(**executor, Status::OK());
             }
@@ -615,6 +623,7 @@ SemiFuture<void> TenantMigrationDonorService::Instance::run(
                 });
         })
         .then([this, self = shared_from_this(), executor, recipientTargeterRS, token] {
+            std::cerr << "!!!! migration p3, threads " << executor->idleThreads() << std::endl;
             if (_stateDoc.getState() > TenantMigrationDonorStateEnum::kBlocking) {
                 return ExecutorFuture<void>(**executor, Status::OK());
             }
@@ -640,9 +649,10 @@ SemiFuture<void> TenantMigrationDonorService::Instance::run(
                 .thenRunOn(**executor)
                 .then([cancelTimeoutSource,
                        recipientSyncDataCommandCancelSource,
-                       self = shared_from_this()](auto result) mutable {
+                       self = shared_from_this(), executor](auto result) mutable {
                     const auto& [status, idx] = result;
 
+                    std::cerr << "!!!! migration p3-1 futures, threads " << executor->idleThreads() << std::endl;
                     if (idx == 0) {
                         LOGV2(5290301,
                               "Tenant migration blocking stage timeout expired",
@@ -659,10 +669,11 @@ SemiFuture<void> TenantMigrationDonorService::Instance::run(
                     }
                     MONGO_UNREACHABLE;
                 })
-                .then([this, self = shared_from_this()]() -> void {
+                .then([this, self = shared_from_this(), executor]() -> void {
                     auto opCtxHolder = cc().makeOperationContext();
                     auto opCtx = opCtxHolder.get();
 
+                    std::cerr << "!!!! migration p3-2 failpoint, threads " << executor->idleThreads() << std::endl;
                     pauseTenantMigrationAfterBlockingStarts.executeIf(
                         [&](const BSONObj&) {
                             pauseTenantMigrationAfterBlockingStarts.pauseWhileSet(opCtx);
@@ -711,6 +722,7 @@ SemiFuture<void> TenantMigrationDonorService::Instance::run(
                 });
         })
         .onError([this, self = shared_from_this(), executor](Status status) {
+            std::cerr << "!!!! migration p4, error " << status << ", threads " << executor->idleThreads() << std::endl;
             if (_stateDoc.getState() == TenantMigrationDonorStateEnum::kAborted) {
                 // The migration was resumed on stepup and it was already aborted.
                 return ExecutorFuture<void>(**executor, Status::OK());
@@ -728,10 +740,12 @@ SemiFuture<void> TenantMigrationDonorService::Instance::run(
             } else {
                 // Enter "abort" state.
                 _abortReason.emplace(status);
+                std::cerr << "!!!! migration p5, threads " << executor->idleThreads() << std::endl;
                 return _updateStateDocument(executor, TenantMigrationDonorStateEnum::kAborted)
                     .then([this, self = shared_from_this(), executor](repl::OpTime opTime) {
                         return _waitForMajorityWriteConcern(executor, std::move(opTime))
-                            .then([this, self = shared_from_this()] {
+                            .then([this, self = shared_from_this(), executor] {
+                                std::cerr << "!!!! migration p6, threads " << executor->idleThreads() << std::endl;
                                 // If interrupt is called at some point during execution, it is
                                 // possible that interrupt() will fulfill the promise before we do.
                                 if (!_decisionPromise.getFuture().isReady()) {
@@ -742,7 +756,8 @@ SemiFuture<void> TenantMigrationDonorService::Instance::run(
                     });
             }
         })
-        .onCompletion([this, self = shared_from_this()](Status status) {
+        .onCompletion([this, self = shared_from_this(), executor](Status status) {
+            std::cerr << "!!!! migration p7, threads " << executor->idleThreads() << std::endl;
             LOGV2(5006601,
                   "Tenant migration completed",
                   "migrationId"_attr = _stateDoc.getId(),
@@ -751,6 +766,7 @@ SemiFuture<void> TenantMigrationDonorService::Instance::run(
                   "abortReason"_attr = _abortReason);
         })
         .then([this, self = shared_from_this(), executor, recipientTargeterRS] {
+            std::cerr << "!!!! migration p8, threads " << executor->idleThreads() << std::endl;
             if (_stateDoc.getExpireAt()) {
                 // The migration state has already been marked as garbage collectable. Set the
                 // donorForgetMigration promise here since the Instance's destructor has an
@@ -766,13 +782,15 @@ SemiFuture<void> TenantMigrationDonorService::Instance::run(
                     return _sendRecipientForgetMigrationCommand(executor, recipientTargeterRS);
                 })
                 .then([this, self = shared_from_this(), executor] {
+                    std::cerr << "!!!! migration p8-2, after forget, threads " << executor->idleThreads() << std::endl;
                     return _markStateDocumentAsGarbageCollectable(executor);
                 })
                 .then([this, self = shared_from_this(), executor](repl::OpTime opTime) {
                     return _waitForMajorityWriteConcern(executor, std::move(opTime));
                 });
         })
-        .onCompletion([this, self = shared_from_this()](Status status) {
+        .onCompletion([this, self = shared_from_this(), executor](Status status) {
+            std::cerr << "!!!! migration p9, threads " << executor->idleThreads() << std::endl;
             LOGV2(4920400,
                   "Marked migration state as garbage collectable",
                   "migrationId"_attr = _stateDoc.getId(),

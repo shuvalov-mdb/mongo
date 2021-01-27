@@ -85,6 +85,8 @@ public:
 
     void appendConnectionStats(ConnectionPoolStats* stats) const override;
 
+    int idleThreads() const override;
+
 private:
     std::unique_ptr<ThreadPoolTaskExecutor> _executor;
 };

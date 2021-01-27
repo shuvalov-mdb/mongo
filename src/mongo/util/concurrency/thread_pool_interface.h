@@ -29,6 +29,8 @@
 
 #pragma once
 
+#include <iostream>
+
 #include "mongo/util/functional.h"
 #include "mongo/util/out_of_line_executor.h"
 
@@ -72,6 +74,11 @@ public:
      * inside the pool.
      */
     virtual void join() = 0;
+
+    virtual int idleThreads() const { 
+        std::cerr << "!!!!! th interf " << typeid(*this).name() << std::endl;
+        return -1; 
+    }
 
 protected:
     ThreadPoolInterface() = default;

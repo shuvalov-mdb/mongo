@@ -112,6 +112,8 @@ public:
     void waitForIdle();
     Stats getStats() const;
 
+    int idleThreads() const;
+
 private:
     /**
      * Representation of the stage of life of a thread pool.
@@ -505,6 +507,15 @@ void ThreadPool::Impl::_consumeTasks() {
     _retiredThreads.splice(_retiredThreads.end(), _threads, pos);
 }
 
+int ThreadPool::idleThreads() const {
+    return _impl->idleThreads();
+}
+
+int ThreadPool::Impl::idleThreads() const {
+    std::cerr << "!!!!! idle threads " << _numIdleThreads << " for pool " << _options.poolName << std::endl;
+    return _numIdleThreads;
+}
+
 void ThreadPool::Impl::_doOneTask(stdx::unique_lock<Latch>* lk) noexcept {
     invariant(!_pendingTasks.empty());
     LOGV2_DEBUG(23109,
@@ -515,6 +526,10 @@ void ThreadPool::Impl::_doOneTask(stdx::unique_lock<Latch>* lk) noexcept {
     Task task = std::move(_pendingTasks.front());
     _pendingTasks.pop_front();
     --_numIdleThreads;
+    invariant(_numIdleThreads >= 0);
+    if (_numIdleThreads == 0) {
+        std::cerr << "!!!!! Pool fully busy " << _options.poolName << ", thread " << getThreadName() << std::endl;
+    }
 
     lk->unlock();
     // Run the task outside of the lock. Note that if the task throws, the task destructor will run
@@ -524,6 +539,9 @@ void ThreadPool::Impl::_doOneTask(stdx::unique_lock<Latch>* lk) noexcept {
     // Reset the task and run the dtor before we reacquire the lock.
     task = {};
     lk->lock();
+    if (_numIdleThreads == 0) {
+        std::cerr << "!!!!! Pool is unblocked " << _options.poolName << ", thread " << getThreadName() << std::endl;
+    }
 
     ++_numIdleThreads;
     if (_pendingTasks.empty() && _threads.size() == _numIdleThreads) {

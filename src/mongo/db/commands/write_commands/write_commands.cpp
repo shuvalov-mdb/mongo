@@ -296,6 +296,7 @@ boost::optional<BSONObj> generateError(OperationContext* opCtx,
         error.append("code", static_cast<int>(ErrorCodes::DocumentValidationFailure));
         error.append("errInfo", docValidationError->getDetails());
     } else if (ErrorCodes::isTenantMigrationError(status.code())) {
+        std::cerr << "!!!!! got error " << status << std::endl;
         if (ErrorCodes::TenantMigrationConflict == status.code()) {
             auto migrationConflictInfo = status.extraInfo<TenantMigrationConflictInfo>();
 

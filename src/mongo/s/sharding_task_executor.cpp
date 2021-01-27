@@ -294,5 +294,9 @@ void ShardingTaskExecutor::appendConnectionStats(ConnectionPoolStats* stats) con
     _executor->appendConnectionStats(stats);
 }
 
+int ShardingTaskExecutor::idleThreads() const { 
+    return _executor->idleThreads(); 
+}
+
 }  // namespace executor
 }  // namespace mongo

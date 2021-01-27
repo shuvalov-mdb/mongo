@@ -873,5 +873,9 @@ void ThreadPoolTaskExecutor::dropConnections(const HostAndPort& hostAndPort) {
     _net->dropConnections(hostAndPort);
 }
 
+int ThreadPoolTaskExecutor::idleThreads() const {
+    return _pool->idleThreads();
+}
+
 }  // namespace executor
 }  // namespace mongo

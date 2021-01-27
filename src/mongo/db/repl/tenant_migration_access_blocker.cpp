@@ -44,6 +44,8 @@
 #include "mongo/util/fail_point.h"
 #include "mongo/util/future_util.h"
 
+#include "mongo/util/stacktrace.h"//tmp
+
 namespace mongo {
 
 namespace {
@@ -75,6 +77,8 @@ void TenantMigrationAccessBlocker::checkIfCanWriteOrThrow() {
             return;
         case State::kBlockWrites:
         case State::kBlockWritesAndReads:
+            std::cerr << "!!!! checkIfCanWriteOrThrow " << ((int)_state) << std::endl;
+            printStackTrace();
             uasserted(TenantMigrationConflictInfo(_tenantId, shared_from_this()),
                       "Write must block until this tenant migration commits or aborts");
         case State::kReject:
@@ -219,6 +223,7 @@ void TenantMigrationAccessBlocker::rollBackStartBlocking() {
 
     _state = State::kAllow;
     _blockTimestamp.reset();
+    std::cerr << "!!!! rollback" << std::endl;
     _transitionOutOfBlockingPromise.setFrom(Status::OK());
 }
 
@@ -292,6 +297,7 @@ void TenantMigrationAccessBlocker::_onMajorityCommitCommitOpTime(stdx::unique_lo
     invariant(!_abortOpTime);
 
     _state = State::kReject;
+    std::cerr << "!!!! committed" << std::endl;
     Status error{ErrorCodes::TenantMigrationCommitted,
                  "Write or read must be re-routed to the new owner of this tenant",
                  TenantMigrationCommittedInfo(_tenantId, _recipientConnString).toBSON()};
@@ -310,6 +316,7 @@ void TenantMigrationAccessBlocker::_onMajorityCommitAbortOpTime(stdx::unique_loc
 
     _state = State::kAborted;
     _transitionOutOfBlockingPromise.setFrom(Status::OK());
+    std::cerr << "!!!! aborted" << std::endl;
     _completionPromise.setError({ErrorCodes::TenantMigrationAborted, "Tenant migration aborted"});
 
     lk.unlock();

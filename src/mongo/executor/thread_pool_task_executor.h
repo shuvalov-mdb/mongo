@@ -110,6 +110,9 @@ public:
      */
     bool hasTasks();
 
+    int idleThreads() const override;
+
+
 private:
     class CallbackState;
     class EventState;

@@ -55,6 +55,7 @@
 #include "mongo/rpc/metadata/egress_metadata_hook_list.h"
 #include "mongo/s/write_ops/batched_command_response.h"
 #include "mongo/util/concurrency/thread_pool.h"
+#include "mongo/util/stacktrace.h"
 
 namespace mongo {
 namespace repl {
@@ -670,6 +671,8 @@ void PrimaryOnlyService::_rebuildInstances(long long term) noexcept {
 void PrimaryOnlyService::_scheduleRun(WithLock wl,
                                       std::shared_ptr<Instance> instance,
                                       InstanceID instanceID) {
+     std::cerr << "!!!! migration before scheduling, threads " << (*_scopedExecutor)->idleThreads() << std::endl;
+     printStackTrace();
     (*_scopedExecutor)
         ->schedule([this,
                     instance = std::move(instance),

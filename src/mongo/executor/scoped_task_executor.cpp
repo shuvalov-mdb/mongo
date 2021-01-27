@@ -185,6 +185,10 @@ public:
         MONGO_UNREACHABLE;
     }
 
+    int idleThreads() const override {
+        return _executor->idleThreads();
+    }
+
 private:
     /**
      * Helper function to get a shared_ptr<ScopedTaskExecutor::Impl> to this object, akin to

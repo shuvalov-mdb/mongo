@@ -149,6 +149,8 @@ public:
     void shutdown() override;
     void join() override;
 
+    int idleThreads() const override;
+
     /**
      * Blocks the caller until there are no pending tasks on this pool.
      *

@@ -132,6 +132,7 @@ BaseCloner::AfterStageBehavior TenantAllDatabaseCloner::listExistingDatabasesSta
 
     std::vector<std::string> clonedDatabases;
     for (const auto& dbBSON : databasesArray) {
+        std::cerr << "!!!! recipient dbs " << dbBSON << std::endl;
         LOGV2_DEBUG(5271500,
                     2,
                     "listExistingDatabases entry",

@@ -102,6 +102,10 @@ public:
         return _executor.get();
     }
 
+    int idleThreads() const {
+        return _executor->idleThreads();
+    }
+
 private:
     class Impl;
 

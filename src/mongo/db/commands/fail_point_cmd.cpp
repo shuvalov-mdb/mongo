@@ -37,6 +37,7 @@
 #include "mongo/db/commands/test_commands_enabled.h"
 #include "mongo/s/request_types/wait_for_fail_point_gen.h"
 #include "mongo/util/fail_point.h"
+#include "mongo/util/stacktrace.h"
 
 namespace mongo {
 
@@ -68,7 +69,8 @@ namespace mongo {
  */
 class FaultInjectCmd : public BasicCommand {
 public:
-    FaultInjectCmd() : BasicCommand("configureFailPoint") {}
+    FaultInjectCmd() : BasicCommand("configureFailPoint") {
+    }
 
     AllowedOnSecondary secondaryAllowed(ServiceContext*) const override {
         return AllowedOnSecondary::kAlways;
@@ -99,9 +101,12 @@ public:
              const std::string& dbname,
              const BSONObj& cmdObj,
              BSONObjBuilder& result) override {
+        std::cerr << "!!!!! fault inject " << cmdObj << std::endl;
+        printStackTrace();
         const std::string failPointName(cmdObj.firstElement().str());
         const auto timesEntered = setGlobalFailPoint(failPointName, cmdObj);
         result.appendIntOrLL("count", timesEntered);
+        std::cerr << "!!!!! fault inject done " << cmdObj << std::endl;
         return true;
     }
 };
