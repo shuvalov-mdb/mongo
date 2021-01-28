@@ -62,11 +62,12 @@ bool initializeServerSecurityGlobalState(ServiceContext* service) {
 #ifdef MONGO_CONFIG_SSL
     if (clusterAuthMode == ServerGlobalParams::ClusterAuthMode_x509 ||
         clusterAuthMode == ServerGlobalParams::ClusterAuthMode_sendX509) {
-        auth::setInternalUserAuthParams(auth::createInternalX509AuthDocument(
-            boost::optional<StringData>{SSLManagerCoordinator::get()
-                                            ->getSSLManager()
-                                            ->getSSLConfiguration()
-                                            .clientSubjectName.toString()}));
+        auto clientSubjectName = SSLManagerCoordinator::get()
+                                     ->getSSLManager()
+                                     ->getSSLConfiguration()
+                                     .getClientSubjectNameString();
+        auth::setInternalUserAuthParams(
+            auth::createInternalX509AuthDocument(boost::optional<StringData>{clientSubjectName}));
     }
 #endif
 

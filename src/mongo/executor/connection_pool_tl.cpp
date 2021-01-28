@@ -276,7 +276,7 @@ public:
             if (index == 0) {
                 return auth::createInternalX509AuthDocument(
                     boost::optional<StringData>{_transientSSLContext->manager->getSSLConfiguration()
-                                                    .clientSubjectName.toString()});
+                                                    .getClientSubjectNameString()});
             } else {
                 return BSONObj();
             }

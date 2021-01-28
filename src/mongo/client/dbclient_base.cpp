@@ -503,11 +503,11 @@ void DBClientBase::_auth(const BSONObj& params) {
     ScopedMetadataWriterRemover remover{this};
 
     // We will only have a client name if SSL is enabled
-    std::string clientName = "";
+    std::string clientName;
 #ifdef MONGO_CONFIG_SSL
     auto sslConfiguration = getSSLConfiguration();
     if (sslConfiguration) {
-        clientName = sslConfiguration->clientSubjectName.toString();
+        clientName = sslConfiguration->getClientSubjectNameString();
     }
 #endif
 
@@ -531,11 +531,11 @@ Status DBClientBase::authenticateInternalUser(auth::StepDownBehavior stepDownBeh
     }
 
     // We will only have a client name if SSL is enabled
-    std::string clientName = "";
+    std::string clientName;
 #ifdef MONGO_CONFIG_SSL
     auto sslConfiguration = getSSLConfiguration();
     if (sslConfiguration) {
-        clientName = sslConfiguration->clientSubjectName.toString();
+        clientName = sslConfiguration->getClientSubjectNameString();
     }
 #endif
 

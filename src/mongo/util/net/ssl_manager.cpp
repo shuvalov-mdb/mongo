@@ -372,8 +372,9 @@ void SSLManagerCoordinator::rotate() {
     int clusterAuthMode = serverGlobalParams.clusterAuthMode.load();
     if (clusterAuthMode == ServerGlobalParams::ClusterAuthMode_x509 ||
         clusterAuthMode == ServerGlobalParams::ClusterAuthMode_sendX509) {
-        auth::setInternalUserAuthParams(auth::createInternalX509AuthDocument(
-            StringData(manager->getSSLConfiguration().clientSubjectName.toString())));
+        auto clientSubjectName = manager->getSSLConfiguration().getClientSubjectNameString();
+        auth::setInternalUserAuthParams(
+            auth::createInternalX509AuthDocument(StringData(clientSubjectName)));
     }
 
     auto tl = getGlobalServiceContext()->getTransportLayer();
@@ -610,24 +611,24 @@ MONGO_INITIALIZER_WITH_PREREQUISITES(SSLManagerLogger, ("SSLManager"))
 (InitializerContext*) {
     if (!isSSLServer || (sslGlobalParams.sslMode.load() != SSLParams::SSLMode_disabled)) {
         const auto& config = SSLManagerCoordinator::get()->getSSLManager()->getSSLConfiguration();
-        if (!config.clientSubjectName.empty()) {
+        if (!config.isClientSubjectEmpty()) {
             LOGV2_DEBUG(23214,
                         1,
                         "Client Certificate Name: {name}",
                         "Client certificate name",
-                        "name"_attr = config.clientSubjectName);
+                        "name"_attr = config.getClientSubjectNameString());
         }
-        if (!config.serverSubjectName().empty()) {
+        if (!config.isServerSubjectEmpty()) {
             LOGV2_DEBUG(23215,
                         1,
                         "Server Certificate Name: {name}",
                         "Server certificate name",
-                        "name"_attr = config.serverSubjectName());
+                        "name"_attr = config.getServerSubjectNameString());
             LOGV2_DEBUG(23216,
                         1,
                         "Server Certificate Expiration: {expiration}",
                         "Server certificate expiration",
-                        "expiration"_attr = config.serverCertificateExpirationDate);
+                        "expiration"_attr = config.getServerCertificateExpirationDate());
         }
     }
 }
@@ -709,6 +710,7 @@ std::string SSLX509Name::toString() const {
 }
 
 Status SSLConfiguration::setServerSubjectName(SSLX509Name name) {
+    stdx::lock_guard<Latch> lk(_mutex);
     auto status = name.normalizeStrings();
     if (!status.isOK()) {
         return status;
@@ -716,6 +718,53 @@ Status SSLConfiguration::setServerSubjectName(SSLX509Name name) {
     _serverSubjectName = std::move(name);
     _canonicalServerSubjectName = canonicalizeClusterDN(_serverSubjectName.entries());
     return Status::OK();
+}
+
+Status SSLConfiguration::setClientSubjectName(SSLX509Name name) {
+    stdx::lock_guard<Latch> lk(_mutex);
+    // We do not normalize the incoming name (see server side above).
+    _clientSubjectName = std::move(name);
+    return Status::OK();
+}
+
+void SSLConfiguration::setHasCA() {
+    stdx::lock_guard<Latch> lk(_mutex);
+    _hasCA = true;
+}
+
+bool SSLConfiguration::hasCA() const {
+    stdx::lock_guard<Latch> lk(_mutex);
+    return _hasCA;
+}
+
+bool SSLConfiguration::isClientSubjectEmpty() const {
+    stdx::lock_guard<Latch> lk(_mutex);
+    return _clientSubjectName.empty();
+}
+
+bool SSLConfiguration::isServerSubjectEmpty() const {
+    stdx::lock_guard<Latch> lk(_mutex);
+    return _serverSubjectName.empty();
+}
+
+std::string SSLConfiguration::getClientSubjectNameString() const {
+    stdx::lock_guard<Latch> lk(_mutex);
+    return _clientSubjectName.toString();
+}
+
+std::string SSLConfiguration::getServerSubjectNameString() const {
+    stdx::lock_guard<Latch> lk(_mutex);
+    return _serverSubjectName.toString();
+}
+
+void SSLConfiguration::setServerCertificateExpirationDate(Date_t date) {
+    stdx::lock_guard<Latch> lk(_mutex);
+    _serverCertificateExpirationDate = date;
+}
+
+Date_t SSLConfiguration::getServerCertificateExpirationDate() const {
+    stdx::lock_guard<Latch> lk(_mutex);
+    return _serverCertificateExpirationDate;
 }
 
 /**
@@ -730,6 +779,7 @@ Status SSLConfiguration::setServerSubjectName(SSLX509Name name) {
  * the server's distinguished name.
  */
 bool SSLConfiguration::isClusterMember(SSLX509Name subject) const {
+    stdx::lock_guard<Latch> lk(_mutex);
     if (!subject.normalizeStrings().isOK()) {
         return false;
     }
@@ -748,6 +798,7 @@ bool SSLConfiguration::isClusterMember(SSLX509Name subject) const {
 }
 
 bool SSLConfiguration::isClusterMember(StringData subjectName) const {
+    stdx::lock_guard<Latch> lk(_mutex);
     auto swClient = parseDN(subjectName);
     if (!swClient.isOK()) {
         LOGV2_WARNING(23219,
@@ -772,9 +823,10 @@ bool SSLConfiguration::isClusterMember(StringData subjectName) const {
 }
 
 void SSLConfiguration::getServerStatusBSON(BSONObjBuilder* security) const {
+    stdx::lock_guard<Latch> lk(_mutex);
     security->append("SSLServerSubjectName", _serverSubjectName.toString());
-    security->appendBool("SSLServerHasCertificateAuthority", hasCA);
-    security->appendDate("SSLServerCertificateExpirationDate", serverCertificateExpirationDate);
+    security->appendBool("SSLServerHasCertificateAuthority", _hasCA);
+    security->appendDate("SSLServerCertificateExpirationDate", _serverCertificateExpirationDate);
 }
 
 SSLManagerInterface::~SSLManagerInterface() {}

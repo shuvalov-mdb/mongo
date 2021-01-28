@@ -1121,7 +1121,7 @@ private:
     // object is alive.
     SSLManagerOpenSSL* _manager;
 
-    Mutex _staplingMutex = MONGO_MAKE_LATCH("OCSPStaplingJobRunner::_mutex");
+    Mutex _staplingMutex = MONGO_MAKE_LATCH("OCSPFetcher::_mutex");
     PeriodicRunner::JobAnchor _ocspStaplingAnchor;
     bool _shutdown{false};
 };
@@ -1199,7 +1199,7 @@ private:
     bool _suppressNoCertificateWarning;
     SSLConfiguration _sslConfiguration;
 
-    Mutex _sharedResponseMutex = MONGO_MAKE_LATCH("OCSPStaplingJobRunner::_sharedResponseMutex");
+    Mutex _sharedResponseMutex = MONGO_MAKE_LATCH("SSLManagerOpenSSL::_sharedResponseMutex");
     std::shared_ptr<OCSPStaplingContext> _ocspStaplingContext;
 
     OCSPFetcher _fetcher;
@@ -1566,11 +1566,13 @@ SSLManagerOpenSSL::SSLManagerOpenSSL(const SSLParams& params, bool isServer)
     }
 
     if (!clientPEM.empty()) {
-        auto status = _parseAndValidateCertificate(
-            clientPEM, clientPassword, &_sslConfiguration.clientSubjectName, nullptr);
+        SSLX509Name clientSubjectName;
+        auto status =
+            _parseAndValidateCertificate(clientPEM, clientPassword, &clientSubjectName, nullptr);
         uassertStatusOKWithContext(
             status,
             str::stream() << "ssl client initialization problem for certificate: " << clientPEM);
+        uassertStatusOK(_sslConfiguration.setClientSubjectName(clientSubjectName));
     }
 
     // SSL server specific initialization
@@ -1580,20 +1582,21 @@ SSLManagerOpenSSL::SSLManagerOpenSSL(const SSLParams& params, bool isServer)
         }
 
         SSLX509Name serverSubjectName;
-        auto status =
-            _parseAndValidateCertificate(params.sslPEMKeyFile,
-                                         &_serverPEMPassword,
-                                         &serverSubjectName,
-                                         &_sslConfiguration.serverCertificateExpirationDate);
+        Date_t serverCertificateExpirationDate;
+        auto status = _parseAndValidateCertificate(params.sslPEMKeyFile,
+                                                   &_serverPEMPassword,
+                                                   &serverSubjectName,
+                                                   &serverCertificateExpirationDate);
         uassertStatusOKWithContext(status,
                                    str::stream()
                                        << "ssl server initialization problem for certificate: "
                                        << params.sslPEMKeyFile);
 
         uassertStatusOK(_sslConfiguration.setServerSubjectName(std::move(serverSubjectName)));
+        _sslConfiguration.setServerCertificateExpirationDate(serverCertificateExpirationDate);
 
         CertificateExpirationMonitor::get()->updateExpirationDeadline(
-            _sslConfiguration.serverCertificateExpirationDate);
+            serverCertificateExpirationDate);
     }
 }
 
@@ -2211,12 +2214,17 @@ Status SSLManagerOpenSSL::initSSLContext(SSL_CTX* context,
                                         << transientParams.targetedClusterConnectionString);
         }
 
+        SSLX509Name clientSubjectName;
         auto status = _parseAndValidateCertificateFromMemory(transientParams.sslClusterPEMPayload,
                                                              &_clusterPEMPassword,
-                                                             &_sslConfiguration.clientSubjectName,
+                                                             &clientSubjectName,
                                                              nullptr);
         if (!status.isOK()) {
             return status.withContext("Could not validate transient certificate");
+        }
+        status = _sslConfiguration.setClientSubjectName(clientSubjectName);
+        if (!status.isOK()) {
+            return status;
         }
 
     } else if (direction == ConnectionDirection::kOutgoing && params.tlsWithholdClientCertificate) {
@@ -2616,7 +2624,7 @@ Status SSLManagerOpenSSL::_setupCA(SSL_CTX* context, const std::string& caFile) 
     // Set SSL to require peer (client) certificate verification
     // if a certificate is presented
     SSL_CTX_set_verify(context, SSL_VERIFY_PEER, &SSLManagerOpenSSL::verify_cb);
-    _sslConfiguration.hasCA = true;
+    _sslConfiguration.setHasCA();
     return Status::OK();
 }
 
@@ -2881,7 +2889,7 @@ Future<SSLPeerInfo> SSLManagerOpenSSL::parseAndValidatePeerCertificate(
 
     recordTLSVersion(tlsVersionStatus.getValue(), hostForLogging);
 
-    if (!_sslConfiguration.hasCA && isSSLServer)
+    if (!_sslConfiguration.hasCA() && isSSLServer)
         return SSLPeerInfo(sni);
 
     X509* peerCert = SSL_get_peer_certificate(conn);
@@ -2970,7 +2978,12 @@ Future<SSLPeerInfo> SSLManagerOpenSSL::parseAndValidatePeerCertificate(
         }
 
         // If client and server certificate are the same, log a warning.
-        if (_sslConfiguration.serverSubjectName() == peerSubject) {
+        bool subjectsEqual = false;
+        _sslConfiguration.accessServerSubjectName(
+            [&subjectsEqual, &peerSubject](const SSLX509Name& name) {
+                subjectsEqual = name == peerSubject;
+            });
+        if (subjectsEqual) {
             LOGV2_WARNING(23236, "Client connecting with server's own TLS certificate");
         }
 

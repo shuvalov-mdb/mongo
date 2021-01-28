@@ -33,7 +33,9 @@
 
 #include "mongo/bson/util/builder.h"
 #include "mongo/db/auth/role_name.h"
+#include "mongo/platform/mutex.h"
 #include "mongo/stdx/unordered_set.h"
+#include "mongo/util/future.h"
 
 namespace mongo {
 
@@ -113,18 +115,39 @@ class SSLConfiguration {
 public:
     bool isClusterMember(StringData subjectName) const;
     bool isClusterMember(SSLX509Name subjectName) const;
+    bool hasCA() const;
     void getServerStatusBSON(BSONObjBuilder*) const;
-    Status setServerSubjectName(SSLX509Name name);
+    bool isClientSubjectEmpty() const;
+    bool isServerSubjectEmpty() const;
+    Date_t getServerCertificateExpirationDate() const;
 
-    const SSLX509Name& serverSubjectName() const {
-        return _serverSubjectName;
+    Status setClientSubjectName(SSLX509Name name);
+    Status setServerSubjectName(SSLX509Name name);
+    void setServerCertificateExpirationDate(Date_t date);
+    void setHasCA();
+
+    std::string getClientSubjectNameString() const;
+    std::string getServerSubjectNameString() const;
+
+    TEMPLATE(typename Func)
+    REQUIRES(future_details::isCallableExactR<void, Func, const SSLX509Name&>)
+    void accessServerSubjectName(Func&& func) const {
+        stdx::lock_guard<Latch> lk(_mutex);
+        func(_serverSubjectName);
     }
 
-    SSLX509Name clientSubjectName;
-    Date_t serverCertificateExpirationDate;
-    bool hasCA = false;
+    TEMPLATE(typename Func)
+    REQUIRES(future_details::isCallableExactR<void, Func, const SSLX509Name&>)
+    void accessClientSubjectName(Func&& func) const {
+        stdx::lock_guard<Latch> lk(_mutex);
+        func(_clientSubjectName);
+    }
 
 private:
+    mutable Mutex _mutex = MONGO_MAKE_LATCH("SSLConfiguration::_mutex");
+    Date_t _serverCertificateExpirationDate;
+    bool _hasCA = false;
+    SSLX509Name _clientSubjectName;
     SSLX509Name _serverSubjectName;
     std::vector<SSLX509Name::Entry> _canonicalServerSubjectName;
 };

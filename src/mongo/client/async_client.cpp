@@ -158,7 +158,7 @@ Future<void> AsyncDBClient::authenticate(const BSONObj& params) {
 #ifdef MONGO_CONFIG_SSL
     auto sslConfiguration = _session->getSSLConfiguration();
     if (sslConfiguration) {
-        clientName = sslConfiguration->clientSubjectName.toString();
+        clientName = sslConfiguration->getClientSubjectNameString();
     }
 #endif
 
@@ -177,7 +177,7 @@ Future<void> AsyncDBClient::authenticateInternal(
 #ifdef MONGO_CONFIG_SSL
     auto sslConfiguration = _session->getSSLConfiguration();
     if (sslConfiguration) {
-        clientName = sslConfiguration->clientSubjectName.toString();
+        clientName = sslConfiguration->getClientSubjectNameString();
     }
 #endif
 

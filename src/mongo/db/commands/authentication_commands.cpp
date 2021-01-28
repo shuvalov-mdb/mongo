@@ -216,7 +216,7 @@ void _authenticateX509(OperationContext* opCtx, UserName& user, StringData dbnam
 
     uassert(ErrorCodes::AuthenticationFailed,
             "Unable to verify x.509 certificate, as no CA has been provided.",
-            sslConfiguration->hasCA);
+            sslConfiguration->hasCA());
 
     uassert(ErrorCodes::AuthenticationFailed,
             "There is no x.509 client certificate matching the user.",
