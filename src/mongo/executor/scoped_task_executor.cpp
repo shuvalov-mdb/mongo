@@ -27,9 +27,12 @@
  *    it in the license file.
  */
 
+#define MONGO_LOGV2_DEFAULT_COMPONENT ::mongo::logv2::LogComponent::kExecutor
+
 #include "mongo/platform/basic.h"
 
 #include "mongo/executor/scoped_task_executor.h"
+#include "mongo/logv2/log.h"
 
 namespace mongo {
 namespace executor {
@@ -49,8 +52,8 @@ static const inline auto kDefaultShutdownStatus =
  */
 class ScopedTaskExecutor::Impl : public TaskExecutor {
 public:
-    Impl(std::shared_ptr<TaskExecutor> executor, Status shutdownStatus)
-        : _executor(std::move(executor)), _shutdownStatus(std::move(shutdownStatus)) {}
+    Impl(std::shared_ptr<TaskExecutor> executor, Status shutdownStatus, StringData serviceName)
+        : _serviceName(serviceName), _executor(std::move(executor)), _shutdownStatus(std::move(shutdownStatus)) {}
 
     ~Impl() {
         // The ScopedTaskExecutor dtor calls shutdown, so this is guaranteed.
@@ -62,6 +65,9 @@ public:
     }
 
     void shutdown() override {
+        LOGV2(53950,
+              "Primary service scoped executor is shutting down",
+              "serviceName"_attr = _serviceName);
         auto handles = [&] {
             stdx::lock_guard lk(_mutex);
             if (!_inShutdown && _cbHandles.empty()) {
@@ -345,6 +351,8 @@ private:
         }
     }
 
+    const std::string _serviceName;
+
     mutable Mutex _mutex = MONGO_MAKE_LATCH("ScopedTaskExecutor::_mutex");
     bool _inShutdown = false;
     std::shared_ptr<TaskExecutor> _executor;
@@ -358,11 +366,11 @@ private:
 };
 
 ScopedTaskExecutor::ScopedTaskExecutor(std::shared_ptr<TaskExecutor> executor)
-    : _executor(std::make_shared<Impl>(std::move(executor), kDefaultShutdownStatus)) {}
+    : _executor(std::make_shared<Impl>(std::move(executor), kDefaultShutdownStatus, "")) {}
 
 ScopedTaskExecutor::ScopedTaskExecutor(std::shared_ptr<TaskExecutor> executor,
-                                       Status shutdownStatus)
-    : _executor(std::make_shared<Impl>(std::move(executor), std::move(shutdownStatus))) {}
+                                       Status shutdownStatus, StringData serviceName)
+    : _executor(std::make_shared<Impl>(std::move(executor), std::move(shutdownStatus), serviceName)) {}
 
 ScopedTaskExecutor::~ScopedTaskExecutor() {
     _executor->shutdown();

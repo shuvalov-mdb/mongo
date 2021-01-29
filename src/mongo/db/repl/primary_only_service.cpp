@@ -324,7 +324,7 @@ void PrimaryOnlyService::onStepUp(const OpTime& stepUpOpTime) {
     InstanceMap savedInstances;
     invariant(_getHasExecutor());
     auto newThenOldScopedExecutor =
-        std::make_shared<executor::ScopedTaskExecutor>(_executor, kExecutorShutdownStatus);
+        std::make_shared<executor::ScopedTaskExecutor>(_executor, kExecutorShutdownStatus, getServiceName());
     {
         stdx::lock_guard lk(_mutex);
 
