@@ -710,11 +710,11 @@ std::string SSLX509Name::toString() const {
 }
 
 Status SSLConfiguration::setServerSubjectName(SSLX509Name name) {
-    stdx::lock_guard<Latch> lk(_mutex);
     auto status = name.normalizeStrings();
     if (!status.isOK()) {
         return status;
     }
+    stdx::lock_guard<Latch> lk(_mutex);
     _serverSubjectName = std::move(name);
     _canonicalServerSubjectName = canonicalizeClusterDN(_serverSubjectName.entries());
     return Status::OK();
@@ -779,7 +779,6 @@ Date_t SSLConfiguration::getServerCertificateExpirationDate() const {
  * the server's distinguished name.
  */
 bool SSLConfiguration::isClusterMember(SSLX509Name subject) const {
-    stdx::lock_guard<Latch> lk(_mutex);
     if (!subject.normalizeStrings().isOK()) {
         return false;
     }
@@ -789,6 +788,7 @@ bool SSLConfiguration::isClusterMember(SSLX509Name subject) const {
         return false;
     }
 
+    stdx::lock_guard<Latch> lk(_mutex);
     if (client == _canonicalServerSubjectName) {
         return true;
     }
@@ -798,7 +798,6 @@ bool SSLConfiguration::isClusterMember(SSLX509Name subject) const {
 }
 
 bool SSLConfiguration::isClusterMember(StringData subjectName) const {
-    stdx::lock_guard<Latch> lk(_mutex);
     auto swClient = parseDN(subjectName);
     if (!swClient.isOK()) {
         LOGV2_WARNING(23219,
@@ -819,6 +818,7 @@ bool SSLConfiguration::isClusterMember(StringData subjectName) const {
 
     auto canonicalClient = canonicalizeClusterDN(client.entries());
 
+    stdx::lock_guard<Latch> lk(_mutex);
     return !canonicalClient.empty() && (canonicalClient == _canonicalServerSubjectName);
 }
 
