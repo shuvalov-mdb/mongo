@@ -56,6 +56,8 @@
 #include "mongo/s/write_ops/batched_command_response.h"
 #include "mongo/util/concurrency/thread_pool.h"
 
+#include "mongo/util/stacktrace.h"
+
 namespace mongo {
 namespace repl {
 
@@ -323,8 +325,8 @@ void PrimaryOnlyService::startup(OperationContext* opCtx) {
 void PrimaryOnlyService::onStepUp(const OpTime& stepUpOpTime) {
     InstanceMap savedInstances;
     invariant(_getHasExecutor());
-    auto newThenOldScopedExecutor =
-        std::make_shared<executor::ScopedTaskExecutor>(_executor, kExecutorShutdownStatus, getServiceName());
+    auto newThenOldScopedExecutor = std::make_shared<executor::ScopedTaskExecutor>(
+        _executor, kExecutorShutdownStatus, getServiceName());
     {
         stdx::lock_guard lk(_mutex);
 
@@ -470,8 +472,12 @@ void PrimaryOnlyService::shutdown() {
     }
 
     if (hasExecutor) {
+        BSONObjBuilder builder;
+        _executor->appendDiagnosticBSON(&builder);
+        std::cerr << "!!!! Service executor shutdown " << builder.obj() << std::endl;
         _executor->shutdown();
         _executor->join();
+        std::cerr << "!!!! After service executor shutdown" << std::endl;
     }
     savedInstances.clear();
 }
@@ -540,14 +546,31 @@ boost::optional<std::shared_ptr<PrimaryOnlyService::Instance>> PrimaryOnlyServic
     return it->second;
 }
 
-void PrimaryOnlyService::releaseInstance(const InstanceID& id) {
-    stdx::lock_guard lk(_mutex);
-    _instances.erase(id);
+void PrimaryOnlyService::releaseInstance(const InstanceID& id, Status status) {
+    std::cerr << "!!!!! Release instance " << id << std::endl;
+    printStackTrace();
+    std::shared_ptr<Instance> savedInstance;
+    {
+        stdx::lock_guard lk(_mutex);
+        auto iterator = _instances.find(id);
+        savedInstance = iterator->second;
+        _instances.erase(iterator);
+    }
+    if (savedInstance.get()) {
+        savedInstance->interrupt(std::move(status));
+    }
 }
 
-void PrimaryOnlyService::releaseAllInstances() {
-    stdx::lock_guard lk(_mutex);
-    _instances.clear();
+void PrimaryOnlyService::releaseAllInstances(Status status) {
+    InstanceMap allInstances;
+    {
+        stdx::lock_guard lk(_mutex);
+        allInstances = _instances;
+        _instances.clear();
+    }
+    for (const auto& instancePair : allInstances) {
+        instancePair.second->interrupt(status);
+    }
 }
 
 void PrimaryOnlyService::_setHasExecutor(WithLock) {
@@ -574,7 +597,7 @@ void PrimaryOnlyService::_rebuildInstances(long long term) noexcept {
                     2,
                     "Querying {ns} to look for state documents while rebuilding PrimaryOnlyService "
                     "{service}",
-                    "Querying to look for state documents while rebuiding PrimaryOnlyService",
+                    "Querying to look for state documents while rebuilding PrimaryOnlyService",
                     "ns"_attr = ns,
                     "service"_attr = serviceName);
 

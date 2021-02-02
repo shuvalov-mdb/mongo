@@ -899,6 +899,7 @@ void setPromiseOkifNotReady(WithLock lk, Promise& promise) {
 }  // namespace
 
 SemiFuture<void> TenantMigrationRecipientService::Instance::_markStateDocAsGarbageCollectable() {
+    std::cerr << "!!!!! state doc GC-0 " << getMigrationUUID() << std::endl;
     _stopOrHangOnFailPoint(&fpAfterReceivingRecipientForgetMigration);
 
     // Throws if we have failed to persist the state doc at the first place. This can only happen in
@@ -908,6 +909,7 @@ SemiFuture<void> TenantMigrationRecipientService::Instance::_markStateDocAsGarba
     invariant(_stateDocPersistedPromise.getFuture().isReady());
     _stateDocPersistedPromise.getFuture().get();
 
+    std::cerr << "!!!!! state doc GC enters " << getMigrationUUID() << std::endl;
     stdx::lock_guard lk(_mutex);
 
     if (_stateDoc.getExpireAt()) {
@@ -926,6 +928,7 @@ SemiFuture<void> TenantMigrationRecipientService::Instance::_markStateDocAsGarba
             // Update the state doc with the expireAt set.
             return tenantMigrationRecipientEntryHelpers::updateStateDoc(opCtx, _stateDoc);
         } catch (DBException& ex) {
+            std::cerr << "!!!!! state doc GC " << ex.toString() << getMigrationUUID() << std::endl;
             return ex.toStatus();
         }
     }();
@@ -934,6 +937,7 @@ SemiFuture<void> TenantMigrationRecipientService::Instance::_markStateDocAsGarba
         // Otherwise, the whole chain would stop running without marking the state doc garbage
         // collectable while we are still the primary.
         invariant(ErrorCodes::isShutdownError(status) || ErrorCodes::isNotPrimaryError(status));
+        std::cerr << "!!!!! after state doc GC2 " << status << getMigrationUUID() << std::endl;
         uassertStatusOK(status);
     }
 
@@ -967,6 +971,7 @@ void TenantMigrationRecipientService::Instance::_cancelRemainingWork(WithLock lk
 
 void TenantMigrationRecipientService::Instance::_interrupt(Status status,
                                                            bool skipWaitingForForgetMigration) {
+    std::cerr << "!!!!! Interrupt " << status << " " << getMigrationUUID() << std::endl;
     invariant(!status.isOK());
 
     stdx::lock_guard lk(_mutex);
@@ -975,11 +980,14 @@ void TenantMigrationRecipientService::Instance::_interrupt(Status status,
         // We only get here on receiving the recipientForgetMigration command or on
         // stepDown/shutDown. On receiving the recipientForgetMigration, the promise should have
         // already been set.
+        std::cerr << "!!!!! Interrupt skip waiting for forget migration " << getMigrationUUID()
+                  << std::endl;
         setPromiseErrorifNotReady(lk, _receivedRecipientForgetMigrationPromise, status);
     }
 
     if (_taskState.isInterrupted() || _taskState.isDone()) {
         // nothing to do.
+        std::cerr << "!!!!! Interrupt nothing to do " << getMigrationUUID() << std::endl;
         return;
     }
 
@@ -988,6 +996,7 @@ void TenantMigrationRecipientService::Instance::_interrupt(Status status,
     // If the task is running, then setting promise result will be taken care by the main task
     // continuation chain.
     if (_taskState.isNotStarted()) {
+        std::cerr << "!!!!! Interrupt set errors " << getMigrationUUID() << std::endl;
         invariant(skipWaitingForForgetMigration);
         _stateDocPersistedPromise.setError(status);
         _dataSyncStartedPromise.setError(status);
@@ -1349,12 +1358,16 @@ SemiFuture<void> TenantMigrationRecipientService::Instance::run(
                 // Skip waiting for the recipientForgetMigration command.
                 setPromiseOkifNotReady(lk, _receivedRecipientForgetMigrationPromise);
             }
+            std::cerr << "!!!!! before scoped exec " << getMigrationUUID() << std::endl;
         })
         .thenRunOn(**_scopedExecutor)
         .then([this, self = shared_from_this()] {
             // Schedule on the _scopedExecutor to make sure we are still the primary when waiting
             // for the recipientForgetMigration command.
-            return _receivedRecipientForgetMigrationPromise.getFuture();
+            auto fut = _receivedRecipientForgetMigrationPromise.getFuture();
+            std::cerr << "!!!!! after scoped exec, fut " << fut.isReady() << getMigrationUUID()
+                      << std::endl;
+            return fut;
         })
         .then([this, self = shared_from_this()] { return _markStateDocAsGarbageCollectable(); })
         .thenRunOn(_recipientService->getInstanceCleanupExecutor())
@@ -1372,7 +1385,8 @@ SemiFuture<void> TenantMigrationRecipientService::Instance::run(
                       "expireAt"_attr = *_stateDoc.getExpireAt());
                 setPromiseOkifNotReady(lk, _taskCompletionPromise);
             } else {
-                // We should only hit here on a stepDown/shutDown.
+                // We should only hit here on a stepDown/shutDown, or a 'conflicting operation'
+                // error.
                 LOGV2(4881402,
                       "Migration not marked to be garbage collectable",
                       "migrationId"_attr = getMigrationUUID(),

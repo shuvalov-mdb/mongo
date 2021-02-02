@@ -70,7 +70,7 @@ void PrimaryOnlyServiceOpObserver::onDelete(OperationContext* opCtx,
     if (!service) {
         return;
     }
-    service->releaseInstance(documentId);
+    service->releaseInstance(documentId, Status::OK());
 }
 
 
@@ -81,7 +81,9 @@ repl::OpTime PrimaryOnlyServiceOpObserver::onDropCollection(OperationContext* op
                                                             const CollectionDropType dropType) {
     auto service = _registry->lookupServiceByNamespace(collectionName);
     if (service) {
-        service->releaseAllInstances();
+        service->releaseAllInstances(Status(ErrorCodes::IllegalOperation,
+                                            "Collection is dropped",
+                                            BSON("collection" << collectionName.toString())));
     }
     return {};
 }

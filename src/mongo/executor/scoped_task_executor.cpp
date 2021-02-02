@@ -53,7 +53,9 @@ static const inline auto kDefaultShutdownStatus =
 class ScopedTaskExecutor::Impl : public TaskExecutor {
 public:
     Impl(std::shared_ptr<TaskExecutor> executor, Status shutdownStatus, StringData serviceName)
-        : _serviceName(serviceName), _executor(std::move(executor)), _shutdownStatus(std::move(shutdownStatus)) {}
+        : _serviceName(serviceName),
+          _executor(std::move(executor)),
+          _shutdownStatus(std::move(shutdownStatus)) {}
 
     ~Impl() {
         // The ScopedTaskExecutor dtor calls shutdown, so this is guaranteed.
@@ -70,10 +72,10 @@ public:
             _executor->appendDiagnosticBSON(&builder);
             stdx::lock_guard lk(_mutex);
             LOGV2(5395001,
-                "Primary service scoped executor is shutting down",
-                "serviceName"_attr = _serviceName,
-                "pendingHandlesCount"_attr = _cbHandles.size(),
-                "executorStats"_attr = builder.obj());
+                  "Primary service scoped executor is shutting down",
+                  "serviceName"_attr = _serviceName,
+                  "pendingHandlesCount"_attr = _cbHandles.size(),
+                  "executorStats"_attr = builder.obj());
             if (!_inShutdown && _cbHandles.empty()) {
                 // We are guaranteed that no more callbacks can be added to _cbHandles after
                 // _inShutdown is set to true. If there aren't any callbacks outstanding, then it is
@@ -99,9 +101,10 @@ public:
 
     void join() override {
         joinAsync().wait();
-        LOGV2_DEBUG(5395002, 1,
-              "Join complete for primary service scoped executor",
-              "serviceName"_attr = _serviceName);
+        LOGV2_DEBUG(5395002,
+                    1,
+                    "Join complete for primary service scoped executor",
+                    "serviceName"_attr = _serviceName);
     }
 
     SharedSemiFuture<void> joinAsync() override {
@@ -376,8 +379,10 @@ ScopedTaskExecutor::ScopedTaskExecutor(std::shared_ptr<TaskExecutor> executor)
     : _executor(std::make_shared<Impl>(std::move(executor), kDefaultShutdownStatus, "")) {}
 
 ScopedTaskExecutor::ScopedTaskExecutor(std::shared_ptr<TaskExecutor> executor,
-                                       Status shutdownStatus, StringData serviceName)
-    : _executor(std::make_shared<Impl>(std::move(executor), std::move(shutdownStatus), serviceName)) {}
+                                       Status shutdownStatus,
+                                       StringData serviceName)
+    : _executor(
+          std::make_shared<Impl>(std::move(executor), std::move(shutdownStatus), serviceName)) {}
 
 ScopedTaskExecutor::~ScopedTaskExecutor() {
     _executor->shutdown();

@@ -83,7 +83,9 @@ namespace executor {
 class ScopedTaskExecutor {
 public:
     explicit ScopedTaskExecutor(std::shared_ptr<TaskExecutor> executor);
-    ScopedTaskExecutor(std::shared_ptr<TaskExecutor> executor, Status shutdownError, StringData serviceName = "");
+    ScopedTaskExecutor(std::shared_ptr<TaskExecutor> executor,
+                       Status shutdownError,
+                       StringData serviceName = "");
 
     // Delete all move/copy-ability
     ScopedTaskExecutor(ScopedTaskExecutor&&) = delete;
