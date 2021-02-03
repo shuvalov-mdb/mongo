@@ -31,8 +31,6 @@ const readPreference = {
     mode: 'primary'
 };
 
-var migrationIds = [];
-
 TestData.stopFailPointErrorCode = 4880402;
 function checkTenantMigrationRecipientStateCollCount(expectedCount) {
     let res = tenantMigrationRecipientStateColl.find().toArray();
@@ -84,15 +82,11 @@ assert.commandWorked(primary.adminCommand({
     // Sanity check : 'config.tenantMigrationRecipients' collection count should be empty.
     checkTenantMigrationRecipientStateCollCount(0);
     // Start the  conflicting recipientSyncData cmds.
-    let migrationId1 = UUID();
-    let migrationId2 = UUID();
     const recipientSyncDataCmd1 = startParallelShell(
-        funWithArgs(
-            startRecipientSyncDataCmd, migrationId1, tenantId, connectionString, readPreference),
+        funWithArgs(startRecipientSyncDataCmd, UUID(), tenantId, connectionString, readPreference),
         primary.port);
     const recipientSyncDataCmd2 = startParallelShell(
-        funWithArgs(
-            startRecipientSyncDataCmd, migrationId2, tenantId, connectionString, readPreference),
+        funWithArgs(startRecipientSyncDataCmd, UUID(), tenantId, connectionString, readPreference),
         primary.port);
 
     jsTestLog("Waiting until both conflicting instances get started and hit the failPoint.");
@@ -125,15 +119,6 @@ assert.commandWorked(primary.adminCommand({
     // Only one instance should have succeeded in persisting the state doc, other should have failed
     // with ErrorCodes.ConflictingOperationInProgress.
     let result = checkTenantMigrationRecipientStateCollCount(1);
-
-    let uuidThatSucceeded = result[0]["_id"];
-    // We will have to forget the migration that succeeded first.
-    migrationIds.push(uuidThatSucceeded);
-    if (uuidThatSucceeded == migrationId1) {
-        migrationIds.push(migrationId2);
-    } else {
-        migrationIds.push(migrationId1);
-    }
 }
 
 {
@@ -141,11 +126,8 @@ assert.commandWorked(primary.adminCommand({
     // instance for  tenant "test' wasn't garbage collected, the migration status for that tenant is
     // considered as active. So, this command should fail with
     // ErrorCodes.ConflictingOperationInProgress.
-    let migrationId = UUID();
-    migrationIds.push(migrationId);
     const recipientSyncDataCmd3 = startParallelShell(
-        funWithArgs(
-            startRecipientSyncDataCmd, migrationId, tenantId, connectionString, readPreference),
+        funWithArgs(startRecipientSyncDataCmd, UUID(), tenantId, connectionString, readPreference),
         primary.port);
     recipientSyncDataCmd3();
 
@@ -154,33 +136,12 @@ assert.commandWorked(primary.adminCommand({
 }
 
 {
-    // There should be no ASAN errors after down/up cycle.
+    // There should be no ASAN errors after step down cycle.
     const stepDown = startParallelShell(() => {
         assert.commandWorked(db.adminCommand({"replSetStepDown": 60, "force": true}));
+        assert.commandWorked(db.adminCommand({replSetFreeze: 0}));
     }, primary.port);
     stepDown();
-    const stepUp = startParallelShell(() => {
-        assert.commandWorked(db.adminCommand({replSetFreeze: 0}));
-        assert.commandWorked(db.adminCommand({replSetStepUp: 1}));
-    }, primary.port);
-    stepUp();
-    rst.awaitNodesAgreeOnPrimary();
-}
-
-{
-    // The successful migration should be forgotten first, otherwise we get the conflicting
-    // operation error.
-    migrationIds.forEach(id => {
-        assert.commandWorked(primary.adminCommand({
-            recipientForgetMigration: 1,
-            migrationId: id,
-            donorConnectionString: connectionString,
-            tenantId: tenantId,
-            readPreference: readPreference,
-            recipientCertificateForDonor:
-                TenantMigrationUtil.makeMigrationCertificatesForTest().recipientCertificateForDonor
-        }));
-    });
 }
 
 rst.stopSet();
