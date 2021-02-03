@@ -12,7 +12,7 @@ load("jstests/libs/parallel_shell_helpers.js");
 load("jstests/replsets/libs/tenant_migration_util.js");
 
 var rst =
-    new ReplSetTest({nodes: 2, nodeOptions: TenantMigrationUtil.makeX509OptionsForTest().donor});
+    new ReplSetTest({nodes: 1, nodeOptions: TenantMigrationUtil.makeX509OptionsForTest().donor});
 rst.startSet();
 rst.initiate();
 if (!TenantMigrationUtil.isFeatureFlagEnabled(rst.getPrimary())) {
@@ -37,7 +37,6 @@ function checkTenantMigrationRecipientStateCollCount(expectedCount) {
     assert.eq(expectedCount,
               res.length,
               "'config.tenantMigrationRecipients' collection count mismatch: " + tojson(res));
-    return res;
 }
 
 /**
@@ -118,7 +117,7 @@ assert.commandWorked(primary.adminCommand({
 
     // Only one instance should have succeeded in persisting the state doc, other should have failed
     // with ErrorCodes.ConflictingOperationInProgress.
-    let result = checkTenantMigrationRecipientStateCollCount(1);
+    checkTenantMigrationRecipientStateCollCount(1);
 }
 
 {
@@ -133,15 +132,6 @@ assert.commandWorked(primary.adminCommand({
 
     // Collection count should remain the same.
     checkTenantMigrationRecipientStateCollCount(1);
-}
-
-{
-    // There should be no ASAN errors after step down cycle.
-    const stepDown = startParallelShell(() => {
-        assert.commandWorked(db.adminCommand({"replSetStepDown": 60, "force": true}));
-        assert.commandWorked(db.adminCommand({replSetFreeze: 0}));
-    }, primary.port);
-    stepDown();
 }
 
 rst.stopSet();
