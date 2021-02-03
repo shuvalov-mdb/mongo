@@ -545,10 +545,13 @@ void PrimaryOnlyService::releaseInstance(const InstanceID& id, Status status) {
     {
         stdx::lock_guard lk(_mutex);
         auto iterator = _instances.find(id);
+        if (iterator == _instances.end()) {
+            return;
+        }
         savedInstance = iterator->second;
         _instances.erase(iterator);
     }
-    if (savedInstance.get()) {
+    if (!status.isOK() && savedInstance.get()) {
         savedInstance->interrupt(std::move(status));
     }
 }
@@ -557,7 +560,11 @@ void PrimaryOnlyService::releaseAllInstances(Status status) {
     InstanceMap allInstances;
     {
         stdx::lock_guard lk(_mutex);
-        allInstances = _instances;
+        if (status.isOK()) {
+            _instances.clear();
+            return;
+        }
+        allInstances = std::move(_instances);
         _instances.clear();
     }
     for (const auto& instancePair : allInstances) {
