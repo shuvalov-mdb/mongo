@@ -110,12 +110,12 @@ public:
                 return Response(recipientInstance->waitUntilTimestampIsMajorityCommitted(
                     opCtx, *returnAfterReachingDonorTs));
 
-            } catch (ExceptionFor<ErrorCodes::ConflictingOperationInProgress>&) {
+            } catch (ExceptionFor<ErrorCodes::ConflictingOperationInProgress>& exception) {
                 // A conflict may arise when inserting the recipientInstance's  state document.
                 // Since the conflict occurred at the insert stage, that means this instance's
                 // tenantId conflicts with an existing instance's tenantId. Therefore, remove the
                 // instance that was just created.
-                recipientService->releaseInstance(stateDocBson["_id"].wrap());
+                recipientService->releaseInstance(stateDocBson["_id"].wrap(), exception.toStatus());
                 throw;
             }
         }

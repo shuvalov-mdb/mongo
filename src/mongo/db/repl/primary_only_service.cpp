@@ -540,14 +540,29 @@ boost::optional<std::shared_ptr<PrimaryOnlyService::Instance>> PrimaryOnlyServic
     return it->second;
 }
 
-void PrimaryOnlyService::releaseInstance(const InstanceID& id) {
-    stdx::lock_guard lk(_mutex);
-    _instances.erase(id);
+void PrimaryOnlyService::releaseInstance(const InstanceID& id, Status status) {
+    std::shared_ptr<Instance> savedInstance;
+    {
+        stdx::lock_guard lk(_mutex);
+        auto iterator = _instances.find(id);
+        savedInstance = iterator->second;
+        _instances.erase(iterator);
+    }
+    if (savedInstance.get()) {
+        savedInstance->interrupt(std::move(status));
+    }
 }
 
-void PrimaryOnlyService::releaseAllInstances() {
-    stdx::lock_guard lk(_mutex);
-    _instances.clear();
+void PrimaryOnlyService::releaseAllInstances(Status status) {
+    InstanceMap allInstances;
+    {
+        stdx::lock_guard lk(_mutex);
+        allInstances = _instances;
+        _instances.clear();
+    }
+    for (const auto& instancePair : allInstances) {
+        instancePair.second->interrupt(status);
+    }
 }
 
 void PrimaryOnlyService::_setHasExecutor(WithLock) {
