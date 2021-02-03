@@ -164,6 +164,7 @@ assert.commandWorked(primary.adminCommand({
         assert.commandWorked(db.adminCommand({replSetStepUp: 1}));
     }, primary.port);
     stepUp();
+    rst.awaitNodesAgreeOnPrimary();
 }
 
 {
