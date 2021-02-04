@@ -1604,7 +1604,7 @@ SemiFuture<void> TenantMigrationRecipientService::Instance::run(
                       "expireAt"_attr = *_stateDoc.getExpireAt());
                 setPromiseOkifNotReady(lk, _taskCompletionPromise);
             } else {
-                // We should only hit here on a stepDown/shutDown, or a 'conflicting operation'
+                // We should only hit here on a stepDown/shutDown, or a 'conflicting migration'
                 // error.
                 LOGV2(4881402,
                       "Migration not marked to be garbage collectable",

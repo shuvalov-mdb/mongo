@@ -551,24 +551,26 @@ void PrimaryOnlyService::releaseInstance(const InstanceID& id, Status status) {
         savedInstance = iterator->second;
         _instances.erase(iterator);
     }
-    if (!status.isOK() && savedInstance.get()) {
+    if (!status.isOK() && savedInstance) {
         savedInstance->interrupt(std::move(status));
     }
 }
 
 void PrimaryOnlyService::releaseAllInstances(Status status) {
-    InstanceMap allInstances;
+    InstanceMap savedInstances;
     {
         stdx::lock_guard lk(_mutex);
         if (status.isOK()) {
             _instances.clear();
             return;
         }
-        allInstances = std::move(_instances);
+        savedInstances = std::move(_instances);
         _instances.clear();
     }
-    for (const auto& instancePair : allInstances) {
-        instancePair.second->interrupt(status);
+    for (const auto& instancePair : savedInstances) {
+        if (instancePair.second) {
+            instancePair.second->interrupt(status);
+        }
     }
 }
 

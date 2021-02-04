@@ -70,6 +70,7 @@ void PrimaryOnlyServiceOpObserver::onDelete(OperationContext* opCtx,
     if (!service) {
         return;
     }
+    // Passing OK() as an argument does not invoke the interrupt() method on the instance.
     service->releaseInstance(documentId, Status::OK());
 }
 
@@ -81,8 +82,10 @@ repl::OpTime PrimaryOnlyServiceOpObserver::onDropCollection(OperationContext* op
                                                             const CollectionDropType dropType) {
     auto service = _registry->lookupServiceByNamespace(collectionName);
     if (service) {
-        service->releaseAllInstances(Status(ErrorCodes::IllegalOperation,
-                                            "Collection is dropped",
+        // Dropping the state doc collection also interrups all the instances with 'interrupted'
+        // status.
+        service->releaseAllInstances(Status(ErrorCodes::Interrupted,
+                                            str::stream() << collectionName << " is dropped",
                                             BSON("collection" << collectionName.toString())));
     }
     return {};
