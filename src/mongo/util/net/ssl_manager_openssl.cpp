@@ -1451,9 +1451,15 @@ MONGO_INITIALIZER_WITH_PREREQUISITES(SSLManager, ("SetupOpenSSL", "EndStartupOpt
 
 std::shared_ptr<SSLManagerInterface> SSLManagerInterface::create(
     const SSLParams& params,
-    std::optional<const TransientSSLParams*> transientSSLParams,
+    std::optional<TransientSSLParams> transientSSLParams,
     bool isServer) {
     return std::make_shared<SSLManagerOpenSSL>(params, transientSSLParams, isServer);
+}
+
+std::shared_ptr<SSLManagerInterface> SSLManagerInterface::create(
+    const SSLParams& params,
+    bool isServer) {
+    return std::make_shared<SSLManagerOpenSSL>(params, {}, isServer);
 }
 
 SSLX509Name getCertificateSubjectX509Name(X509* cert) {
