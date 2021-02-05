@@ -1300,6 +1300,15 @@ TransportLayerASIO::_createSSLContext(std::shared_ptr<SSLManagerInterface>& mana
 
 StatusWith<std::shared_ptr<const transport::SSLConnectionContext>>
 TransportLayerASIO::createTransientSSLContext(const TransientSSLParams& transientSSLParams) {
+    auto coordinator = SSLManagerCoordinator::get();
+    if (!coordinator) {
+        return Status(ErrorCodes::InvalidSSLConfiguration,
+                      "SSLManagerCoordinator is not initialized");
+    }
+    // if (SSLManagerCoordinator::get()) {
+    //     manager = SSLManagerCoordinator::get()->getSSLManager();
+    // }
+    // return rotateCertificates(manager, true);
     auto manager = getSSLManager();
     if (!manager) {
         return Status(ErrorCodes::InvalidSSLConfiguration, "TransportLayerASIO has no SSL manager");

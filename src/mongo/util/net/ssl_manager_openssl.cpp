@@ -1129,7 +1129,9 @@ private:
 class SSLManagerOpenSSL : public SSLManagerInterface,
                           public std::enable_shared_from_this<SSLManagerOpenSSL> {
 public:
-    explicit SSLManagerOpenSSL(const SSLParams& params, bool isServer);
+    explicit SSLManagerOpenSSL(const SSLParams& params,
+                               std::optional<const TransientSSLParams*> transientSSLParams,
+                               bool isServer);
     ~SSLManagerOpenSSL() {
         stopJobs();
     }
@@ -1141,7 +1143,7 @@ public:
     Status initSSLContext(SSL_CTX* context,
                           const SSLParams& params,
                           const TransientSSLParams& transientParams,
-                          ConnectionDirection direction) final;
+                          ConnectionDirection direction) const final;
 
     SSLConnectionInterface* connect(Socket* socket) final;
 
@@ -1263,8 +1265,11 @@ private:
 
         std::string _prompt;
     };
-    PasswordFetcher _serverPEMPassword;
-    PasswordFetcher _clusterPEMPassword;
+
+    // Password fetcher is allowed to be invoked from const methods. It is
+    // logically const because its state is one time internal cache change.
+    mutable PasswordFetcher _serverPEMPassword;
+    mutable PasswordFetcher _clusterPEMPassword;
 
     /**
      * creates an SSL object to be used for this file descriptor.
@@ -1444,9 +1449,11 @@ MONGO_INITIALIZER_WITH_PREREQUISITES(SSLManager, ("SetupOpenSSL", "EndStartupOpt
     }
 }
 
-std::shared_ptr<SSLManagerInterface> SSLManagerInterface::create(const SSLParams& params,
-                                                                 bool isServer) {
-    return std::make_shared<SSLManagerOpenSSL>(params, isServer);
+std::shared_ptr<SSLManagerInterface> SSLManagerInterface::create(
+    const SSLParams& params,
+    std::optional<const TransientSSLParams*> transientSSLParams,
+    bool isServer) {
+    return std::make_shared<SSLManagerOpenSSL>(params, transientSSLParams, isServer);
 }
 
 SSLX509Name getCertificateSubjectX509Name(X509* cert) {
@@ -1537,7 +1544,9 @@ SSLConnectionOpenSSL::~SSLConnectionOpenSSL() {
     }
 }
 
-SSLManagerOpenSSL::SSLManagerOpenSSL(const SSLParams& params, bool isServer)
+SSLManagerOpenSSL::SSLManagerOpenSSL(const SSLParams& params,
+                                     std::optional<const TransientSSLParams*> transientSSLParams,
+                                     bool isServer)
     : _serverContext(nullptr),
       _clientContext(nullptr),
       _weakValidation(params.sslWeakCertificateValidation),
@@ -2135,7 +2144,7 @@ Milliseconds SSLManagerOpenSSL::updateOcspStaplingContextWithResponse(
 Status SSLManagerOpenSSL::initSSLContext(SSL_CTX* context,
                                          const SSLParams& params,
                                          const TransientSSLParams& transientParams,
-                                         ConnectionDirection direction) {
+                                         ConnectionDirection direction) const {
     // SSL_OP_ALL - Activate all bug workaround options, to support buggy client SSL's.
     // SSL_OP_NO_SSLv2 - Disable SSL v2 support
     // SSL_OP_NO_SSLv3 - Disable SSL v3 support

@@ -1251,7 +1251,7 @@ public:
     Status initSSLContext(asio::ssl::apple::Context* context,
                           const SSLParams& params,
                           const TransientSSLParams& transientParams,
-                          ConnectionDirection direction) override final;
+                          ConnectionDirection direction) const final;
 
     SSLConnectionInterface* connect(Socket* socket) final;
     SSLConnectionInterface* accept(Socket* socket, const char* initialBytes, int len) final;

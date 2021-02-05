@@ -270,7 +270,7 @@ public:
     Status initSSLContext(SCHANNEL_CRED* cred,
                           const SSLParams& params,
                           const TransientSSLParams& transientParams,
-                          ConnectionDirection direction) override final;
+                          ConnectionDirection direction) const final;
 
     SSLConnectionInterface* connect(Socket* socket) final;
 
@@ -393,8 +393,10 @@ SSLConnectionWindows::~SSLConnectionWindows() {}
 // Global variable indicating if this is a server or a client instance
 bool isSSLServer = false;
 
-std::shared_ptr<SSLManagerInterface> SSLManagerInterface::create(const SSLParams& params,
-                                                                 bool isServer) {
+std::shared_ptr<SSLManagerInterface> SSLManagerInterface::create(
+    const SSLParams& params,
+    std::optional<const TransientSSLParams*> transientSSLParams,
+    bool isServer) {
     return std::make_shared<SSLManagerWindows>(params, isServer);
 }
 

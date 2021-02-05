@@ -330,6 +330,11 @@ SSLManagerCoordinator* SSLManagerCoordinator::get() {
     return theSSLManagerCoordinator;
 }
 
+std::shared_ptr<SSLManagerInterface> SSLManagerCoordinator::createTransientSSLManager(
+    const TransientSSLParams& transientSSLParams) {
+    auto manager = SSLManagerInterface::create(sslGlobalParams, false /* isSSLServer */);
+}
+
 std::shared_ptr<SSLManagerInterface> SSLManagerCoordinator::getSSLManager() {
     return *_manager;
 }

@@ -208,9 +208,13 @@ class SSLManagerInterface : public Decorable<SSLManagerInterface> {
 public:
     /**
      * Creates an instance of SSLManagerInterface.
-     * Note: as we normally have one instance of the manager, it cannot take TransientSSLParams.
+     * Note: if 'transientSSLParams' is set, this will create a transient instance of the manager,
+     * otherwise, normally, this will be a global instance.
      */
-    static std::shared_ptr<SSLManagerInterface> create(const SSLParams& params, bool isServer);
+    static std::shared_ptr<SSLManagerInterface> create(
+        const SSLParams& params,
+        std::optional<const TransientSSLParams*> transientSSLParams,
+        bool isServer);
 
     virtual ~SSLManagerInterface();
 
@@ -294,7 +298,7 @@ public:
     virtual Status initSSLContext(SSLContextType context,
                                   const SSLParams& params,
                                   const TransientSSLParams& transientParams,
-                                  ConnectionDirection direction) = 0;
+                                  ConnectionDirection direction) const = 0;
 
     /**
      * Fetches a peer certificate and validates it if it exists. If validation fails, but weak
@@ -348,6 +352,13 @@ public:
      * Access the current SSLManager safely.
      */
     std::shared_ptr<SSLManagerInterface> getSSLManager();
+
+    /**
+     * Create a transient instance of SSL Manager.
+     * Ownership a the new manager is passed
+     */
+    std::shared_ptr<SSLManagerInterface> createTransientSSLManager(
+        const TransientSSLParams& transientSSLParams);
 
     /**
      * Perform certificate rotation safely.
