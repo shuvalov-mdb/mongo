@@ -552,10 +552,8 @@ TEST(SSLManager, InitContextFromFile) {
         SSLManagerInterface::create(params, false /* isSSLServer */);
 
     auto egress = std::make_unique<asio::ssl::context>(asio::ssl::context::sslv23);
-    uassertStatusOK(manager->initSSLContext(egress->native_handle(),
-                                            params,
-                                            TransientSSLParams(),
-                                            SSLManagerInterface::ConnectionDirection::kOutgoing));
+    uassertStatusOK(manager->initSSLContext(
+        egress->native_handle(), params, SSLManagerInterface::ConnectionDirection::kOutgoing));
 }
 
 TEST(SSLManager, InitContextFromMemory) {
@@ -570,10 +568,8 @@ TEST(SSLManager, InitContextFromMemory) {
         SSLManagerInterface::create(params, false /* isSSLServer */);
 
     auto egress = std::make_unique<asio::ssl::context>(asio::ssl::context::sslv23);
-    uassertStatusOK(manager->initSSLContext(egress->native_handle(),
-                                            params,
-                                            transientParams,
-                                            SSLManagerInterface::ConnectionDirection::kOutgoing));
+    uassertStatusOK(manager->initSSLContext(
+        egress->native_handle(), params, SSLManagerInterface::ConnectionDirection::kOutgoing));
 }
 
 TEST(SSLManager, InitServerSideContextFromMemory) {
@@ -589,10 +585,8 @@ TEST(SSLManager, InitServerSideContextFromMemory) {
         SSLManagerInterface::create(params, true /* isSSLServer */);
 
     auto egress = std::make_unique<asio::ssl::context>(asio::ssl::context::sslv23);
-    uassertStatusOK(manager->initSSLContext(egress->native_handle(),
-                                            params,
-                                            transientParams,
-                                            SSLManagerInterface::ConnectionDirection::kOutgoing));
+    uassertStatusOK(manager->initSSLContext(
+        egress->native_handle(), params, SSLManagerInterface::ConnectionDirection::kOutgoing));
 }
 
 TEST(SSLManager, TransientSSLParams) {

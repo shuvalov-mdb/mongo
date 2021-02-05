@@ -191,7 +191,6 @@ private:
     StatusWith<std::shared_ptr<const transport::SSLConnectionContext>> _createSSLContext(
         std::shared_ptr<SSLManagerInterface>& manager,
         SSLParams::SSLModes sslMode,
-        TransientSSLParams transientEgressSSLParams,
         bool asyncOCSPStaple) const;
 
     void _runListener() noexcept;
