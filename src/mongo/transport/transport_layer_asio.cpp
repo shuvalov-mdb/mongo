@@ -1309,7 +1309,7 @@ TransportLayerASIO::createTransientSSLContext(const TransientSSLParams& transien
     //     manager = SSLManagerCoordinator::get()->getSSLManager();
     // }
     // return rotateCertificates(manager, true);
-    auto manager = getSSLManager();
+    auto manager = coordinator->createTransientSSLManager(transientSSLParams);
     if (!manager) {
         return Status(ErrorCodes::InvalidSSLConfiguration, "TransportLayerASIO has no SSL manager");
     }

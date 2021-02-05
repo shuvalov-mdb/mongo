@@ -208,13 +208,13 @@ class SSLManagerInterface : public Decorable<SSLManagerInterface> {
 public:
     /**
      * Creates an instance of SSLManagerInterface.
-     * Note: if 'transientSSLParams' is set, this will create a transient instance of the manager,
+     * Note: if 'isTransient' is true, this will create a transient instance of the manager,
      * otherwise, normally, this will be a global instance.
      */
     static std::shared_ptr<SSLManagerInterface> create(
         const SSLParams& params,
-        std::optional<const TransientSSLParams*> transientSSLParams,
-        bool isServer);
+        bool isServer,
+        bool isTransient);
 
     virtual ~SSLManagerInterface();
 
@@ -355,10 +355,9 @@ public:
 
     /**
      * Create a transient instance of SSL Manager.
-     * Ownership a the new manager is passed
+     * Ownership a the new manager is passed to the invoker.
      */
-    std::shared_ptr<SSLManagerInterface> createTransientSSLManager(
-        const TransientSSLParams& transientSSLParams);
+    std::shared_ptr<SSLManagerInterface> createTransientSSLManager() const;
 
     /**
      * Perform certificate rotation safely.

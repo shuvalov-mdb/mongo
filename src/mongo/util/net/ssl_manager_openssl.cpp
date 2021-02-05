@@ -1130,8 +1130,8 @@ class SSLManagerOpenSSL : public SSLManagerInterface,
                           public std::enable_shared_from_this<SSLManagerOpenSSL> {
 public:
     explicit SSLManagerOpenSSL(const SSLParams& params,
-                               std::optional<const TransientSSLParams*> transientSSLParams,
-                               bool isServer);
+                               bool isServer,
+                               bool isTransient);
     ~SSLManagerOpenSSL() {
         stopJobs();
     }

@@ -152,13 +152,13 @@ public:
     Status rotateCertificates(std::shared_ptr<SSLManagerInterface> manager,
                               bool asyncOCSPStaple) override;
 
-    std::shared_ptr<SSLManagerInterface> getSSLManager() {
-        auto sslContext = _sslContext.get();
-        if (!sslContext) {
-            return std::shared_ptr<SSLManagerInterface>{};
-        }
-        return sslContext->manager;
-    }
+    // std::shared_ptr<SSLManagerInterface> getSSLManager() {
+    //     auto sslContext = _sslContext.get();
+    //     if (!sslContext) {
+    //         return std::shared_ptr<SSLManagerInterface>{};
+    //     }
+    //     return sslContext->manager;
+    // }
 
     /**
      * Creates a transient SSL context using targeted (non default) SSL params.
