@@ -1818,8 +1818,10 @@ bool isSSLServer = false;
 extern SSLManagerInterface* theSSLManager;
 extern SSLManagerCoordinator* theSSLManagerCoordinator;
 
-std::shared_ptr<SSLManagerInterface> SSLManagerInterface::create(const SSLParams& params,
-                                                                 bool isServer) {
+std::shared_ptr<SSLManagerInterface> SSLManagerInterface::create(
+    const SSLParams& params,
+    const std::optional<TransientSSLParams>& transientSSLParams,
+    bool isServer) {
     return std::make_shared<SSLManagerApple>(params, isServer);
 }
 

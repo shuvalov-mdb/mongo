@@ -1272,10 +1272,8 @@ private:
         std::string _prompt;
     };
 
-    // Password fetcher is allowed to be invoked from const methods. It is
-    // logically const because its state is one time internal cache change.
-    mutable PasswordFetcher _serverPEMPassword;
-    mutable PasswordFetcher _clusterPEMPassword;
+    PasswordFetcher _serverPEMPassword;
+    PasswordFetcher _clusterPEMPassword;
 
     /**
      * creates an SSL object to be used for this file descriptor.

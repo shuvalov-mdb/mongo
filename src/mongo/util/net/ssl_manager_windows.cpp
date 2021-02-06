@@ -269,7 +269,7 @@ public:
      */
     Status initSSLContext(SCHANNEL_CRED* cred,
                           const SSLParams& params,
-                          ConnectionDirection direction) const final;
+                          ConnectionDirection direction) final;
 
     SSLConnectionInterface* connect(Socket* socket) final;
 
@@ -394,7 +394,7 @@ bool isSSLServer = false;
 
 std::shared_ptr<SSLManagerInterface> SSLManagerInterface::create(
     const SSLParams& params,
-    std::optional<const TransientSSLParams*> transientSSLParams,
+    const std::optional<TransientSSLParams>& transientSSLParams,
     bool isServer) {
     return std::make_shared<SSLManagerWindows>(params, isServer);
 }
