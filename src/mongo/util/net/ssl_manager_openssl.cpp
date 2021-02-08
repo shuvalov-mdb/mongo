@@ -1574,6 +1574,7 @@ SSLManagerOpenSSL::SSLManagerOpenSSL(const SSLParams& params,
     if (_transientSSLParams.has_value()) {
         // No other initialization is necessary: this is egress connection manager that
         // is not using local PEM files.
+        LOGV2_DEBUG(54090, 1, "Default params are ignored for transient SSL manager");
         return;
     }
 
