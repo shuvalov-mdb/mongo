@@ -771,9 +771,7 @@ public:
         _cleanupTransaction();
     }
 
-        void _checkOutSession();
-        void _tapError(Status);
-        Future<void> _commitInvocation();
+    Future<void> run();
 
 private:
     void _stashTransaction();
@@ -795,7 +793,7 @@ Future<void> InvokeCommand::run() {
                auto execContext = _ecd->getExecutionContext();
                // TODO SERVER-53761: find out if we can do this more asynchronously. The client
                // Strand is locked to current thread in ServiceStateMachine::Impl::startNewLoop().
-               auto status = tenant_migration_donor::checkIfCanReadOrBlock(
+               auto status = tenant_migration_access_blocker::checkIfCanReadOrBlock(
                                  execContext->getOpCtx(), execContext->getRequest().getDatabase())
                                  .getNoThrow();
                uassertStatusOK(status);
@@ -815,7 +813,7 @@ Future<void> CheckoutSessionAndInvokeCommand::run() {
 
                auto execContext = _ecd->getExecutionContext();
                // TODO SERVER-53761: find out if we can do this more asynchronously.
-               auto status = tenant_migration_donor::checkIfCanReadOrBlock(
+               auto status = tenant_migration_access_blocker::checkIfCanReadOrBlock(
                                  execContext->getOpCtx(), execContext->getRequest().getDatabase())
                                  .getNoThrow();
                uassertStatusOK(status);
