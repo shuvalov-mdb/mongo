@@ -70,11 +70,14 @@ void PrimaryOnlyServiceOpObserver::onDelete(OperationContext* opCtx,
     if (!service) {
         return;
     }
-    // Passing OK() as an argument does not invoke the interrupt() method on the instance.
-    //service->releaseInstance(documentId, Status::OK());
-        service->releaseInstance(documentId, Status(ErrorCodes::Interrupted,
-                                            str::stream() << "State document " << documentId << " is dropped",
-                                            BSON("documentId" << documentId)));
+    // Normally, state doc is supposed to be deleted when the primary service instance already
+    // completed its normal execution. In that case, the service should handle the error status
+    // gracefully.
+    service->releaseInstance(
+        documentId,
+        Status(ErrorCodes::Interrupted,
+               str::stream() << "State document " << documentId << " is dropped",
+               BSON("documentId" << documentId)));
 }
 
 
