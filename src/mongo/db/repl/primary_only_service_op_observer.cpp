@@ -71,7 +71,10 @@ void PrimaryOnlyServiceOpObserver::onDelete(OperationContext* opCtx,
         return;
     }
     // Passing OK() as an argument does not invoke the interrupt() method on the instance.
-    service->releaseInstance(documentId, Status::OK());
+    //service->releaseInstance(documentId, Status::OK());
+        service->releaseInstance(documentId, Status(ErrorCodes::Interrupted,
+                                            str::stream() << "State document " << documentId << " is dropped",
+                                            BSON("documentId" << documentId)));
 }
 
 
