@@ -142,7 +142,9 @@ SemiFuture<void> checkIfCanReadOrBlock(OperationContext* opCtx, StringData dbNam
 
     // Optimisation: if the future is already ready, we are done.
     if (canReadFuture.isReady()) {
-        return canReadFuture.getNoThrow();
+        auto status = canReadFuture.getNoThrow();
+        mtab->recordTenantMigrationError(status);
+        return status;
     }
 
     auto executor = mtab->getAsyncBlockingOperationsExecutor();
@@ -158,20 +160,24 @@ SemiFuture<void> checkIfCanReadOrBlock(OperationContext* opCtx, StringData dbNam
 
     return whenAny(std::move(futures))
         .thenRunOn(executor)
-        .then([cancelTimeoutSource, opCtx, mtab, executor](
-                  StatusWith<WhenAnyResult<void>> swResult) mutable {
-            uassertStatusOK(swResult.getStatus());
-            const auto& [status, idx] = swResult.getValue();
+        .then([cancelTimeoutSource, opCtx, mtab, executor](WhenAnyResult<void> result) mutable {
+            const auto& [status, idx] = result;
             if (idx == 0) {
                 // Read unblock condition finished first.
                 cancelTimeoutSource.cancel();
-                uassertStatusOK(status);
+                mtab->recordTenantMigrationError(status);
+                return status;
             } else if (idx == 1) {
                 // Deadline finished first, throw error.
-                uassertStatusOK(Status(opCtx->getTimeoutError(),
-                                       "Read timed out waiting for tenant migration blocker",
-                                       mtab->getDebugInfo()));
+                return Status(opCtx->getTimeoutError(),
+                              "Read timed out waiting for tenant migration blocker",
+                              mtab->getDebugInfo());
             }
+            MONGO_UNREACHABLE;
+        })
+        .onError([cancelTimeoutSource](Status status) mutable {
+            cancelTimeoutSource.cancel();
+            return status;
         })
         .semi();  // To require continuation in the user executor.
 }
