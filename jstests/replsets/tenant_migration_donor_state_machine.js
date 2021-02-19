@@ -154,6 +154,15 @@ let configDonorsColl = donorPrimary.getCollection(TenantMigrationTest.kConfigDon
     assert.commandFailedWithCode(
         donorPrimary.adminCommand({donorForgetMigration: 1, migrationId: migrationId}),
         ErrorCodes.TenantMigrationInProgress);
+    // Test the server status stats.
+    let donorStats = tenantMigrationTest.getTenantMigrationStats(donorPrimary);
+    assert.eq(1,
+              donorStats.tenantMigrations.currentMigrationsDonating -
+                  donorStatsAtStart.tenantMigrations.currentMigrationsDonating);
+    let recipientStats = tenantMigrationTest.getTenantMigrationStats(recipientPrimary);
+    assert.eq(1,
+              recipientStats.tenantMigrations.currentMigrationsReceiving -
+                  recipientStatsAtStart.tenantMigrations.currentMigrationsReceiving);
 
     // Allow the migration to complete.
     blockingFp.off();
