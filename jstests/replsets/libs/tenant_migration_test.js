@@ -573,6 +573,18 @@ function TenantMigrationTest({
     };
 
     /**
+     * Returns the TenantMigrationStats associated with given the tenantId on the
+     * node.
+     */
+    this.getTenantMigrationStats = function(node) {
+        let result = assert.commandWorked(node.adminCommand({serverStatus: 1}));
+        jsTestLog(`STATS: ${tojson(result)}`);
+        return result;
+        // return assert.commandWorked(node.adminCommand({serverStatus: 1}))
+        //     .tenantMigrations[tenantId];
+    };
+
+    /**
      * Returns the donor ReplSetTest.
      */
     this.getDonorRst = function() {

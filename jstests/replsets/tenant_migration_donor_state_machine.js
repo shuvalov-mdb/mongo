@@ -113,6 +113,8 @@ if (!tenantMigrationTest.isFeatureFlagEnabled()) {
 
 const donorPrimary = tenantMigrationTest.getDonorPrimary();
 const recipientPrimary = tenantMigrationTest.getRecipientPrimary();
+const donorStatsAtStart = tenantMigrationTest.getTenantMigrationStats(donorPrimary);
+const recipientStatsAtStart = tenantMigrationTest.getTenantMigrationStats(recipientPrimary);
 
 const kTenantId = "testDb";
 

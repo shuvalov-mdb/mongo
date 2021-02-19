@@ -45,6 +45,7 @@
 #include "mongo/db/repl/tenant_migration_access_blocker_util.h"
 #include "mongo/db/repl/tenant_migration_donor_access_blocker.h"
 #include "mongo/db/repl/tenant_migration_state_machine_gen.h"
+#include "mongo/db/repl/tenant_migration_statistics.h"
 #include "mongo/db/repl/wait_for_majority_service.h"
 #include "mongo/executor/connection_pool.h"
 #include "mongo/executor/network_interface_factory.h"
@@ -780,6 +781,8 @@ SemiFuture<void> TenantMigrationDonorService::Instance::run(
     _abortMigrationSource = CancelationSource(serviceToken);
     auto recipientTargeterRS = std::make_shared<RemoteCommandTargeterRS>(
         _recipientUri.getSetName(), _recipientUri.getServers());
+    auto runningCounter =
+        TenantMigrationStatistics::get(_serviceContext).getScopedOutstandingDonatingCount();
 
     return ExecutorFuture<void>(**executor)
         .then([this, self = shared_from_this(), executor, serviceToken] {
@@ -1047,7 +1050,8 @@ SemiFuture<void> TenantMigrationDonorService::Instance::run(
                     return _waitForMajorityWriteConcern(executor, std::move(opTime));
                 });
         })
-        .onCompletion([this, self = shared_from_this()](Status status) {
+        .onCompletion([this, self = shared_from_this(), runningCounter{std::move(runningCounter)}](
+                          Status status) {
             LOGV2(4920400,
                   "Marked migration state as garbage collectable",
                   "migrationId"_attr = _stateDoc.getId(),
@@ -1061,8 +1065,11 @@ SemiFuture<void> TenantMigrationDonorService::Instance::run(
             }
 
             if (status.isOK()) {
+                TenantMigrationStatistics::get(_serviceContext)
+                    .incTotalSuccessfulMigrationsDonated();
                 _completionPromise.emplaceValue();
             } else {
+                TenantMigrationStatistics::get(_serviceContext).incTotalFailedMigrationsDonated();
                 _completionPromise.setError(status);
             }
         })

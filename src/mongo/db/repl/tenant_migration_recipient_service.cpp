@@ -59,6 +59,7 @@
 #include "mongo/db/repl/tenant_migration_recipient_entry_helpers.h"
 #include "mongo/db/repl/tenant_migration_recipient_service.h"
 #include "mongo/db/repl/tenant_migration_state_machine_gen.h"
+#include "mongo/db/repl/tenant_migration_statistics.h"
 #include "mongo/db/repl/wait_for_majority_service.h"
 #include "mongo/db/session_catalog_mongod.h"
 #include "mongo/db/session_txn_record_gen.h"
@@ -1668,6 +1669,8 @@ SemiFuture<void> TenantMigrationRecipientService::Instance::run(
     std::shared_ptr<executor::ScopedTaskExecutor> executor,
     const CancelationToken& token) noexcept {
     _scopedExecutor = executor;
+    auto runningCounter =
+        TenantMigrationStatistics::get(_serviceContext).getScopedOutstandingReceivingCount();
 
     LOGV2(4879607,
           "Starting tenant migration recipient instance: ",
@@ -2074,7 +2077,8 @@ SemiFuture<void> TenantMigrationRecipientService::Instance::run(
                                                     getOplogBufferNs(getMigrationUUID()));
         })
         .thenRunOn(_recipientService->getInstanceCleanupExecutor())
-        .onCompletion([this, self = shared_from_this()](Status status) {
+        .onCompletion([this, self = shared_from_this(), runningCounter{std::move(runningCounter)}](
+                          Status status) {
             // Schedule on the parent executor to mark the completion of the whole chain so this
             // is safe even on shutDown/stepDown.
             stdx::lock_guard lk(_mutex);
@@ -2087,6 +2091,8 @@ SemiFuture<void> TenantMigrationRecipientService::Instance::run(
                       "migrationId"_attr = getMigrationUUID(),
                       "tenantId"_attr = getTenantId(),
                       "expireAt"_attr = *_stateDoc.getExpireAt());
+                TenantMigrationStatistics::get(_serviceContext)
+                    .incTotalSuccessfulMigrationsReceived();
                 setPromiseOkifNotReady(lk, _taskCompletionPromise);
             } else {
                 // We should only hit here on a stepDown/shutDown, or a 'conflicting migration'
@@ -2096,6 +2102,7 @@ SemiFuture<void> TenantMigrationRecipientService::Instance::run(
                       "migrationId"_attr = getMigrationUUID(),
                       "tenantId"_attr = getTenantId(),
                       "status"_attr = status);
+                TenantMigrationStatistics::get(_serviceContext).incTotalFailedMigrationsReceived();
                 setPromiseErrorifNotReady(lk, _taskCompletionPromise, status);
             }
             _taskState.setState(TaskState::kDone);

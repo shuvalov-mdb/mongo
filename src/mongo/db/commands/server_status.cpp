@@ -173,7 +173,7 @@ public:
 
 private:
     const Date_t _started;
-    bool _runCalled;
+    std::atomic<bool> _runCalled;
 
     typedef map<string, ServerStatusSection*> SectionMap;
     SectionMap _sections;
