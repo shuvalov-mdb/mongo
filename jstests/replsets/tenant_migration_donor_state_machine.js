@@ -120,6 +120,29 @@ const kTenantId = "testDb";
 
 let configDonorsColl = donorPrimary.getCollection(TenantMigrationTest.kConfigDonorsNS);
 
+function testStats(currentMigrationsDonating,
+                   currentMigrationsReceiving,
+                   totalSuccessfulMigrationsDonated,
+                   totalSuccessfulMigrationsReceived,
+                   totalFailedMigrationsDonated,
+                   totalFailedMigrationsReceived) {
+    let donorStats = tenantMigrationTest.getTenantMigrationStats(donorPrimary);
+    assert.eq(currentMigrationsDonating,
+              donorStats.tenantMigrations.currentMigrationsDonating -
+                  donorStatsAtStart.tenantMigrations.currentMigrationsDonating);
+    assert.eq(totalSuccessfulMigrationsDonated,
+              donorStats.tenantMigrations.totalSuccessfulMigrationsDonated -
+                  donorStatsAtStart.tenantMigrations.totalSuccessfulMigrationsDonated);
+
+    let recipientStats = tenantMigrationTest.getTenantMigrationStats(recipientPrimary);
+    assert.eq(currentMigrationsReceiving,
+              recipientStats.tenantMigrations.currentMigrationsReceiving -
+                  recipientStatsAtStart.tenantMigrations.currentMigrationsReceiving);
+    assert.eq(totalSuccessfulMigrationsReceived,
+              recipientStats.tenantMigrations.totalSuccessfulMigrationsReceived -
+                  recipientStatsAtStart.tenantMigrations.totalSuccessfulMigrationsReceived);
+}
+
 (() => {
     jsTest.log("Test the case where the migration commits");
     const migrationId = UUID();
@@ -154,15 +177,9 @@ let configDonorsColl = donorPrimary.getCollection(TenantMigrationTest.kConfigDon
     assert.commandFailedWithCode(
         donorPrimary.adminCommand({donorForgetMigration: 1, migrationId: migrationId}),
         ErrorCodes.TenantMigrationInProgress);
+
     // Test the server status stats.
-    let donorStats = tenantMigrationTest.getTenantMigrationStats(donorPrimary);
-    assert.eq(1,
-              donorStats.tenantMigrations.currentMigrationsDonating -
-                  donorStatsAtStart.tenantMigrations.currentMigrationsDonating);
-    let recipientStats = tenantMigrationTest.getTenantMigrationStats(recipientPrimary);
-    assert.eq(1,
-              recipientStats.tenantMigrations.currentMigrationsReceiving -
-                  recipientStatsAtStart.tenantMigrations.currentMigrationsReceiving);
+    testStats(1, 1, 0, 0, 0, 0);
 
     // Allow the migration to complete.
     blockingFp.off();
@@ -189,6 +206,9 @@ let configDonorsColl = donorPrimary.getCollection(TenantMigrationTest.kConfigDon
     assert.eq(recipientSyncDataMetrics.total, expectedNumRecipientSyncDataCmdSent);
 
     testDonorForgetMigrationAfterMigrationCompletes(donorRst, recipientRst, migrationId, kTenantId);
+
+    // Test the server status stats.
+    testStats(0, 0, 1, 1, 0, 0);
 })();
 
 (() => {
@@ -227,6 +247,9 @@ let configDonorsColl = donorPrimary.getCollection(TenantMigrationTest.kConfigDon
     assert.eq(recipientSyncDataMetrics.total, expectedNumRecipientSyncDataCmdSent);
 
     testDonorForgetMigrationAfterMigrationCompletes(donorRst, recipientRst, migrationId, kTenantId);
+
+    // Test the server status stats.
+    testStats(0, 0, 1, 1, 1, 1);
 })();
 
 // Drop the TTL index to make sure that the migration state is still available when the

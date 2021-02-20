@@ -50,19 +50,19 @@ TenantMigrationStatistics::getScopedOutstandingReceivingCount() {
 }
 
 void TenantMigrationStatistics::incTotalSuccessfulMigrationsDonated() {
-    _totalSuccessfulMigrationsDonated.fetch_add(-1, std::memory_order_relaxed);
+    _totalSuccessfulMigrationsDonated.fetch_add(1, std::memory_order_relaxed);
 }
 
 void TenantMigrationStatistics::incTotalSuccessfulMigrationsReceived() {
-    _totalSuccessfulMigrationsReceived.fetch_add(-1, std::memory_order_relaxed);
+    _totalSuccessfulMigrationsReceived.fetch_add(1, std::memory_order_relaxed);
 }
 
 void TenantMigrationStatistics::incTotalFailedMigrationsDonated() {
-    _totalFailedMigrationsDonated.fetch_add(-1, std::memory_order_relaxed);
+    _totalFailedMigrationsDonated.fetch_add(1, std::memory_order_relaxed);
 }
 
 void TenantMigrationStatistics::incTotalFailedMigrationsReceived() {
-    _totalFailedMigrationsReceived.fetch_add(-1, std::memory_order_relaxed);
+    _totalFailedMigrationsReceived.fetch_add(1, std::memory_order_relaxed);
 }
 
 void TenantMigrationStatistics::appendInfoForServerStatus(BSONObjBuilder* builder) const {
