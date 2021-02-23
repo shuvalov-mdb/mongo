@@ -2114,7 +2114,8 @@ void TenantMigrationRecipientService::Instance::_setMigrationStatsOnCompletion(
 
     if (completionStatus.isOK()) {
         auto consistentFuture = _dataConsistentPromise.getFuture();
-        if (consistentFuture.isReady() && consistentFuture.getNoThrow().isOK()) {
+        invariant(consistentFuture.isReady());
+        if (consistentFuture.getNoThrow().isOK()) {
             success = true;
         }
     } else {
