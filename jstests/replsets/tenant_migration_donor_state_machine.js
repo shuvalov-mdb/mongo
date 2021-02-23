@@ -128,19 +128,24 @@ function testStats(currentMigrationsDonating,
                    totalFailedMigrationsReceived) {
     let donorStats = tenantMigrationTest.getTenantMigrationStats(donorPrimary);
     assert.lte(currentMigrationsDonating,
-               donorStats.tenantMigrations.currentMigrationsDonating -
-                   donorStatsAtStart.tenantMigrations.currentMigrationsDonating);
+               donorStats.currentMigrationsDonating - donorStatsAtStart.currentMigrationsDonating);
     assert.lte(totalSuccessfulMigrationsDonated,
-               donorStats.tenantMigrations.totalSuccessfulMigrationsDonated -
-                   donorStatsAtStart.tenantMigrations.totalSuccessfulMigrationsDonated);
+               donorStats.totalSuccessfulMigrationsDonated -
+                   donorStatsAtStart.totalSuccessfulMigrationsDonated);
+    assert.lte(
+        totalFailedMigrationsDonated,
+        donorStats.totalFailedMigrationsDonated - donorStatsAtStart.totalFailedMigrationsDonated);
 
     let recipientStats = tenantMigrationTest.getTenantMigrationStats(recipientPrimary);
     assert.lte(currentMigrationsReceiving,
-               recipientStats.tenantMigrations.currentMigrationsReceiving -
-                   recipientStatsAtStart.tenantMigrations.currentMigrationsReceiving);
+               recipientStats.currentMigrationsReceiving -
+                   recipientStatsAtStart.currentMigrationsReceiving);
     assert.lte(totalSuccessfulMigrationsReceived,
-               recipientStats.tenantMigrations.totalSuccessfulMigrationsReceived -
-                   recipientStatsAtStart.tenantMigrations.totalSuccessfulMigrationsReceived);
+               recipientStats.totalSuccessfulMigrationsReceived -
+                   recipientStatsAtStart.totalSuccessfulMigrationsReceived);
+    assert.lte(totalFailedMigrationsReceived,
+               recipientStats.totalFailedMigrationsReceived -
+                   recipientStatsAtStart.totalFailedMigrationsReceived);
 }
 
 (() => {
@@ -248,8 +253,8 @@ function testStats(currentMigrationsDonating,
 
     testDonorForgetMigrationAfterMigrationCompletes(donorRst, recipientRst, migrationId, kTenantId);
 
-    // Test the server status stats.
-    testStats(0, 0, 0, 0, 1, 1);
+    // Test the server status stats. In this case recipient cannot detect a failure.
+    testStats(0, 0, 0, 0, 1, 0);
 })();
 
 // Drop the TTL index to make sure that the migration state is still available when the

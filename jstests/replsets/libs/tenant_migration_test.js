@@ -577,11 +577,7 @@ function TenantMigrationTest({
      * node.
      */
     this.getTenantMigrationStats = function(node) {
-        let result = assert.commandWorked(node.adminCommand({serverStatus: 1}));
-        jsTestLog(`STATS: ${tojson(result)}`);
-        return result;
-        // return assert.commandWorked(node.adminCommand({serverStatus: 1}))
-        //     .tenantMigrations[tenantId];
+        return assert.commandWorked(node.adminCommand({serverStatus: 1})).tenantMigrations;
     };
 
     /**

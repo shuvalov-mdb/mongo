@@ -2091,8 +2091,6 @@ SemiFuture<void> TenantMigrationRecipientService::Instance::run(
                       "migrationId"_attr = getMigrationUUID(),
                       "tenantId"_attr = getTenantId(),
                       "expireAt"_attr = *_stateDoc.getExpireAt());
-                TenantMigrationStatistics::get(_serviceContext)
-                    .incTotalSuccessfulMigrationsReceived();
                 setPromiseOkifNotReady(lk, _taskCompletionPromise);
             } else {
                 // We should only hit here on a stepDown/shutDown, or a 'conflicting migration'
@@ -2102,12 +2100,38 @@ SemiFuture<void> TenantMigrationRecipientService::Instance::run(
                       "migrationId"_attr = getMigrationUUID(),
                       "tenantId"_attr = getTenantId(),
                       "status"_attr = status);
-                TenantMigrationStatistics::get(_serviceContext).incTotalFailedMigrationsReceived();
                 setPromiseErrorifNotReady(lk, _taskCompletionPromise, status);
             }
+            _setMigrationStatsOnCompletion(status);
             _taskState.setState(TaskState::kDone);
         })
         .semi();
+}
+
+void TenantMigrationRecipientService::Instance::_setMigrationStatsOnCompletion(
+    Status completionStatus) const {
+    bool success = false;
+
+    if (completionStatus.isOK()) {
+        auto consistentFuture = _dataConsistentPromise.getFuture();
+        if (consistentFuture.isReady() && consistentFuture.getNoThrow().isOK()) {
+            success = true;
+        }
+        auto completionFuture = _dataSyncCompletionPromise.getFuture();
+        if (completionFuture.isReady() && completionFuture.getNoThrow().isOK()) {
+            success = true;
+        }
+    } else {
+        if (completionStatus.code() != ErrorCodes::TenantMigrationConflict) {
+            return;  // No statistics on stepDown/shutDown.
+        }
+    }
+
+    if (success) {
+        TenantMigrationStatistics::get(_serviceContext).incTotalSuccessfulMigrationsReceived();
+    } else {
+        TenantMigrationStatistics::get(_serviceContext).incTotalFailedMigrationsReceived();
+    }
 }
 
 const UUID& TenantMigrationRecipientService::Instance::getMigrationUUID() const {

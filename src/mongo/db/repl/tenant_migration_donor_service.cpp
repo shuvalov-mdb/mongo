@@ -1009,6 +1009,12 @@ SemiFuture<void> TenantMigrationDonorService::Instance::run(
                   "tenantId"_attr = _stateDoc.getTenantId(),
                   "status"_attr = status,
                   "abortReason"_attr = _abortReason);
+            if (_abortReason->isOK()) {
+                TenantMigrationStatistics::get(_serviceContext)
+                    .incTotalSuccessfulMigrationsDonated();
+            } else {
+                TenantMigrationStatistics::get(_serviceContext).incTotalFailedMigrationsDonated();
+            }
         })
         .then([this, self = shared_from_this(), executor, recipientTargeterRS, serviceToken] {
             if (_stateDoc.getExpireAt()) {
@@ -1065,11 +1071,8 @@ SemiFuture<void> TenantMigrationDonorService::Instance::run(
             }
 
             if (status.isOK()) {
-                TenantMigrationStatistics::get(_serviceContext)
-                    .incTotalSuccessfulMigrationsDonated();
                 _completionPromise.emplaceValue();
             } else {
-                TenantMigrationStatistics::get(_serviceContext).incTotalFailedMigrationsDonated();
                 _completionPromise.setError(status);
             }
         })
