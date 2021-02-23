@@ -2117,10 +2117,6 @@ void TenantMigrationRecipientService::Instance::_setMigrationStatsOnCompletion(
         if (consistentFuture.isReady() && consistentFuture.getNoThrow().isOK()) {
             success = true;
         }
-        auto completionFuture = _dataSyncCompletionPromise.getFuture();
-        if (completionFuture.isReady() && completionFuture.getNoThrow().isOK()) {
-            success = true;
-        }
     } else {
         if (completionStatus.code() != ErrorCodes::TenantMigrationConflict) {
             return;  // No statistics on stepDown/shutDown.
