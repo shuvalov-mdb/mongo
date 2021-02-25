@@ -54,6 +54,7 @@ namespace {
 
 MONGO_FAIL_POINT_DEFINE(hangBeforeWritingParticipantList);
 MONGO_FAIL_POINT_DEFINE(hangBeforeSendingPrepare);
+MONGO_FAIL_POINT_DEFINE(prepareShardFailsWithAbort);
 MONGO_FAIL_POINT_DEFINE(hangBeforeWritingDecision);
 MONGO_FAIL_POINT_DEFINE(hangBeforeSendingCommit);
 MONGO_FAIL_POINT_DEFINE(hangBeforeSendingAbort);
@@ -274,11 +275,19 @@ Future<PrepareVoteConsensus> sendPrepare(ServiceContext* service,
                // Initial value
                PrepareVoteConsensus{int(participants.size())},
                // Aggregates an incoming response (next) with the existing aggregate value (result)
-               [&prepareScheduler = *prepareScheduler](PrepareVoteConsensus& result,
-                                                       const PrepareResponse& next) {
+               [&prepareScheduler = *prepareScheduler, txnNumber](PrepareVoteConsensus& result,
+                                                                  const PrepareResponse& next) {
                    result.registerVote(next);
 
                    if (next.vote == PrepareVote::kAbort) {
+                       LOGV2_DEBUG(5141701,
+                                   1,
+                                   "Received abort prepare vote from node",
+                                   "shardId"_attr = next.shardId,
+                                   "txnNumber"_attr = txnNumber,
+                                   "error"_attr = (next.abortReason.has_value()
+                                                       ? next.abortReason.value().reason()
+                                                       : ""));
                        prepareScheduler.shutdown(
                            {ErrorCodes::TransactionCoordinatorReachedAbortDecision,
                             str::stream() << "Received abort vote from " << next.shardId});
@@ -592,7 +601,7 @@ Future<PrepareResponse> sendPrepareToShard(ServiceContext* service,
                                            const BSONObj& commandObj,
                                            OperationContextFn operationContextFn) {
     const bool isLocalShard = (shardId == txn::getLocalShardId(service));
-    auto f = txn::doWhile(
+    return txn::doWhile(
         scheduler,
         kExponentialBackoff,
         [](const StatusWith<PrepareResponse>& swPrepareResponse) {
@@ -632,6 +641,16 @@ Future<PrepareResponse> sendPrepareToShard(ServiceContext* service,
                     // response.
                     if (!wcStatus.isOK()) {
                         status = wcStatus;
+                    }
+
+                    if (MONGO_unlikely(prepareShardFailsWithAbort.shouldFail())) {
+                        return PrepareResponse{shardId,
+                                               PrepareVote::kAbort,
+                                               boost::none,
+                                               Status(ErrorCodes::NoSuchTransaction,
+                                                      str::stream()
+                                                          << "Shard " << shardId
+                                                          << " failed with fail injection")};
                     }
 
                     if (status.isOK()) {
@@ -709,21 +728,6 @@ Future<PrepareResponse> sendPrepareToShard(ServiceContext* service,
                     return Future<PrepareResponse>::makeReady(
                         {shardId, CommitDecision::kAbort, boost::none, status});
                 });
-        });
-
-    return std::move(f).onError<ErrorCodes::TransactionCoordinatorReachedAbortDecision>(
-        [lsid, txnNumber, shardId](const Status& status) {
-            LOGV2_DEBUG(22480,
-                        3,
-                        "{sessionId}:{txnNumber} Prepare stopped retrying due to retrying "
-                        "being cancelled",
-                        "Prepare stopped retrying due to retrying being cancelled",
-                        "sessionId"_attr = lsid.getId(),
-                        "txnNumber"_attr = txnNumber);
-            return PrepareResponse{shardId,
-                                   boost::none,
-                                   boost::none,
-                                   Status(ErrorCodes::NoSuchTransaction, status.reason())};
         });
 }
 

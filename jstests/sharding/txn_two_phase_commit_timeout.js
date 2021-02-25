@@ -99,6 +99,9 @@ const testCommitProtocol = function(failpointData) {
 
     st.s.getDB(dbName).getCollection(collName).drop();
     clearRawMongoProgramOutput();
+
+    assert.commandWorked(
+        coordPrimary.adminCommand({configureFailPoint: failpointData.failpoint, mode: "off"}));
 };
 
 //
@@ -107,6 +110,8 @@ const testCommitProtocol = function(failpointData) {
 
 testCommitProtocol(getCoordinatorFailpoints().find((data) => data.failpoint ===
                                                        'hangBeforeWritingParticipantList'));
+
+testCommitProtocol({failpoint: "prepareShardFailsWithAbort", numTimesShouldBeHit: 2});
 
 st.stop();
 })();
