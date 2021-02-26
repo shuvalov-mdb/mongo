@@ -601,7 +601,7 @@ Future<PrepareResponse> sendPrepareToShard(ServiceContext* service,
                                            const BSONObj& commandObj,
                                            OperationContextFn operationContextFn) {
     const bool isLocalShard = (shardId == txn::getLocalShardId(service));
-    return txn::doWhile(
+    auto f = txn::doWhile(
         scheduler,
         kExponentialBackoff,
         [](const StatusWith<PrepareResponse>& swPrepareResponse) {
@@ -728,6 +728,21 @@ Future<PrepareResponse> sendPrepareToShard(ServiceContext* service,
                     return Future<PrepareResponse>::makeReady(
                         {shardId, CommitDecision::kAbort, boost::none, status});
                 });
+        });
+
+    return std::move(f).onError<ErrorCodes::TransactionCoordinatorReachedAbortDecision>(
+        [lsid, txnNumber, shardId](const Status& status) {
+            LOGV2_DEBUG(22480,
+                        3,
+                        "{sessionId}:{txnNumber} Prepare stopped retrying due to retrying "
+                        "being cancelled",
+                        "Prepare stopped retrying due to retrying being cancelled",
+                        "sessionId"_attr = lsid.getId(),
+                        "txnNumber"_attr = txnNumber);
+            return PrepareResponse{shardId,
+                                   boost::none,
+                                   boost::none,
+                                   Status(ErrorCodes::NoSuchTransaction, status.reason())};
         });
 }
 
