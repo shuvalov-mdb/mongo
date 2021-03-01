@@ -113,39 +113,38 @@ if (!tenantMigrationTest.isFeatureFlagEnabled()) {
 
 const donorPrimary = tenantMigrationTest.getDonorPrimary();
 const recipientPrimary = tenantMigrationTest.getRecipientPrimary();
-const donorStatsAtStart = tenantMigrationTest.getTenantMigrationStats(donorPrimary);
-const recipientStatsAtStart = tenantMigrationTest.getTenantMigrationStats(recipientPrimary);
 
 const kTenantId = "testDb";
 
 let configDonorsColl = donorPrimary.getCollection(TenantMigrationTest.kConfigDonorsNS);
 
-function testStats(currentMigrationsDonating,
-                   currentMigrationsReceiving,
-                   totalSuccessfulMigrationsDonated,
-                   totalSuccessfulMigrationsReceived,
-                   totalFailedMigrationsDonated,
-                   totalFailedMigrationsReceived) {
-    let donorStats = tenantMigrationTest.getTenantMigrationStats(donorPrimary);
-    assert.lte(currentMigrationsDonating,
-               donorStats.currentMigrationsDonating - donorStatsAtStart.currentMigrationsDonating);
-    assert.lte(totalSuccessfulMigrationsDonated,
-               donorStats.totalSuccessfulMigrationsDonated -
-                   donorStatsAtStart.totalSuccessfulMigrationsDonated);
-    assert.lte(
-        totalFailedMigrationsDonated,
-        donorStats.totalFailedMigrationsDonated - donorStatsAtStart.totalFailedMigrationsDonated);
-
-    let recipientStats = tenantMigrationTest.getTenantMigrationStats(recipientPrimary);
-    assert.lte(currentMigrationsReceiving,
-               recipientStats.currentMigrationsReceiving -
-                   recipientStatsAtStart.currentMigrationsReceiving);
-    assert.lte(totalSuccessfulMigrationsReceived,
-               recipientStats.totalSuccessfulMigrationsReceived -
-                   recipientStatsAtStart.totalSuccessfulMigrationsReceived);
-    assert.lte(totalFailedMigrationsReceived,
-               recipientStats.totalFailedMigrationsReceived -
-                   recipientStatsAtStart.totalFailedMigrationsReceived);
+function testStats(node,
+                    {currentMigrationsDonating = 0,
+                    currentMigrationsReceiving = 0,
+                    totalSuccessfulMigrationsDonated = 0,
+                    totalSuccessfulMigrationsReceived = 0,
+                    totalFailedMigrationsDonated = 0,
+                    totalFailedMigrationsReceived = 0}) {
+    const stats = tenantMigrationTest.getTenantMigrationStats(node);
+    jsTestLog(stats);
+    if (currentMigrationsDonating) {
+        assert.eq(currentMigrationsDonating, stats.currentMigrationsDonating);
+    }
+    if (totalSuccessfulMigrationsDonated) {
+        assert.eq(totalSuccessfulMigrationsDonated, stats.totalSuccessfulMigrationsDonated);
+    }
+    if (totalFailedMigrationsDonated) {
+        assert.eq(totalFailedMigrationsDonated, stats.totalFailedMigrationsDonated);
+    }
+    if (currentMigrationsReceiving) {
+        assert.eq(currentMigrationsReceiving, stats.currentMigrationsReceiving);
+    }
+    if (totalSuccessfulMigrationsReceived) {
+        assert.eq(totalSuccessfulMigrationsReceived, stats.totalSuccessfulMigrationsReceived);
+    }
+    if (totalFailedMigrationsReceived) {
+        assert.eq(totalFailedMigrationsReceived, stats.totalFailedMigrationsReceived);
+    }
 }
 
 (() => {
@@ -183,8 +182,8 @@ function testStats(currentMigrationsDonating,
         donorPrimary.adminCommand({donorForgetMigration: 1, migrationId: migrationId}),
         ErrorCodes.TenantMigrationInProgress);
 
-    // Test the server status stats.
-    testStats(1, 1, 0, 0, 0, 0);
+    testStats(donorPrimary, { currentMigrationsDonating: 1 });
+    testStats(recipientPrimary, { currentMigrationsReceiving: 1 });
 
     // Allow the migration to complete.
     blockingFp.off();
@@ -212,8 +211,8 @@ function testStats(currentMigrationsDonating,
 
     testDonorForgetMigrationAfterMigrationCompletes(donorRst, recipientRst, migrationId, kTenantId);
 
-    // Test the server status stats.
-    testStats(0, 0, 1, 1, 0, 0);
+    testStats(donorPrimary, { totalSuccessfulMigrationsDonated: 1 });
+    testStats(recipientPrimary, { totalSuccessfulMigrationsReceived: 1 });
 })();
 
 (() => {
@@ -224,12 +223,15 @@ function testStats(currentMigrationsDonating,
         tenantId: kTenantId,
     };
 
-    let abortFp =
+    let abortDonorFp =
         configureFailPoint(donorPrimary, "abortTenantMigrationBeforeLeavingBlockingState");
+    let abortRecipientFp =
+        configureFailPoint(recipientPrimary, "fpBeforeFulfillingDataConsistentPromise");
     const stateRes = assert.commandWorked(tenantMigrationTest.runMigration(
         migrationOpts, false /* retryOnRetryableErrors */, false /* automaticForgetMigration */));
     assert.eq(stateRes.state, TenantMigrationTest.DonorState.kAborted);
     abortFp.off();
+    abortRecipientFp.off();
 
     const donorDoc = configDonorsColl.findOne({tenantId: kTenantId});
     const abortOplogEntry = donorPrimary.getDB("local").oplog.rs.findOne(
@@ -253,8 +255,8 @@ function testStats(currentMigrationsDonating,
 
     testDonorForgetMigrationAfterMigrationCompletes(donorRst, recipientRst, migrationId, kTenantId);
 
-    // Test the server status stats. In this case recipient cannot detect a failure.
-    testStats(0, 0, 0, 0, 1, 0);
+    testStats(donorPrimary, { totalFailedMigrationsDonated: 1 });
+    testStats(recipientPrimary, { totalFailedMigrationsReceived: 1 });
 })();
 
 // Drop the TTL index to make sure that the migration state is still available when the

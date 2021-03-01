@@ -1009,7 +1009,7 @@ SemiFuture<void> TenantMigrationDonorService::Instance::run(
                   "tenantId"_attr = _stateDoc.getTenantId(),
                   "status"_attr = status,
                   "abortReason"_attr = _abortReason);
-            if (_abortReason->isOK()) {
+            if (!_abortReason || _abortReason->isOK()) {
                 TenantMigrationStatistics::get(_serviceContext)
                     .incTotalSuccessfulMigrationsDonated();
             } else {

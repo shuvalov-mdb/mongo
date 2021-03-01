@@ -1505,6 +1505,7 @@ void TenantMigrationRecipientService::Instance::_interrupt(Status status,
         invariant(skipWaitingForForgetMigration);
         _stateDocPersistedPromise.setError(status);
         _dataSyncStartedPromise.setError(status);
+    std::cerr<<"!!!! set-error-interrupt "<<status<<std::endl;
         _dataConsistentPromise.setError(status);
         _dataSyncCompletionPromise.setError(status);
 
@@ -1569,6 +1570,8 @@ void TenantMigrationRecipientService::Instance::_cleanupOnDataSyncCompletion(Sta
         invariant(!status.isOK());
         setPromiseErrorifNotReady(lk, _stateDocPersistedPromise, status);
         setPromiseErrorifNotReady(lk, _dataSyncStartedPromise, status);
+    std::cerr<<"!!!! set "<<status<<std::endl;
+    std::cerr<<"!!!! is ready? "<<_dataConsistentPromise.getFuture().isReady()<<std::endl;
         setPromiseErrorifNotReady(lk, _dataConsistentPromise, status);
         setPromiseErrorifNotReady(lk, _dataSyncCompletionPromise, status);
 
@@ -1937,6 +1940,7 @@ SemiFuture<void> TenantMigrationRecipientService::Instance::run(
                                        _stateDoc.getDataConsistentStopDonorOpTime());
 
                        if (!_dataConsistentPromise.getFuture().isReady()) {
+    std::cerr<<"!!!! set doc "<<_stateDoc.toBSON().toString()<<std::endl;
                            _dataConsistentPromise.emplaceValue(
                                _stateDoc.getDataConsistentStopDonorOpTime().get());
                        }
@@ -2112,18 +2116,22 @@ void TenantMigrationRecipientService::Instance::_setMigrationStatsOnCompletion(
     Status completionStatus) const {
     bool success = false;
 
+    std::cerr<<"!!!! stats "<<completionStatus <<std::endl;
     if (completionStatus.isOK()) {
         auto consistentFuture = _dataConsistentPromise.getFuture();
         invariant(consistentFuture.isReady());
         if (consistentFuture.getNoThrow().isOK()) {
+    std::cerr<<"!!!! stats 1 "<<consistentFuture.getNoThrow()<<std::endl;
             success = true;
         }
     } else {
         if (completionStatus.code() != ErrorCodes::TenantMigrationConflict) {
+    std::cerr<<"!!!! stats 2 "<<std::endl;
             return;  // No statistics on stepDown/shutDown.
         }
     }
 
+    std::cerr<<"!!!! stats 3 "<< success<<std::endl;
     if (success) {
         TenantMigrationStatistics::get(_serviceContext).incTotalSuccessfulMigrationsReceived();
     } else {
