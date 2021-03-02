@@ -564,7 +564,7 @@ function TenantMigrationTest({
     };
 
     /**
-     * Returns the TenantMigrationAccessBlocker associated with given the tenantId on the
+     * Returns the TenantMigrationAccessBlocker associated with given tenantId on the
      * node.
      */
     this.getTenantMigrationAccessBlocker = function(node, tenantId) {
@@ -573,8 +573,7 @@ function TenantMigrationTest({
     };
 
     /**
-     * Returns the TenantMigrationStats associated with given the tenantId on the
-     * node.
+     * Returns the TenantMigrationStats on the node.
      */
     this.getTenantMigrationStats = function(node) {
         return assert.commandWorked(node.adminCommand({serverStatus: 1})).tenantMigrations;

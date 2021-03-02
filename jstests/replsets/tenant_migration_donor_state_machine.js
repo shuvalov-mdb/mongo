@@ -20,6 +20,7 @@ load("jstests/replsets/libs/tenant_migration_test.js");
 
 let expectedNumRecipientSyncDataCmdSent = 0;
 let expectedNumRecipientForgetMigrationCmdSent = 0;
+let expectedRecipientSyncDataMetricsFailed = 0;
 
 /**
  * Runs the donorForgetMigration command and asserts that the TenantMigrationAccessBlocker and donor
@@ -216,7 +217,7 @@ function testStats(node,
 })();
 
 (() => {
-    jsTest.log("Test the case where the migration aborts");
+    jsTest.log("Test the case where the migration aborts before recipient syncs data");
     const migrationId = UUID();
     const migrationOpts = {
         migrationIdString: extractUUIDFromObject(migrationId),
@@ -226,7 +227,8 @@ function testStats(node,
     let abortDonorFp =
         configureFailPoint(donorPrimary, "abortTenantMigrationBeforeLeavingBlockingState");
     let abortRecipientFp =
-        configureFailPoint(recipientPrimary, "fpBeforeFulfillingDataConsistentPromise");
+        configureFailPoint(recipientPrimary, "fpBeforeFulfillingDataConsistentPromise",
+        {action: "stop", stopErrorCode: ErrorCodes.InternalError});
     const stateRes = assert.commandWorked(tenantMigrationTest.runMigration(
         migrationOpts, false /* retryOnRetryableErrors */, false /* automaticForgetMigration */));
     assert.eq(stateRes.state, TenantMigrationTest.DonorState.kAborted);
@@ -247,15 +249,58 @@ function testStats(node,
     });
     assert(mtabs[kTenantId].abortOpTime);
 
-    expectedNumRecipientSyncDataCmdSent += 2;
+    expectedRecipientSyncDataMetricsFailed++;
+    expectedNumRecipientSyncDataCmdSent++;
     const recipientSyncDataMetrics =
         recipientPrimary.adminCommand({serverStatus: 1}).metrics.commands.recipientSyncData;
-    assert.eq(recipientSyncDataMetrics.failed, 0);
+    assert.eq(recipientSyncDataMetrics.failed, expectedRecipientSyncDataMetricsFailed);
     assert.eq(recipientSyncDataMetrics.total, expectedNumRecipientSyncDataCmdSent);
 
     testDonorForgetMigrationAfterMigrationCompletes(donorRst, recipientRst, migrationId, kTenantId);
 
     testStats(donorPrimary, { totalFailedMigrationsDonated: 1 });
+    testStats(recipientPrimary, { totalFailedMigrationsReceived: 1 });
+})();
+
+(() => {
+    jsTest.log("Test the case where the migration aborts");
+    const migrationId = UUID();
+    const migrationOpts = {
+        migrationIdString: extractUUIDFromObject(migrationId),
+        tenantId: kTenantId,
+    };
+
+    let abortDonorFp =
+        configureFailPoint(donorPrimary, "abortTenantMigrationBeforeLeavingBlockingState");
+    const stateRes = assert.commandWorked(tenantMigrationTest.runMigration(
+        migrationOpts, false /* retryOnRetryableErrors */, false /* automaticForgetMigration */));
+    assert.eq(stateRes.state, TenantMigrationTest.State.kAborted);
+    abortDonorFp.off();
+
+    const donorDoc = configDonorsColl.findOne({tenantId: kTenantId});
+    const abortOplogEntry = donorPrimary.getDB("local").oplog.rs.findOne(
+        {ns: TenantMigrationTest.kConfigDonorsNS, op: "u", o: donorDoc});
+    assert.eq(donorDoc.state, TenantMigrationTest.State.kAborted);
+    assert.eq(donorDoc.commitOrAbortOpTime.ts, abortOplogEntry.ts);
+    assert.eq(donorDoc.abortReason.code, ErrorCodes.InternalError);
+
+    let mtabs;
+    assert.soon(() => {
+        mtabs = donorPrimary.adminCommand({serverStatus: 1}).tenantMigrationAccessBlocker;
+        return mtabs[kTenantId].state === TenantMigrationTest.AccessState.kAborted;
+    });
+    assert(mtabs[kTenantId].abortOpTime);
+
+    expectedNumRecipientSyncDataCmdSent += 2;
+    const recipientSyncDataMetrics =
+        recipientPrimary.adminCommand({serverStatus: 1}).metrics.commands.recipientSyncData;
+    assert.eq(recipientSyncDataMetrics.failed, expectedRecipientSyncDataMetricsFailed);
+    assert.eq(recipientSyncDataMetrics.total, expectedNumRecipientSyncDataCmdSent);
+
+    testDonorForgetMigrationAfterMigrationCompletes(donorRst, recipientRst, migrationId, kTenantId);
+
+    testStats(donorPrimary, { totalFailedMigrationsDonated: 2 });
+    // The recipient had a chance to synchronize data and from its side the migration succeeded.
     testStats(recipientPrimary, { totalFailedMigrationsReceived: 1 });
 })();
 

@@ -1672,7 +1672,7 @@ SemiFuture<void> TenantMigrationRecipientService::Instance::run(
     std::shared_ptr<executor::ScopedTaskExecutor> executor,
     const CancelationToken& token) noexcept {
     _scopedExecutor = executor;
-    auto runningCounter =
+    auto scopedOutstandingMigrationCounter =
         TenantMigrationStatistics::get(_serviceContext).getScopedOutstandingReceivingCount();
 
     LOGV2(4879607,
@@ -2041,6 +2041,7 @@ SemiFuture<void> TenantMigrationRecipientService::Instance::run(
             }
 
             _cleanupOnDataSyncCompletion(status);
+            _setMigrationStatsOnCompletion(status);
 
             // Handle recipientForgetMigration.
             stdx::lock_guard lk(_mutex);
@@ -2081,7 +2082,7 @@ SemiFuture<void> TenantMigrationRecipientService::Instance::run(
                                                     getOplogBufferNs(getMigrationUUID()));
         })
         .thenRunOn(_recipientService->getInstanceCleanupExecutor())
-        .onCompletion([this, self = shared_from_this(), runningCounter{std::move(runningCounter)}](
+        .onCompletion([this, self = shared_from_this(), scopedCounter{std::move(scopedOutstandingMigrationCounter)}](
                           Status status) {
             // Schedule on the parent executor to mark the completion of the whole chain so this
             // is safe even on shutDown/stepDown.
@@ -2106,7 +2107,6 @@ SemiFuture<void> TenantMigrationRecipientService::Instance::run(
                       "status"_attr = status);
                 setPromiseErrorifNotReady(lk, _taskCompletionPromise, status);
             }
-            _setMigrationStatsOnCompletion(status);
             _taskState.setState(TaskState::kDone);
         })
         .semi();
@@ -2124,10 +2124,11 @@ void TenantMigrationRecipientService::Instance::_setMigrationStatsOnCompletion(
     std::cerr<<"!!!! stats 1 "<<consistentFuture.getNoThrow()<<std::endl;
             success = true;
         }
-    } else {
-        if (completionStatus.code() != ErrorCodes::TenantMigrationConflict) {
-    std::cerr<<"!!!! stats 2 "<<std::endl;
-            return;  // No statistics on stepDown/shutDown.
+    } else if (completionStatus.code() == ErrorCodes::TenantMigrationForgotten) {
+        auto consistentFuture = _dataConsistentPromise.getFuture();
+        if (consistentFuture.isReady() && consistentFuture.getNoThrow().isOK()) {
+    std::cerr<<"!!!! stats 1/2 "<<consistentFuture.getNoThrow()<<std::endl;
+            success = true;
         }
     }
 
