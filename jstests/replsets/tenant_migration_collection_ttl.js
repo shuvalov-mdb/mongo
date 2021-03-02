@@ -61,7 +61,7 @@ const recipientPrimary = recipientRst.getPrimary();
 const timestamp = new ISODate();
 const numDocs = 20;
 
-function loadData() {
+function prepareData() {
     const testData = [];
     for (let i = 0; i < numDocs; ++i) {
         testData.push({_id: i, time: timestamp});
@@ -76,7 +76,7 @@ function prepareDb(ttlTimeoutSeconds = 0) {
     } catch (err) {
         // First time the DB doesn't exist.
     }
-    tenantMigrationTest.insertDonorDB(dbName, collName, loadData());
+    tenantMigrationTest.insertDonorDB(dbName, collName, prepareData());
     // Create TTL index.
     assert.commandWorked(db[collName].createIndex({time: 1},
         {expireAfterSeconds: ttlTimeoutSeconds}));
@@ -88,13 +88,17 @@ function getNumTTLPasses(node) {
     return serverStatus.metrics.ttl.passes;
 }
 
+function waitForOneTtlPassAtNode(node) {
+    // Wait for one TTL pass.
+    let initialTtlCount = getNumTTLPasses(node);
+    assert.soon(() => {
+        return getNumTTLPasses(node) > initialTtlCount;
+    }, "TTLMonitor never did any passes.");
+}
+
 function testRecipientDb() {
     jsTestLog("Test recipient DB");
-    // Wait for one TTL pass.
-    let initialTtlCount = getNumTTLPasses(recipientPrimary);
-    assert.soon(() => {
-        return getNumTTLPasses(recipientPrimary) > initialTtlCount;
-    }, "TTLMonitor never did any passes.");
+    waitForOneTtlPassAtNode(recipientPrimary);
     let db = recipientPrimary.getDB(dbName);
     let found = db[collName].find({}).count();
     jsTest.log(`${found} documents in the recipient collection`);

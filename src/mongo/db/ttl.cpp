@@ -191,6 +191,10 @@ private:
         // Perform a pass for every collection and index described as being TTL.
         for (const auto& [uuid, infos] : ttlInfos) {
             for (const auto& info : infos) {
+                if (std::holds_alternative<TTLCollectionCache::IndexName>(info))
+                    std::cerr<<"!!!! loop "<< std::get<TTLCollectionCache::IndexName>(info) << " in " <<infos <<std::endl;
+                else
+                    std::cerr<<"!!!! loop clustered ID "<< std::endl;
                 // Skip collections that have not been made visible yet. The TTLCollectionCache
                 // already has the index information available, so we want to avoid removing it
                 // until the collection is visible.
@@ -249,7 +253,7 @@ private:
         // be locked and looked up so we double check here.
         if (!coll || coll->uuid() != uuid)
             return;
-         std::cerr << "!!!! spec " << spec << std::endl;
+         std::cerr << "!!!! check ttl " << coll.getNss() << " "<< coll.getDb() << std::endl;
 
         if (MONGO_unlikely(hangTTLMonitorWithLock.shouldFail())) {
             LOGV2(22534, "Hanging due to hangTTLMonitorWithLock fail point");
