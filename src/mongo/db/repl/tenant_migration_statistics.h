@@ -1,5 +1,5 @@
 /**
- *    Copyright (C) 2018-present MongoDB, Inc.
+ *    Copyright (C) 2021-present MongoDB, Inc.
  *
  *    This program is free software: you can redistribute it and/or modify
  *    it under the terms of the Server Side Public License, version 1,
@@ -31,7 +31,6 @@
 
 #include "mongo/db/service_context.h"
 #include "mongo/platform/atomic_word.h"
-#include "mongo/util/decorable.h"
 #include "mongo/util/scopeguard.h"
 
 namespace mongo {
@@ -42,13 +41,13 @@ namespace mongo {
 class TenantMigrationStatistics {
 public:
     TenantMigrationStatistics() = default;
-    static const ServiceContext::Decoration<TenantMigrationStatistics> get;
-
-    std::unique_ptr<ScopeGuard<std::function<void()>>> getScopedOutstandingDonatingCount();
-    std::unique_ptr<ScopeGuard<std::function<void()>>> getScopedOutstandingReceivingCount();
+    static TenantMigrationStatistics* get(ServiceContext* service);
 
     TenantMigrationStatistics(const TenantMigrationStatistics&) = delete;
     TenantMigrationStatistics operator=(const TenantMigrationStatistics&) = delete;
+
+    std::unique_ptr<ScopeGuard<std::function<void()>>> getScopedOutstandingDonatingCount();
+    std::unique_ptr<ScopeGuard<std::function<void()>>> getScopedOutstandingReceivingCount();
 
     void incTotalSuccessfulMigrationsDonated();
     void incTotalSuccessfulMigrationsReceived();
@@ -58,12 +57,12 @@ public:
     void appendInfoForServerStatus(BSONObjBuilder* builder) const;
 
 private:
-    std::atomic<int> _currentMigrationsDonating;
-    std::atomic<int> _currentMigrationsReceiving;
-    std::atomic<int> _totalSuccessfulMigrationsDonated;
-    std::atomic<int> _totalSuccessfulMigrationsReceived;
-    std::atomic<int> _totalFailedMigrationsDonated;
-    std::atomic<int> _totalFailedMigrationsReceived;
+    AtomicWord<int> _currentMigrationsDonating;
+    AtomicWord<int> _currentMigrationsReceiving;
+    AtomicWord<int> _totalSuccessfulMigrationsDonated;
+    AtomicWord<int> _totalSuccessfulMigrationsReceived;
+    AtomicWord<int> _totalFailedMigrationsDonated;
+    AtomicWord<int> _totalFailedMigrationsReceived;
 };
 
 }  // namespace mongo

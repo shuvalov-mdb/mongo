@@ -48,7 +48,7 @@ public:
                             const BSONElement& configElement) const override {
         BSONObjBuilder result;
         TenantMigrationStatistics::get(opCtx->getServiceContext())
-            .appendInfoForServerStatus(&result);
+            ->appendInfoForServerStatus(&result);
         return result.obj();
     }
 } tenantMigrationServerStatus;

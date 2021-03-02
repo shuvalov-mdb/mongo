@@ -119,13 +119,14 @@ const kTenantId = "testDb";
 
 let configDonorsColl = donorPrimary.getCollection(TenantMigrationTest.kConfigDonorsNS);
 
-function testStats(node,
-                    {currentMigrationsDonating = 0,
-                    currentMigrationsReceiving = 0,
-                    totalSuccessfulMigrationsDonated = 0,
-                    totalSuccessfulMigrationsReceived = 0,
-                    totalFailedMigrationsDonated = 0,
-                    totalFailedMigrationsReceived = 0}) {
+function testStats(node, {
+    currentMigrationsDonating = 0,
+    currentMigrationsReceiving = 0,
+    totalSuccessfulMigrationsDonated = 0,
+    totalSuccessfulMigrationsReceived = 0,
+    totalFailedMigrationsDonated = 0,
+    totalFailedMigrationsReceived = 0
+}) {
     const stats = tenantMigrationTest.getTenantMigrationStats(node);
     jsTestLog(stats);
     if (currentMigrationsDonating) {
@@ -183,8 +184,8 @@ function testStats(node,
         donorPrimary.adminCommand({donorForgetMigration: 1, migrationId: migrationId}),
         ErrorCodes.TenantMigrationInProgress);
 
-    testStats(donorPrimary, { currentMigrationsDonating: 1 });
-    testStats(recipientPrimary, { currentMigrationsReceiving: 1 });
+    testStats(donorPrimary, {currentMigrationsDonating: 1});
+    testStats(recipientPrimary, {currentMigrationsReceiving: 1});
 
     // Allow the migration to complete.
     blockingFp.off();
@@ -212,8 +213,8 @@ function testStats(node,
 
     testDonorForgetMigrationAfterMigrationCompletes(donorRst, recipientRst, migrationId, kTenantId);
 
-    testStats(donorPrimary, { totalSuccessfulMigrationsDonated: 1 });
-    testStats(recipientPrimary, { totalSuccessfulMigrationsReceived: 1 });
+    testStats(donorPrimary, {totalSuccessfulMigrationsDonated: 1});
+    testStats(recipientPrimary, {totalSuccessfulMigrationsReceived: 1});
 })();
 
 (() => {
@@ -227,8 +228,9 @@ function testStats(node,
     let abortDonorFp =
         configureFailPoint(donorPrimary, "abortTenantMigrationBeforeLeavingBlockingState");
     let abortRecipientFp =
-        configureFailPoint(recipientPrimary, "fpBeforeFulfillingDataConsistentPromise",
-        {action: "stop", stopErrorCode: ErrorCodes.InternalError});
+        configureFailPoint(recipientPrimary,
+                           "fpBeforeFulfillingDataConsistentPromise",
+                           {action: "stop", stopErrorCode: ErrorCodes.InternalError});
     const stateRes = assert.commandWorked(tenantMigrationTest.runMigration(
         migrationOpts, false /* retryOnRetryableErrors */, false /* automaticForgetMigration */));
     assert.eq(stateRes.state, TenantMigrationTest.DonorState.kAborted);
@@ -258,8 +260,8 @@ function testStats(node,
 
     testDonorForgetMigrationAfterMigrationCompletes(donorRst, recipientRst, migrationId, kTenantId);
 
-    testStats(donorPrimary, { totalFailedMigrationsDonated: 1 });
-    testStats(recipientPrimary, { totalFailedMigrationsReceived: 1 });
+    testStats(donorPrimary, {totalFailedMigrationsDonated: 1});
+    testStats(recipientPrimary, {totalFailedMigrationsReceived: 1});
 })();
 
 (() => {
@@ -299,9 +301,9 @@ function testStats(node,
 
     testDonorForgetMigrationAfterMigrationCompletes(donorRst, recipientRst, migrationId, kTenantId);
 
-    testStats(donorPrimary, { totalFailedMigrationsDonated: 2 });
+    testStats(donorPrimary, {totalFailedMigrationsDonated: 2});
     // The recipient had a chance to synchronize data and from its side the migration succeeded.
-    testStats(recipientPrimary, { totalFailedMigrationsReceived: 1 });
+    testStats(recipientPrimary, {totalFailedMigrationsReceived: 1});
 })();
 
 // Drop the TTL index to make sure that the migration state is still available when the

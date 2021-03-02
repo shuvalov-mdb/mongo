@@ -1505,7 +1505,6 @@ void TenantMigrationRecipientService::Instance::_interrupt(Status status,
         invariant(skipWaitingForForgetMigration);
         _stateDocPersistedPromise.setError(status);
         _dataSyncStartedPromise.setError(status);
-    std::cerr<<"!!!! set-error-interrupt "<<status<<std::endl;
         _dataConsistentPromise.setError(status);
         _dataSyncCompletionPromise.setError(status);
 
@@ -1570,8 +1569,6 @@ void TenantMigrationRecipientService::Instance::_cleanupOnDataSyncCompletion(Sta
         invariant(!status.isOK());
         setPromiseErrorifNotReady(lk, _stateDocPersistedPromise, status);
         setPromiseErrorifNotReady(lk, _dataSyncStartedPromise, status);
-    std::cerr<<"!!!! set "<<status<<std::endl;
-    std::cerr<<"!!!! is ready? "<<_dataConsistentPromise.getFuture().isReady()<<std::endl;
         setPromiseErrorifNotReady(lk, _dataConsistentPromise, status);
         setPromiseErrorifNotReady(lk, _dataSyncCompletionPromise, status);
 
@@ -1673,7 +1670,7 @@ SemiFuture<void> TenantMigrationRecipientService::Instance::run(
     const CancelationToken& token) noexcept {
     _scopedExecutor = executor;
     auto scopedOutstandingMigrationCounter =
-        TenantMigrationStatistics::get(_serviceContext).getScopedOutstandingReceivingCount();
+        TenantMigrationStatistics::get(_serviceContext)->getScopedOutstandingReceivingCount();
 
     LOGV2(4879607,
           "Starting tenant migration recipient instance: ",
@@ -1940,7 +1937,6 @@ SemiFuture<void> TenantMigrationRecipientService::Instance::run(
                                        _stateDoc.getDataConsistentStopDonorOpTime());
 
                        if (!_dataConsistentPromise.getFuture().isReady()) {
-    std::cerr<<"!!!! set doc "<<_stateDoc.toBSON().toString()<<std::endl;
                            _dataConsistentPromise.emplaceValue(
                                _stateDoc.getDataConsistentStopDonorOpTime().get());
                        }
@@ -2082,8 +2078,9 @@ SemiFuture<void> TenantMigrationRecipientService::Instance::run(
                                                     getOplogBufferNs(getMigrationUUID()));
         })
         .thenRunOn(_recipientService->getInstanceCleanupExecutor())
-        .onCompletion([this, self = shared_from_this(), scopedCounter{std::move(scopedOutstandingMigrationCounter)}](
-                          Status status) {
+        .onCompletion([this,
+                       self = shared_from_this(),
+                       scopedCounter{std::move(scopedOutstandingMigrationCounter)}](Status status) {
             // Schedule on the parent executor to mark the completion of the whole chain so this
             // is safe even on shutDown/stepDown.
             stdx::lock_guard lk(_mutex);
@@ -2116,27 +2113,23 @@ void TenantMigrationRecipientService::Instance::_setMigrationStatsOnCompletion(
     Status completionStatus) const {
     bool success = false;
 
-    std::cerr<<"!!!! stats "<<completionStatus <<std::endl;
     if (completionStatus.isOK()) {
         auto consistentFuture = _dataConsistentPromise.getFuture();
         invariant(consistentFuture.isReady());
         if (consistentFuture.getNoThrow().isOK()) {
-    std::cerr<<"!!!! stats 1 "<<consistentFuture.getNoThrow()<<std::endl;
             success = true;
         }
     } else if (completionStatus.code() == ErrorCodes::TenantMigrationForgotten) {
         auto consistentFuture = _dataConsistentPromise.getFuture();
         if (consistentFuture.isReady() && consistentFuture.getNoThrow().isOK()) {
-    std::cerr<<"!!!! stats 1/2 "<<consistentFuture.getNoThrow()<<std::endl;
             success = true;
         }
     }
 
-    std::cerr<<"!!!! stats 3 "<< success<<std::endl;
     if (success) {
-        TenantMigrationStatistics::get(_serviceContext).incTotalSuccessfulMigrationsReceived();
+        TenantMigrationStatistics::get(_serviceContext)->incTotalSuccessfulMigrationsReceived();
     } else {
-        TenantMigrationStatistics::get(_serviceContext).incTotalFailedMigrationsReceived();
+        TenantMigrationStatistics::get(_serviceContext)->incTotalFailedMigrationsReceived();
     }
 }
 

@@ -782,7 +782,7 @@ SemiFuture<void> TenantMigrationDonorService::Instance::run(
     auto recipientTargeterRS = std::make_shared<RemoteCommandTargeterRS>(
         _recipientUri.getSetName(), _recipientUri.getServers());
     auto scopedOutstandingMigrationCounter =
-        TenantMigrationStatistics::get(_serviceContext).getScopedOutstandingDonatingCount();
+        TenantMigrationStatistics::get(_serviceContext)->getScopedOutstandingDonatingCount();
 
     return ExecutorFuture<void>(**executor)
         .then([this, self = shared_from_this(), executor, serviceToken] {
@@ -1010,10 +1010,10 @@ SemiFuture<void> TenantMigrationDonorService::Instance::run(
                   "status"_attr = status,
                   "abortReason"_attr = _abortReason);
             if (_abortReason) {
-                TenantMigrationStatistics::get(_serviceContext).incTotalFailedMigrationsDonated();
+                TenantMigrationStatistics::get(_serviceContext)->incTotalFailedMigrationsDonated();
             } else {
                 TenantMigrationStatistics::get(_serviceContext)
-                    .incTotalSuccessfulMigrationsDonated();
+                    ->incTotalSuccessfulMigrationsDonated();
             }
         })
         .then([this, self = shared_from_this(), executor, recipientTargeterRS, serviceToken] {
@@ -1056,8 +1056,9 @@ SemiFuture<void> TenantMigrationDonorService::Instance::run(
                     return _waitForMajorityWriteConcern(executor, std::move(opTime));
                 });
         })
-        .onCompletion([this, self = shared_from_this(), scopedCounter{std::move(scopedOutstandingMigrationCounter)}](
-                          Status status) {
+        .onCompletion([this,
+                       self = shared_from_this(),
+                       scopedCounter{std::move(scopedOutstandingMigrationCounter)}](Status status) {
             LOGV2(4920400,
                   "Marked migration state as garbage collectable",
                   "migrationId"_attr = _stateDoc.getId(),

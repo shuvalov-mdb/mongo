@@ -1,5 +1,5 @@
 /**
- *    Copyright (C) 2020-present MongoDB, Inc.
+ *    Copyright (C) 2021-present MongoDB, Inc.
  *
  *    This program is free software: you can redistribute it and/or modify
  *    it under the terms of the Server Side Public License, version 1,
@@ -32,37 +32,42 @@
 namespace mongo {
 
 // static
-const ServiceContext::Decoration<TenantMigrationStatistics> TenantMigrationStatistics::get =
+const ServiceContext::Decoration<TenantMigrationStatistics> statisticsDecoration =
     ServiceContext::declareDecoration<TenantMigrationStatistics>();
+
+// static
+TenantMigrationStatistics* TenantMigrationStatistics::get(ServiceContext* service) {
+    return &statisticsDecoration(service);
+}
 
 std::unique_ptr<ScopeGuard<std::function<void()>>>
 TenantMigrationStatistics::getScopedOutstandingDonatingCount() {
-    _currentMigrationsDonating.fetch_add(1, std::memory_order_relaxed);
+    _currentMigrationsDonating.fetchAndAddRelaxed(1);
     return std::make_unique<ScopeGuard<std::function<void()>>>(
-        [this] { _currentMigrationsDonating.fetch_add(-1, std::memory_order_relaxed); });
+        [this] { _currentMigrationsDonating.fetchAndAddRelaxed(-1); });
 }
 
 std::unique_ptr<ScopeGuard<std::function<void()>>>
 TenantMigrationStatistics::getScopedOutstandingReceivingCount() {
-    _currentMigrationsReceiving.fetch_add(1, std::memory_order_relaxed);
+    _currentMigrationsReceiving.fetchAndAddRelaxed(1);
     return std::make_unique<ScopeGuard<std::function<void()>>>(
-        [this] { _currentMigrationsReceiving.fetch_add(-1, std::memory_order_relaxed); });
+        [this] { _currentMigrationsReceiving.fetchAndAddRelaxed(-1); });
 }
 
 void TenantMigrationStatistics::incTotalSuccessfulMigrationsDonated() {
-    _totalSuccessfulMigrationsDonated.fetch_add(1, std::memory_order_relaxed);
+    _totalSuccessfulMigrationsDonated.fetchAndAddRelaxed(1);
 }
 
 void TenantMigrationStatistics::incTotalSuccessfulMigrationsReceived() {
-    _totalSuccessfulMigrationsReceived.fetch_add(1, std::memory_order_relaxed);
+    _totalSuccessfulMigrationsReceived.fetchAndAddRelaxed(1);
 }
 
 void TenantMigrationStatistics::incTotalFailedMigrationsDonated() {
-    _totalFailedMigrationsDonated.fetch_add(1, std::memory_order_relaxed);
+    _totalFailedMigrationsDonated.fetchAndAddRelaxed(1);
 }
 
 void TenantMigrationStatistics::incTotalFailedMigrationsReceived() {
-    _totalFailedMigrationsReceived.fetch_add(1, std::memory_order_relaxed);
+    _totalFailedMigrationsReceived.fetchAndAddRelaxed(1);
 }
 
 void TenantMigrationStatistics::appendInfoForServerStatus(BSONObjBuilder* builder) const {
