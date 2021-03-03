@@ -60,7 +60,6 @@
 #include "mongo/logv2/log.h"
 #include "mongo/util/background.h"
 #include "mongo/util/concurrency/idle_thread_block.h"
-#include "mongo/util/str.h"
 
 namespace mongo {
 
