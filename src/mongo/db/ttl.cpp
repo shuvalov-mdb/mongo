@@ -50,6 +50,7 @@
 #include "mongo/db/ops/insert.h"
 #include "mongo/db/query/internal_plans.h"
 #include "mongo/db/repl/replication_coordinator.h"
+#include "mongo/db/repl/tenant_migration_access_blocker_registry.h"
 #include "mongo/db/service_context.h"
 #include "mongo/db/stats/resource_consumption_metrics.h"
 #include "mongo/db/storage/durable_catalog.h"
@@ -59,6 +60,7 @@
 #include "mongo/logv2/log.h"
 #include "mongo/util/background.h"
 #include "mongo/util/concurrency/idle_thread_block.h"
+#include "mongo/util/str.h"
 
 namespace mongo {
 
@@ -190,10 +192,6 @@ private:
         // Perform a pass for every collection and index described as being TTL.
         for (const auto& [uuid, infos] : ttlInfos) {
             for (const auto& info : infos) {
-                if (std::holds_alternative<TTLCollectionCache::IndexName>(info))
-                    std::cerr<<"!!!! loop "<< std::get<TTLCollectionCache::IndexName>(info) << " in " <<infos <<std::endl;
-                else
-                    std::cerr<<"!!!! loop clustered ID "<< std::endl;
                 // Skip collections that have not been made visible yet. The TTLCollectionCache
                 // already has the index information available, so we want to avoid removing it
                 // until the collection is visible.
@@ -252,7 +250,6 @@ private:
         // be locked and looked up so we double check here.
         if (!coll || coll->uuid() != uuid)
             return;
-         std::cerr << "!!!! check ttl " << coll.getNss() << " "<< coll.getDb() << std::endl;
 
         if (MONGO_unlikely(hangTTLMonitorWithLock.shouldFail())) {
             LOGV2(22534, "Hanging due to hangTTLMonitorWithLock fail point");
@@ -260,6 +257,19 @@ private:
         }
 
         if (!repl::ReplicationCoordinator::get(opCtx)->canAcceptWritesFor(opCtx, nss)) {
+            return;
+        }
+
+        std::shared_ptr<TenantMigrationAccessBlocker> mtab;
+        if (coll.getDb() &&
+            nullptr !=
+                (mtab = TenantMigrationAccessBlockerRegistry::get(opCtx->getServiceContext())
+                            .getTenantMigrationAccessBlockerForDbName(coll.getDb()->name()))) {
+            LOGV2_DEBUG(53768,
+                        1,
+                        "Postpone TTL of DB because of active tenant migration",
+                        "tenantMigrationAccessBlocker"_attr = mtab->getDebugInfo().jsonString(),
+                        "database"_attr = coll.getDb()->name());
             return;
         }
 
