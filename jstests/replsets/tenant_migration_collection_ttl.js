@@ -144,14 +144,12 @@ function testCollectionIsEventuallyEmpty(node) {
 
     assert.commandWorked(tenantMigrationTest.startMigration(migrationOpts));
 
+    let testIsEnabled = true;
     // There is a small chance that TTL happened right during the 'start migration' above.
     if (getNumTTLPasses(donorPrimary) > ttlPassesBeforeMigration) {
         jsTestLog(
             'Test is aborted because of rare race between TTL cycle and starting the migration');
-        tenantMigrationTest.stop();
-        donorRst.stopSet();
-        recipientRst.stopSet();
-        return;
+        testIsEnabled = false;
     }
 
     const stateRes = assert.commandWorked(tenantMigrationTest.waitForMigrationToComplete(
@@ -159,8 +157,10 @@ function testCollectionIsEventuallyEmpty(node) {
     assert.eq(stateRes.state, TenantMigrationTest.State.kAborted);
 
     // Tests that the TTL cleanup was suspended during the tenant migration.
-    testCollectionIsUnchanged(donorPrimary);
-    testCollectionIsUnchanged(recipientPrimary);
+    if (testIsEnabled) {
+        testCollectionIsUnchanged(donorPrimary);
+        testCollectionIsUnchanged(recipientPrimary);
+    }
 
     abortFp.wait();
     abortFp.off();
