@@ -42,6 +42,7 @@
 #include "mongo/db/repl/database_cloner_gen.h"
 #include "mongo/db/repl/repl_server_parameters_gen.h"
 #include "mongo/db/repl/tenant_collection_cloner.h"
+#include "mongo/db/repl/tenant_migration_decoration.h"
 #include "mongo/logv2/log.h"
 #include "mongo/rpc/get_status_from_command_result.h"
 #include "mongo/rpc/metadata/repl_set_metadata.h"
@@ -290,6 +291,8 @@ BaseCloner::AfterStageBehavior TenantCollectionCloner::listIndexesStage() {
 
 BaseCloner::AfterStageBehavior TenantCollectionCloner::createCollectionStage() {
     auto opCtx = cc().makeOperationContext();
+    tenantMigrationRecipientInfo(opCtx.get()) =
+        boost::make_optional<TenantMigrationRecipientInfo>(getSharedData()->getMigrationId());
 
     bool skipCreateIndexes = false;
 

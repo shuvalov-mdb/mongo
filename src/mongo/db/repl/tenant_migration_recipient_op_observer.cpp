@@ -49,11 +49,8 @@ const auto tenantIdToDeleteDecoration =
  * Initializes the TenantMigrationRecipientAccessBlocker for the tenant migration denoted by the
  * given state doc.
  */
-void onFinishCloning(OperationContext* opCtx,
-                     const TenantMigrationRecipientDocument& recipientStateDoc) {
-    invariant(recipientStateDoc.getState() == TenantMigrationRecipientStateEnum::kStarted);
-    invariant(recipientStateDoc.getDataConsistentStopDonorOpTime());
-
+void createAccessBlockerIfNeeded(OperationContext* opCtx,
+                                 const TenantMigrationRecipientDocument& recipientStateDoc) {
     if (tenant_migration_access_blocker::getTenantMigrationRecipientAccessBlocker(
             opCtx->getServiceContext(), recipientStateDoc.getTenantId())) {
         // The migration failed part-way on the recipient with a retryable error, and got retried
@@ -69,6 +66,15 @@ void onFinishCloning(OperationContext* opCtx,
 
     TenantMigrationAccessBlockerRegistry::get(opCtx->getServiceContext())
         .add(recipientStateDoc.getTenantId(), mtab);
+}
+
+/**
+ * Checks invariants at the cloning finish stage.
+ */
+void onFinishCloning(OperationContext* opCtx,
+                     const TenantMigrationRecipientDocument& recipientStateDoc) {
+    invariant(recipientStateDoc.getState() == TenantMigrationRecipientStateEnum::kStarted);
+    invariant(recipientStateDoc.getDataConsistentStopDonorOpTime());
 }
 
 /**
@@ -113,6 +119,7 @@ void TenantMigrationRecipientOpObserver::onUpdate(OperationContext* opCtx,
                 case TenantMigrationRecipientStateEnum::kDone:
                     break;
                 case TenantMigrationRecipientStateEnum::kStarted:
+                    createAccessBlockerIfNeeded(opCtx, recipientStateDoc);
                     if (recipientStateDoc.getDataConsistentStopDonorOpTime()) {
                         onFinishCloning(opCtx, recipientStateDoc);
                     }

@@ -96,6 +96,11 @@ function getNumTTLPasses(node) {
     return serverStatus.metrics.ttl.passes;
 }
 
+function getNumTTLDeletedDocuments(node) {
+    let serverStatus = assert.commandWorked(node.adminCommand({serverStatus: 1}));
+    return serverStatus.metrics.ttl.deletedDocuments;
+}
+
 function waitForOneTtlPassAtNode(node) {
     // Wait for one TTL pass.
     let initialTtlCount = getNumTTLPasses(node);
@@ -159,7 +164,8 @@ function testCollectionIsEventuallyEmpty(node) {
     // Tests that the TTL cleanup was suspended during the tenant migration.
     if (testIsEnabled) {
         testCollectionIsUnchanged(donorPrimary);
-        testCollectionIsUnchanged(recipientPrimary);
+        assert.eq(0, getNumTTLDeletedDocuments(donorPrimary));
+        assert.eq(0, getNumTTLDeletedDocuments(recipientPrimary));
     }
 
     abortFp.wait();
@@ -169,6 +175,11 @@ function testCollectionIsEventuallyEmpty(node) {
     // After the tenant migration is aborted, the TTL cleanup is restored.
     testCollectionIsEventuallyEmpty(donorPrimary);
     testCollectionIsEventuallyEmpty(recipientPrimary);
+
+    // The count of TTL deleted could be 'numDocs + 1' because the state doc is also
+    // deleted by the TTL machinery.
+    assert.gte(getNumTTLDeletedDocuments(donorPrimary), numDocs);
+    assert.gte(getNumTTLDeletedDocuments(recipientPrimary), numDocs);
 })();
 
 tenantMigrationTest.stop();
