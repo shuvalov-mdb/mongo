@@ -48,6 +48,7 @@ namespace {
 
 MONGO_FAIL_POINT_DEFINE(hangWhileTargetingRemoteHost);
 MONGO_FAIL_POINT_DEFINE(hangWhileTargetingLocalHost);
+MONGO_FAIL_POINT_DEFINE(prepareShardFailsWithAbort);
 
 using RemoteCommandCallbackArgs = executor::TaskExecutor::RemoteCommandCallbackArgs;
 using ResponseStatus = executor::TaskExecutor::ResponseStatus;
@@ -80,6 +81,16 @@ Future<executor::TaskExecutor::ResponseStatus> AsyncWorkScheduler::scheduleRemot
     OperationContextFn operationContextFn) {
 
     const bool isSelfShard = (shardId == getLocalShardId(_serviceContext));
+
+    if (MONGO_unlikely(prepareShardFailsWithAbort.shouldFail())) {
+        return PrepareResponse{shardId,
+                                PrepareVote::kAbort,
+                                boost::none,
+                                Status(ErrorCodes::NoSuchTransaction,
+                                        str::stream()
+                                            << "Shard " << shardId
+                                            << " failed with fail injection")};
+    }
 
     if (isSelfShard) {
         // If sending a command to the same shard as this node is in, send it directly to this node

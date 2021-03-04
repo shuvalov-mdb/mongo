@@ -643,15 +643,15 @@ Future<PrepareResponse> sendPrepareToShard(ServiceContext* service,
                         status = wcStatus;
                     }
 
-                    if (MONGO_unlikely(prepareShardFailsWithAbort.shouldFail())) {
-                        return PrepareResponse{shardId,
-                                               PrepareVote::kAbort,
-                                               boost::none,
-                                               Status(ErrorCodes::NoSuchTransaction,
-                                                      str::stream()
-                                                          << "Shard " << shardId
-                                                          << " failed with fail injection")};
-                    }
+                    // if (MONGO_unlikely(prepareShardFailsWithAbort.shouldFail())) {
+                    //     return PrepareResponse{shardId,
+                    //                            PrepareVote::kAbort,
+                    //                            boost::none,
+                    //                            Status(ErrorCodes::NoSuchTransaction,
+                    //                                   str::stream()
+                    //                                       << "Shard " << shardId
+                    //                                       << " failed with fail injection")};
+                    // }
 
                     if (status.isOK()) {
                         auto prepareTimestampField = response.data["prepareTimestamp"];
