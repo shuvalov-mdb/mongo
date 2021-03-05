@@ -46,9 +46,9 @@ namespace mongo {
 namespace txn {
 namespace {
 
+MONGO_FAIL_POINT_DEFINE(failRemoteTransactionCommand);
 MONGO_FAIL_POINT_DEFINE(hangWhileTargetingRemoteHost);
 MONGO_FAIL_POINT_DEFINE(hangWhileTargetingLocalHost);
-MONGO_FAIL_POINT_DEFINE(prepareShardFailsWithAbort);
 
 using RemoteCommandCallbackArgs = executor::TaskExecutor::RemoteCommandCallbackArgs;
 using ResponseStatus = executor::TaskExecutor::ResponseStatus;
@@ -82,14 +82,24 @@ Future<executor::TaskExecutor::ResponseStatus> AsyncWorkScheduler::scheduleRemot
 
     const bool isSelfShard = (shardId == getLocalShardId(_serviceContext));
 
-    if (MONGO_unlikely(prepareShardFailsWithAbort.shouldFail())) {
-        return PrepareResponse{shardId,
-                                PrepareVote::kAbort,
-                                boost::none,
-                                Status(ErrorCodes::NoSuchTransaction,
-                                        str::stream()
-                                            << "Shard " << shardId
-                                            << " failed with fail injection")};
+    int failPointErrorCode = 0;
+    if (MONGO_unlikely(failRemoteTransactionCommand.shouldFail([&](const BSONObj& data) -> bool {
+            invariant(data.hasField("code"));
+            invariant(data.hasField("command"));
+            failPointErrorCode = data.getIntField("code");
+            if (commandObj.hasField(data.getStringField("command"))) {
+                LOGV2_DEBUG(5141702,
+                            1,
+                            "Fail point matched the command and will inject failure",
+                            "shardId"_attr = shardId,
+                            "failData"_attr = data);
+                return true;
+            }
+            return false;
+        }))) {
+        return ResponseStatus{BSON("code" << failPointErrorCode << "ok" << false << "errmsg"
+                                          << "fail point"),
+                              Milliseconds(1)};
     }
 
     if (isSelfShard) {

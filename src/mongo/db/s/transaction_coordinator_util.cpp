@@ -54,7 +54,6 @@ namespace {
 
 MONGO_FAIL_POINT_DEFINE(hangBeforeWritingParticipantList);
 MONGO_FAIL_POINT_DEFINE(hangBeforeSendingPrepare);
-MONGO_FAIL_POINT_DEFINE(prepareShardFailsWithAbort);
 MONGO_FAIL_POINT_DEFINE(hangBeforeWritingDecision);
 MONGO_FAIL_POINT_DEFINE(hangBeforeSendingCommit);
 MONGO_FAIL_POINT_DEFINE(hangBeforeSendingAbort);
@@ -642,16 +641,6 @@ Future<PrepareResponse> sendPrepareToShard(ServiceContext* service,
                     if (!wcStatus.isOK()) {
                         status = wcStatus;
                     }
-
-                    // if (MONGO_unlikely(prepareShardFailsWithAbort.shouldFail())) {
-                    //     return PrepareResponse{shardId,
-                    //                            PrepareVote::kAbort,
-                    //                            boost::none,
-                    //                            Status(ErrorCodes::NoSuchTransaction,
-                    //                                   str::stream()
-                    //                                       << "Shard " << shardId
-                    //                                       << " failed with fail injection")};
-                    // }
 
                     if (status.isOK()) {
                         auto prepareTimestampField = response.data["prepareTimestamp"];

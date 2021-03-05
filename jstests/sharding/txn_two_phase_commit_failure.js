@@ -33,7 +33,7 @@ let participant0 = st.shard0;
 let participant1 = st.shard1;
 let participant2 = st.shard2;
 
-const runCommitThroughMongosInParallelShellExpectAbort = function() {
+const runCommitThroughMongosInParallelShellExpectAbort = function(errorText) {
     const runCommitExpectCode = "assert.commandFailedWithCode(db.adminCommand({" +
         "commitTransaction: 1," +
         "lsid: " + tojson(lsid) + "," +
@@ -41,7 +41,7 @@ const runCommitThroughMongosInParallelShellExpectAbort = function() {
         "stmtId: NumberInt(0)," +
         "autocommit: false," +
         "})," +
-        "ErrorCodes.NoSuchTransaction);";
+        "ErrorCodes." + errorText + ");";
     return startParallelShell(runCommitExpectCode, st.s.port);
 };
 
@@ -74,7 +74,7 @@ const setUp = function() {
     }));
 };
 
-const testCommitProtocol = function(failpointData) {
+const testCommitProtocol = function(failpointData, expectError = "NoSuchTransaction") {
     jsTest.log("Testing commit protocol with failpointData: " + tojson(failpointData));
 
     txnNumber++;
@@ -85,10 +85,11 @@ const testCommitProtocol = function(failpointData) {
     assert.commandWorked(coordPrimary.adminCommand({
         configureFailPoint: failpointData.failpoint,
         mode: {skip: (failpointData.skip ? failpointData.skip : 0)},
+        data: failpointData.options ? failpointData.options : {},
     }));
 
     // Run commitTransaction through a parallel shell.
-    let awaitResult = runCommitThroughMongosInParallelShellExpectAbort();
+    let awaitResult = runCommitThroughMongosInParallelShellExpectAbort(expectError);
 
     awaitResult();
 
@@ -104,13 +105,40 @@ const testCommitProtocol = function(failpointData) {
 };
 
 //
-// Run through all the failpoints.
+// Run through all the failpoints. Each failpoint is targeting different error handling block.
 //
 
+// This triggers timeout in the chain registered in TransactionCoordinator constructor, which throws
+// TransactionCoordinatorReachedAbortDecision caught by the onError() in the same chain.
 testCommitProtocol(getCoordinatorFailpoints().find((data) => data.failpoint ===
                                                        'hangBeforeWritingParticipantList'));
 
-testCommitProtocol({failpoint: "prepareShardFailsWithAbort", numTimesShouldBeHit: 2});
+// This is one of the standard error codes that a transaction shard can generate and is supported by
+// the transaction coordinator directly.
+testCommitProtocol({
+    failpoint: "failRemoteTransactionCommand",
+    numTimesShouldBeHit: 2,
+    options: {command: "prepareTransaction", code: ErrorCodes.NoSuchTransaction}
+});
+
+// Similar to above, except with different error code, which is expected to be propagated to the
+// abort response.
+testCommitProtocol({
+    failpoint: "failRemoteTransactionCommand",
+    numTimesShouldBeHit: 2,
+    options: {command: "prepareTransaction", code: ErrorCodes.TransactionTooOld}
+},
+                   "TransactionTooOld");
+
+// This is one of the non standard error codes from a transaction shard, it is retried by the
+// per-shard retry logic and it is eventually converted into
+// TransactionCoordinatorReachedAbortDecision and is caught by the onError block in the
+// sendPrepareToShard() helper method.
+testCommitProtocol({
+    failpoint: "failRemoteTransactionCommand",
+    numTimesShouldBeHit: 2,
+    options: {command: "prepareTransaction", code: ErrorCodes.CommandNotFound}
+});
 
 st.stop();
 })();
