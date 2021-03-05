@@ -1282,7 +1282,6 @@ env.Library(
     ],
     LIBDEPS=[
         '$BUILD_DIR/mongo/db/commands/server_status',
-        '$BUILD_DIR/mongo/util/future_util',
         "repl_server_parameters",
     ],
     LIBDEPS_PRIVATE=[

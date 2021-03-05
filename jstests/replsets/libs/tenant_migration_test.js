@@ -564,7 +564,7 @@ function TenantMigrationTest({
     };
 
     /**
-     * Returns the TenantMigrationAccessBlocker associated with given tenantId on the
+     * Returns the TenantMigrationAccessBlocker associated with the given tenantId on the
      * node.
      */
     this.getTenantMigrationAccessBlocker = function(node, tenantId) {

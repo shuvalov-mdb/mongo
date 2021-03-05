@@ -485,7 +485,7 @@ public:
 
         /**
          * Increments either 'totalSuccessfulMigrationsReceived' or 'totalFailedMigrationsReceived'
-         * by examining status and promises.
+         * in TenantMigrationStatistics by examining status and promises.
          */
         void _setMigrationStatsOnCompletion(Status completionStatus) const;
 

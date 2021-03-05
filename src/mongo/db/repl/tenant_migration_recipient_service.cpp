@@ -2120,6 +2120,8 @@ void TenantMigrationRecipientService::Instance::_setMigrationStatsOnCompletion(
             success = true;
         }
     } else if (completionStatus.code() == ErrorCodes::TenantMigrationForgotten) {
+        // TenantMigrationForgotten is not an error if the consistent state is already reached, this
+        // code is also sent when the donor considers the migration complete.
         auto consistentFuture = _dataConsistentPromise.getFuture();
         if (consistentFuture.isReady() && consistentFuture.getNoThrow().isOK()) {
             success = true;

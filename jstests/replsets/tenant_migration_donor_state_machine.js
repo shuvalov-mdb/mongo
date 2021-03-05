@@ -129,24 +129,12 @@ function testStats(node, {
 }) {
     const stats = tenantMigrationTest.getTenantMigrationStats(node);
     jsTestLog(stats);
-    if (currentMigrationsDonating) {
-        assert.eq(currentMigrationsDonating, stats.currentMigrationsDonating);
-    }
-    if (totalSuccessfulMigrationsDonated) {
-        assert.eq(totalSuccessfulMigrationsDonated, stats.totalSuccessfulMigrationsDonated);
-    }
-    if (totalFailedMigrationsDonated) {
-        assert.eq(totalFailedMigrationsDonated, stats.totalFailedMigrationsDonated);
-    }
-    if (currentMigrationsReceiving) {
-        assert.eq(currentMigrationsReceiving, stats.currentMigrationsReceiving);
-    }
-    if (totalSuccessfulMigrationsReceived) {
-        assert.eq(totalSuccessfulMigrationsReceived, stats.totalSuccessfulMigrationsReceived);
-    }
-    if (totalFailedMigrationsReceived) {
-        assert.eq(totalFailedMigrationsReceived, stats.totalFailedMigrationsReceived);
-    }
+    assert.eq(currentMigrationsDonating, stats.currentMigrationsDonating);
+    assert.eq(currentMigrationsReceiving, stats.currentMigrationsReceiving);
+    assert.eq(totalSuccessfulMigrationsDonated, stats.totalSuccessfulMigrationsDonated);
+    assert.eq(totalSuccessfulMigrationsReceived, stats.totalSuccessfulMigrationsReceived);
+    assert.eq(totalFailedMigrationsDonated, stats.totalFailedMigrationsDonated);
+    assert.eq(totalFailedMigrationsReceived, stats.totalFailedMigrationsReceived);
 }
 
 (() => {
@@ -218,15 +206,14 @@ function testStats(node, {
 })();
 
 (() => {
-    jsTest.log("Test the case where the migration aborts before recipient syncs data");
+    jsTest.log(
+        "Test the case where the migration aborts after data becomes consistent on the recipient but before setting the consistent promise.");
     const migrationId = UUID();
     const migrationOpts = {
         migrationIdString: extractUUIDFromObject(migrationId),
         tenantId: kTenantId,
     };
 
-    let abortDonorFp =
-        configureFailPoint(donorPrimary, "abortTenantMigrationBeforeLeavingBlockingState");
     let abortRecipientFp =
         configureFailPoint(recipientPrimary,
                            "fpBeforeFulfillingDataConsistentPromise",
@@ -234,7 +221,6 @@ function testStats(node, {
     const stateRes = assert.commandWorked(tenantMigrationTest.runMigration(
         migrationOpts, false /* retryOnRetryableErrors */, false /* automaticForgetMigration */));
     assert.eq(stateRes.state, TenantMigrationTest.DonorState.kAborted);
-    abortFp.off();
     abortRecipientFp.off();
 
     const donorDoc = configDonorsColl.findOne({tenantId: kTenantId});
@@ -260,8 +246,9 @@ function testStats(node, {
 
     testDonorForgetMigrationAfterMigrationCompletes(donorRst, recipientRst, migrationId, kTenantId);
 
-    testStats(donorPrimary, {totalFailedMigrationsDonated: 1});
-    testStats(recipientPrimary, {totalFailedMigrationsReceived: 1});
+    testStats(donorPrimary, {totalSuccessfulMigrationsDonated: 1, totalFailedMigrationsDonated: 1});
+    testStats(recipientPrimary,
+              {totalSuccessfulMigrationsReceived: 1, totalFailedMigrationsReceived: 1});
 })();
 
 (() => {
@@ -282,7 +269,7 @@ function testStats(node, {
     const donorDoc = configDonorsColl.findOne({tenantId: kTenantId});
     const abortOplogEntry = donorPrimary.getDB("local").oplog.rs.findOne(
         {ns: TenantMigrationTest.kConfigDonorsNS, op: "u", o: donorDoc});
-    assert.eq(donorDoc.state, TenantMigrationTest.State.kAborted);
+    assert.eq(donorDoc.state, TenantMigrationTest.DonorState.kAborted);
     assert.eq(donorDoc.commitOrAbortOpTime.ts, abortOplogEntry.ts);
     assert.eq(donorDoc.abortReason.code, ErrorCodes.InternalError);
 
@@ -301,9 +288,10 @@ function testStats(node, {
 
     testDonorForgetMigrationAfterMigrationCompletes(donorRst, recipientRst, migrationId, kTenantId);
 
-    testStats(donorPrimary, {totalFailedMigrationsDonated: 2});
+    testStats(donorPrimary, {totalSuccessfulMigrationsDonated: 1, totalFailedMigrationsDonated: 2});
     // The recipient had a chance to synchronize data and from its side the migration succeeded.
-    testStats(recipientPrimary, {totalFailedMigrationsReceived: 1});
+    testStats(recipientPrimary,
+              {totalSuccessfulMigrationsReceived: 2, totalFailedMigrationsReceived: 1});
 })();
 
 // Drop the TTL index to make sure that the migration state is still available when the

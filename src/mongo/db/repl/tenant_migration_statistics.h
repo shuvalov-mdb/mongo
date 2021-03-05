@@ -57,12 +57,12 @@ public:
     void appendInfoForServerStatus(BSONObjBuilder* builder) const;
 
 private:
-    AtomicWord<int> _currentMigrationsDonating;
-    AtomicWord<int> _currentMigrationsReceiving;
-    AtomicWord<int> _totalSuccessfulMigrationsDonated;
-    AtomicWord<int> _totalSuccessfulMigrationsReceived;
-    AtomicWord<int> _totalFailedMigrationsDonated;
-    AtomicWord<int> _totalFailedMigrationsReceived;
+    AtomicWord<long long> _currentMigrationsDonating;
+    AtomicWord<long long> _currentMigrationsReceiving;
+    AtomicWord<long long> _totalSuccessfulMigrationsDonated;
+    AtomicWord<long long> _totalSuccessfulMigrationsReceived;
+    AtomicWord<long long> _totalFailedMigrationsDonated;
+    AtomicWord<long long> _totalFailedMigrationsReceived;
 };
 
 }  // namespace mongo
