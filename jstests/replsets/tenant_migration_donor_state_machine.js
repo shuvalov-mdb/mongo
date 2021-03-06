@@ -207,7 +207,8 @@ function testStats(node, {
 
 (() => {
     jsTest.log(
-        "Test the case where the migration aborts after data becomes consistent on the recipient but before setting the consistent promise.");
+        "Test the case where the migration aborts after data becomes consistent on the recipient " +
+        "but before setting the consistent promise.");
     const migrationId = UUID();
     const migrationOpts = {
         migrationIdString: extractUUIDFromObject(migrationId),

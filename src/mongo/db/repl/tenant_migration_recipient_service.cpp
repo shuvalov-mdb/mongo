@@ -2113,19 +2113,16 @@ void TenantMigrationRecipientService::Instance::_setMigrationStatsOnCompletion(
     Status completionStatus) const {
     bool success = false;
 
-    if (completionStatus.isOK()) {
-        auto consistentFuture = _dataConsistentPromise.getFuture();
-        invariant(consistentFuture.isReady());
-        if (consistentFuture.getNoThrow().isOK()) {
+    if (completionStatus.code() == ErrorCodes::TenantMigrationForgotten) {
+        // The migration committed if and only if it received recipientForgetMigration after it has
+        // applied data past the returnAfterReachingDonorTimestamp, saved in state doc as
+        // rejectReadsBeforeTimestamp.
+        if (_stateDoc.getRejectReadsBeforeTimestamp().has_value()) {
             success = true;
         }
-    } else if (completionStatus.code() == ErrorCodes::TenantMigrationForgotten) {
-        // TenantMigrationForgotten is not an error if the consistent state is already reached, this
-        // code is also sent when the donor considers the migration complete.
-        auto consistentFuture = _dataConsistentPromise.getFuture();
-        if (consistentFuture.isReady() && consistentFuture.getNoThrow().isOK()) {
-            success = true;
-        }
+    } else if (ErrorCodes::isRetriableError(completionStatus.code())) {
+        // This error might be retried later, avoid to increment stats.
+        return;
     }
 
     if (success) {
