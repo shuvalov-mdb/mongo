@@ -2120,8 +2120,9 @@ void TenantMigrationRecipientService::Instance::_setMigrationStatsOnCompletion(
         if (_stateDoc.getRejectReadsBeforeTimestamp().has_value()) {
             success = true;
         }
-    } else if (ErrorCodes::isRetriableError(completionStatus.code())) {
-        // This error might be retried later, avoid to increment stats.
+    } else if (ErrorCodes::isRetriableError(completionStatus)) {
+        // The migration was interrupted due to shutdown or stepdown, avoid incrementing the count
+        // for failed migrations since the migration will be resumed on stepup.
         return;
     }
 
