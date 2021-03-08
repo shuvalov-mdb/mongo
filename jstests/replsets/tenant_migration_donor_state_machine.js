@@ -277,7 +277,7 @@ function testStats(node, {
     let mtabs;
     assert.soon(() => {
         mtabs = donorPrimary.adminCommand({serverStatus: 1}).tenantMigrationAccessBlocker;
-        return mtabs[kTenantId].state === TenantMigrationTest.AccessState.kAborted;
+        return mtabs[kTenantId].state === TenantMigrationTest.DonorAccessState.kAborted;
     });
     assert(mtabs[kTenantId].abortOpTime);
 
