@@ -264,7 +264,7 @@ function testStats(node, {
         configureFailPoint(donorPrimary, "abortTenantMigrationBeforeLeavingBlockingState");
     const stateRes = assert.commandWorked(tenantMigrationTest.runMigration(
         migrationOpts, false /* retryOnRetryableErrors */, false /* automaticForgetMigration */));
-    assert.eq(stateRes.state, TenantMigrationTest.State.kAborted);
+    assert.eq(stateRes.state, TenantMigrationTest.DonorState.kAborted);
     abortDonorFp.off();
 
     const donorDoc = configDonorsColl.findOne({tenantId: kTenantId});
