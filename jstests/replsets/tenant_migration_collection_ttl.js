@@ -15,36 +15,16 @@ load("jstests/libs/uuid_util.js");
 load("jstests/replsets/libs/tenant_migration_test.js");
 load("jstests/replsets/libs/tenant_migration_util.js");
 
-const kGarbageCollectionDelayMS = 5 * 1000;
-
 const garbageCollectionOpts = {
     // Set the delay before a donor state doc is garbage collected to be short to speed
     // up the test.
-    tenantMigrationGarbageCollectionDelayMS: kGarbageCollectionDelayMS,
+    tenantMigrationGarbageCollectionDelayMS: 5 * 1000,
     // Set the TTL interval large enough to decrease the probability of races.
     ttlMonitorSleepSecs: 5
 };
 
-const donorRst = new ReplSetTest({
-    nodes: [{}, {rsConfig: {priority: 0}}, {rsConfig: {priority: 0}}],
-    name: "TenantMigrationTest_donor",
-    nodeOptions: Object.assign(TenantMigrationUtil.makeX509OptionsForTest().donor,
-                               {setParameter: garbageCollectionOpts})
-});
-donorRst.startSet();
-donorRst.initiateWithHighElectionTimeout();
-
-const recipientRst = new ReplSetTest({
-    nodes: [{}, {rsConfig: {priority: 0}}, {rsConfig: {priority: 0}}],
-    name: "TenantMigrationTest_recipient",
-    nodeOptions: Object.assign(TenantMigrationUtil.makeX509OptionsForTest().recipient,
-                               {setParameter: garbageCollectionOpts})
-});
-recipientRst.startSet();
-recipientRst.initiateWithHighElectionTimeout();
-
-const tenantMigrationTest =
-    new TenantMigrationTest({name: jsTestName(), donorRst: donorRst, recipientRst: recipientRst});
+const tenantMigrationTest = new TenantMigrationTest(
+    {name: jsTestName(), sharedOptions: {setParameter: garbageCollectionOpts}});
 if (!tenantMigrationTest.isFeatureFlagEnabled()) {
     jsTestLog("Skipping test because the tenant migrations feature flag is disabled");
     donorRst.stopSet();
@@ -56,34 +36,24 @@ const tenantId = "testTenantId";
 const dbName = tenantMigrationTest.tenantDB(tenantId, "testDB");
 const collName = "testColl";
 
+const donorRst = tenantMigrationTest.getDonorRst();
+const recipientRst = tenantMigrationTest.getRecipientRst();
 const donorPrimary = donorRst.getPrimary();
 const recipientPrimary = recipientRst.getPrimary();
 
-// Timestamp to use in TTL.
-const timestamp = new ISODate();
 const numDocs = 20;
 
-// Force the donor to preserve all snapshot history to ensure that transactional reads do not fail
-// with TransientTransactionError "Read timestamp is older than the oldest available timestamp".
-donorRst.nodes.forEach(node => {
-    configureFailPoint(node, "WTPreserveSnapshotHistoryIndefinitely");
-});
-
 function prepareData() {
-    const testData = [];
-    for (let i = 0; i < numDocs; ++i) {
-        testData.push({_id: i, time: timestamp});
-    }
-    return testData;
+    // Timestamp to use in TTL.
+    const timestamp = new Date();
+    // This creates an array of tuples.
+    return Array.apply(null, Array(numDocs)).map(function(x, i) {
+        return {_id: i, time: timestamp};
+    });
 }
 
 function prepareDb(ttlTimeoutSeconds = 0) {
     let db = donorPrimary.getDB(dbName);
-    try {
-        db.dropDatabase();
-    } catch (err) {
-        // First time the DB doesn't exist.
-    }
     tenantMigrationTest.insertDonorDB(dbName, collName, prepareData());
     // Create TTL index.
     assert.commandWorked(
@@ -96,36 +66,38 @@ function getNumTTLPasses(node) {
     return serverStatus.metrics.ttl.passes;
 }
 
-function waitForOneTtlPassAtNode(node) {
+function waitForOneTTLPassAtNode(node) {
     // Wait for one TTL pass.
-    let initialTtlCount = getNumTTLPasses(node);
+    let initialTTLCount = getNumTTLPasses(node);
     assert.soon(() => {
-        return getNumTTLPasses(node) > initialTtlCount;
+        return getNumTTLPasses(node) > initialTTLCount;
     }, "TTLMonitor never did any passes.");
 }
 
-function testCollectionIsUnchanged(node) {
-    waitForOneTtlPassAtNode(node);
+function assertTTLNotDeleteExpiredDocs(node) {
     let db = node.getDB(dbName);
-    let found = db[collName].find({}).count();
-    jsTest.log(`${found} documents in the ${node} collection`);
-    assert.eq(numDocs, found);
+    assert.eq(numDocs, db[collName].find({}).count());
 }
 
-function testCollectionIsEventuallyEmpty(node) {
-    waitForOneTtlPassAtNode(node);
+function assertTTLDeleteExpiredDocs(node) {
+    waitForOneTTLPassAtNode(node);
     let db = node.getDB(dbName);
-    let found;
     assert.soon(() => {
-        found = db[collName].find({}).count();
+        let found = db[collName].find({}).count();
         jsTest.log(`${found} documents in the ${node} collection`);
         return found == 0;
     }, `TTL doesn't clean the database at ${node}`);
-    assert.eq(0, found);
 }
 
 (() => {
     jsTest.log("Test that the TTL does not delete documents during tenant migration");
+
+    // Force the donor to preserve all snapshot history to ensure that transactional reads do not
+    // fail with TransientTransactionError "Read timestamp is older than the oldest available
+    // timestamp".
+    donorRst.nodes.forEach(node => {
+        configureFailPoint(node, "WTPreserveSnapshotHistoryIndefinitely");
+    });
 
     const migrationId = UUID();
     const migrationOpts = {
@@ -133,42 +105,42 @@ function testCollectionIsEventuallyEmpty(node) {
         tenantId: tenantId,
         recipientConnString: tenantMigrationTest.getRecipientConnString(),
     };
-    let abortFp =
-        configureFailPoint(donorPrimary, "abortTenantMigrationBeforeLeavingBlockingState", {
-            blockTimeMS: 1000,
-        });
+    let blockFp =
+        configureFailPoint(donorPrimary, "pauseTenantMigrationBeforeLeavingBlockingState");
 
+    waitForOneTTLPassAtNode(donorPrimary);
+    const ttlPassesAtDonorBeforeTest = getNumTTLPasses(donorPrimary);
     prepareDb();
 
-    let ttlPassesBeforeMigration = getNumTTLPasses(donorPrimary);
-
     assert.commandWorked(tenantMigrationTest.startMigration(migrationOpts));
+    // TTL interval should be long enough to avoid any race.
+    assert.eq(ttlPassesAtDonorBeforeTest, getNumTTLPasses(donorPrimary));
 
-    let testIsEnabled = true;
-    // There is a small chance that TTL happened right during the 'start migration' above.
-    if (getNumTTLPasses(donorPrimary) > ttlPassesBeforeMigration) {
-        jsTestLog(
-            'Test is aborted because of rare race between TTL cycle and starting the migration');
-        testIsEnabled = false;
-    }
+    // Tests that the TTL cycle at the donor will not erase any docs.
+    waitForOneTTLPassAtNode(donorPrimary);
+    assertTTLNotDeleteExpiredDocs(donorPrimary);
+    blockFp.wait();
+    blockFp.off();
 
-    const stateRes = assert.commandWorked(tenantMigrationTest.waitForMigrationToComplete(
-        migrationOpts, false /* retryOnRetryableErrors */));
-    assert.eq(stateRes.state, TenantMigrationTest.State.kAborted);
+    const stateRes =
+        assert.commandWorked(tenantMigrationTest.waitForMigrationToComplete(migrationOpts));
+    assert.eq(stateRes.state, TenantMigrationTest.State.kCommitted);
 
     // Tests that the TTL cleanup was suspended during the tenant migration.
-    if (testIsEnabled) {
-        testCollectionIsUnchanged(donorPrimary);
-        testCollectionIsUnchanged(recipientPrimary);
-    }
+    waitForOneTTLPassAtNode(donorPrimary);
+    waitForOneTTLPassAtNode(recipientPrimary);
+    assertTTLNotDeleteExpiredDocs(donorPrimary);
+    assertTTLNotDeleteExpiredDocs(recipientPrimary);
 
-    abortFp.wait();
-    abortFp.off();
     assert.commandWorked(tenantMigrationTest.forgetMigration(migrationOpts.migrationIdString));
 
     // After the tenant migration is aborted, the TTL cleanup is restored.
-    testCollectionIsEventuallyEmpty(donorPrimary);
-    testCollectionIsEventuallyEmpty(recipientPrimary);
+    assertTTLDeleteExpiredDocs(recipientPrimary);
+
+    // Tests that the TTL at donor is still suspended, and thus the collection cleanup
+    // at the recipient side was TTL and not sync.
+    assertTTLNotDeleteExpiredDocs(donorPrimary);
+    assertTTLDeleteExpiredDocs(donorPrimary);
 })();
 
 tenantMigrationTest.stop();

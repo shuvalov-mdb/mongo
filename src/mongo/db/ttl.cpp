@@ -252,7 +252,9 @@ private:
             return;
 
         if (MONGO_unlikely(hangTTLMonitorWithLock.shouldFail())) {
-            LOGV2(22534, "Hanging due to hangTTLMonitorWithLock fail point");
+            LOGV2(22534,
+                  "Hanging due to hangTTLMonitorWithLock fail point",
+                  "ttlPasses"_attr = ttlPasses.get());
             hangTTLMonitorWithLock.pauseWhileSet(opCtx);
         }
 
@@ -264,7 +266,8 @@ private:
         if (coll.getDb() &&
             nullptr !=
                 (mtab = TenantMigrationAccessBlockerRegistry::get(opCtx->getServiceContext())
-                            .getTenantMigrationAccessBlockerForDbName(coll.getDb()->name()))) {
+                            .getTenantMigrationAccessBlockerForDbName(coll.getDb()->name())) &&
+            mtab->checkIfShouldBlockTTL()) {
             LOGV2_DEBUG(53768,
                         1,
                         "Postpone TTL of DB because of active tenant migration",
