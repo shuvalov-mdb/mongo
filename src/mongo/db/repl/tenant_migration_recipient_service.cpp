@@ -2114,6 +2114,16 @@ void TenantMigrationRecipientService::Instance::_setMigrationStatsOnCompletion(
     bool success = false;
 
     if (completionStatus.code() == ErrorCodes::TenantMigrationForgotten) {
+        if (_stateDoc.getExpireAt()) {
+            // Avoid double counting the migration stats if the document was already
+            // made garbage collectable by another node before failover.
+            LOGV2_DEBUG(5426301,
+                        1,
+                        "Avoid double counting tenant migration statistics after failover",
+                        "migrationId"_attr = getMigrationUUID(),
+                        "tenantId"_attr = getTenantId());
+            return;
+        }
         // The migration committed if and only if it received recipientForgetMigration after it has
         // applied data past the returnAfterReachingDonorTimestamp, saved in state doc as
         // rejectReadsBeforeTimestamp.
