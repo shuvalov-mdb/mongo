@@ -68,6 +68,12 @@ public:
     //
     virtual Status checkIfCanBuildIndex() = 0;
 
+    // We suspend TTL deletions at the receiver side to avoid the race when a record is updated at
+    // the donor side the way its TTL is postponed, while the receiver side record is deleted by the
+    // TTL. The donor side update will fail to update on non-existing recipient record. There is no
+    // necessity to suspend TTL at the donor side.
+    virtual bool checkIfShouldBlockTTL() const = 0;
+
     /**
      * If the given opTime is the commit or abort opTime and the completion promise has not been
      * fulfilled, calls _onMajorityCommitCommitOpTime or _onMajorityCommitAbortOpTime to transition
