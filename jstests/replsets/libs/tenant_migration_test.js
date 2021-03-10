@@ -598,7 +598,8 @@ function TenantMigrationTest({
                       stats[statName],
                       `Stat ${statName} value ${stats[statName]} exceeded the target`);
             return false;
-        } assert.soon(() => {
+        };
+        assert.soon(() => {
             const stats = this.getTenantMigrationStats(node);
             if (check(currentMigrationsDonating, stats, "currentMigrationsDonating") &&
                 check(currentMigrationsReceiving, stats, "currentMigrationsReceiving") &&
