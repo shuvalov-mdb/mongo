@@ -30,8 +30,9 @@ const migrationX509Options = TenantMigrationUtil.makeX509OptionsForTest();
  * Runs the donorStartMigration command to start a migration, and interrupts the migration on the
  * recipient using the 'interruptFunc' after the migration starts on the recipient side, and
  * asserts that migration eventually commits.
+ * @param {recipientRestarted} bool is needed to properly assert the tenant migrations stat count.
  */
-function testRecipientSyncDataInterrupt(interruptFunc) {
+function testRecipientSyncDataInterrupt(interruptFunc, recipientRestarted) {
     const recipientRst = new ReplSetTest(
         {nodes: 3, name: "recipientRst", nodeOptions: migrationX509Options.recipient});
     recipientRst.startSet();
@@ -45,7 +46,7 @@ function testRecipientSyncDataInterrupt(interruptFunc) {
     }
     const donorRst = tenantMigrationTest.getDonorRst();
     const donorPrimary = tenantMigrationTest.getDonorPrimary();
-    const recipientPrimary = tenantMigrationTest.getRecipientPrimary();
+    let recipientPrimary = tenantMigrationTest.getRecipientPrimary();
 
     const migrationId = UUID();
     const migrationOpts = {
@@ -79,6 +80,16 @@ function testRecipientSyncDataInterrupt(interruptFunc) {
 
     tenantMigrationTest.awaitTenantMigrationStatsCounts(donorPrimary,
                                                         {totalSuccessfulMigrationsDonated: 1});
+    recipientPrimary = tenantMigrationTest.getRecipientPrimary();  // Could change after interrupt.
+    if (!recipientRestarted) {
+        tenantMigrationTest.awaitTenantMigrationStatsCounts(recipientPrimary,
+                                                            {totalSuccessfulMigrationsReceived: 1});
+    } else {
+        // In full restart the count could be lost completely.
+        const stats = tenantMigrationTest.getTenantMigrationStats(recipientPrimary);
+        assert(1 == stats.totalSuccessfulMigrationsReceived ||
+               0 == stats.totalSuccessfulMigrationsReceived);
+    }
 
     tenantMigrationTest.stop();
     recipientRst.stopSet();
@@ -88,9 +99,8 @@ function testRecipientSyncDataInterrupt(interruptFunc) {
  * Starts a migration and waits for it to commit, then runs the donorForgetMigration, and interrupts
  * the recipient using the 'interruptFunc', and asserts that the migration state is eventually
  * garbage collected.
- * @param {recipientRestarted} bool is needed to properly assert the tenant migrations stat count.
  */
-function testRecipientForgetMigrationInterrupt(interruptFunc, donorRestarted) {
+function testRecipientForgetMigrationInterrupt(interruptFunc) {
     const donorRst = new ReplSetTest({
         nodes: 1,
         name: "donorRst",
@@ -164,11 +174,6 @@ function testRecipientForgetMigrationInterrupt(interruptFunc, donorRestarted) {
 
     tenantMigrationTest.awaitTenantMigrationStatsCounts(donorPrimary,
                                                         {totalSuccessfulMigrationsDonated: 1});
-    if (!donorRestarted) {
-        // In full restart the count could be lost completely.
-        tenantMigrationTest.awaitTenantMigrationStatsCounts(recipientPrimary,
-                                                            {totalSuccessfulMigrationsReceived: 1});
-    }
 
     tenantMigrationTest.stop();
     donorRst.stopSet();
@@ -183,7 +188,7 @@ function testRecipientForgetMigrationInterrupt(interruptFunc, donorRestarted) {
         assert.commandWorked(recipientPrimary.adminCommand(
             {replSetStepDown: ReplSetTest.kForeverSecs, force: true}));
         assert.commandWorked(recipientPrimary.adminCommand({replSetFreeze: 0}));
-    });
+    }, false);
 })();
 
 (() => {
@@ -191,7 +196,7 @@ function testRecipientForgetMigrationInterrupt(interruptFunc, donorRestarted) {
     testRecipientSyncDataInterrupt((recipientRst) => {
         recipientRst.stopSet(null /* signal */, true /*forRestart */);
         recipientRst.startSet({restart: true});
-    });
+    }, true);
 })();
 
 (() => {
@@ -202,7 +207,7 @@ function testRecipientForgetMigrationInterrupt(interruptFunc, donorRestarted) {
         assert.commandWorked(recipientPrimary.adminCommand(
             {replSetStepDown: ReplSetTest.kForeverSecs, force: true}));
         assert.commandWorked(recipientPrimary.adminCommand({replSetFreeze: 0}));
-    }, false);
+    });
 })();
 
 (() => {
@@ -210,6 +215,6 @@ function testRecipientForgetMigrationInterrupt(interruptFunc, donorRestarted) {
     testRecipientForgetMigrationInterrupt((recipientRst) => {
         recipientRst.stopSet(null /* signal */, true /*forRestart */);
         recipientRst.startSet({restart: true});
-    }, true);
+    });
 })();
 })();

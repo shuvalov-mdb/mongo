@@ -2123,12 +2123,6 @@ void TenantMigrationRecipientService::Instance::_setMigrationStatsOnCompletion(
         // rejectReadsBeforeTimestamp.
         if (_stateDoc.getRejectReadsBeforeTimestamp().has_value()) {
             success = true;
-        } else {
-            LOGV2(5426303,
-                  "Tenant migration is considered failed because it never applied all data up to "
-                  "the timestamp received from donor",
-                  "migrationId"_attr = getMigrationUUID(),
-                  "tenantId"_attr = getTenantId());
         }
     } else if (ErrorCodes::isRetriableError(completionStatus)) {
         // The migration was interrupted due to shutdown or stepdown, avoid incrementing the count

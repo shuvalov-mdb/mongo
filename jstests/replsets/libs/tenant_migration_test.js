@@ -580,7 +580,7 @@ function TenantMigrationTest({
     };
 
     /**
-     * Awaits the condition when every stats counter reaches at least the specified count.
+     * Awaits the condition when every stats counter reaches the specified count.
      */
     this.awaitTenantMigrationStatsCounts = function(node, {
         currentMigrationsDonating = 0,
@@ -590,19 +590,29 @@ function TenantMigrationTest({
         totalFailedMigrationsDonated = 0,
         totalFailedMigrationsReceived = 0
     }) {
-        assert.soon(() => {
-            const stats = this.getTenantMigrationStats(node);
-            if (currentMigrationsDonating > stats.currentMigrationsDonating ||
-                currentMigrationsReceiving > stats.currentMigrationsReceiving ||
-                totalSuccessfulMigrationsDonated > stats.totalSuccessfulMigrationsDonated ||
-                totalSuccessfulMigrationsReceived > stats.totalSuccessfulMigrationsReceived ||
-                totalFailedMigrationsDonated > stats.totalFailedMigrationsDonated ||
-                totalFailedMigrationsReceived > stats.totalFailedMigrationsReceived) {
-                jsTestLog(
-                    `Awaiting for tenant migration stats to reach target, got ${tojson(stats)}`);
-                return false;
+        const check = function(param, stats, statName) {
+            if (param == stats[statName]) {
+                return true;  // Condition reached, true means the counter reached the target.
             }
-            return true;
+            assert.gt(param,
+                      stats[statName],
+                      `Stat ${statName} value ${stats[statName]} exceeded the target`);
+            return false;
+        } assert.soon(() => {
+            const stats = this.getTenantMigrationStats(node);
+            if (check(currentMigrationsDonating, stats, "currentMigrationsDonating") &&
+                check(currentMigrationsReceiving, stats, "currentMigrationsReceiving") &&
+                check(
+                    totalSuccessfulMigrationsDonated, stats, "totalSuccessfulMigrationsDonated") &&
+                check(totalSuccessfulMigrationsReceived,
+                      stats,
+                      "totalSuccessfulMigrationsReceived") &&
+                check(totalFailedMigrationsDonated, stats, "totalFailedMigrationsDonated") &&
+                check(totalFailedMigrationsReceived, stats, "totalFailedMigrationsReceived")) {
+                return true;  // Done.
+            }
+            jsTestLog(`Awaiting for tenant migration stats to reach target, got ${tojson(stats)}`);
+            return false;
         });
     };
 

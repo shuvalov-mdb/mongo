@@ -51,7 +51,7 @@ function testDonorStartMigrationInterrupt(interruptFunc, donorRestarted) {
         donorRst.stopSet();
         return;
     }
-    const donorPrimary = tenantMigrationTest.getDonorPrimary();
+    let donorPrimary = tenantMigrationTest.getDonorPrimary();
     const recipientPrimary = tenantMigrationTest.getRecipientPrimary();
 
     const migrationId = UUID();
@@ -83,6 +83,7 @@ function testDonorStartMigrationInterrupt(interruptFunc, donorRestarted) {
                                                       TenantMigrationTest.DonorState.kCommitted);
     assert.commandWorked(tenantMigrationTest.forgetMigration(migrationOpts.migrationIdString));
 
+    donorPrimary = tenantMigrationTest.getDonorPrimary();  // Could change after interrupt.
     const donorStats = tenantMigrationTest.getTenantMigrationStats(donorPrimary);
     jsTestLog(`Stats at the donor primary: ${tojson(donorStats)}`);
     if (donorRestarted) {
@@ -91,7 +92,8 @@ function testDonorStartMigrationInterrupt(interruptFunc, donorRestarted) {
     } else {
         assert.eq(1, donorStats.totalSuccessfulMigrationsDonated);
     }
-    // Recipient side migration always fails blocked on TODO above.
+    // Recipient side migration always fails because of 'returnResponseOkForRecipientSyncDataCmd'
+    // failpoint.
 
     tenantMigrationTest.stop();
     donorRst.stopSet();

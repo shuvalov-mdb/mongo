@@ -66,10 +66,8 @@ function testDonorStartMigrationInterrupt(interruptFunc, verifyCmdResponseFunc) 
  * Starts a migration and waits for it to commit, then runs the donorForgetMigration, and interrupts
  * the donor using the 'interruptFunc', and verifies the command response using the
  * 'verifyCmdResponseFunc'.
- * @param {donorRestarted} bool is needed to properly assert the tenant migrations stat count.
- *    When false, the Replica Set restart may completely discard the counter
  */
-function testDonorForgetMigrationInterrupt(interruptFunc, verifyCmdResponseFunc, donorRestarted) {
+function testDonorForgetMigrationInterrupt(interruptFunc, verifyCmdResponseFunc) {
     const tenantMigrationTest = new TenantMigrationTest({name: jsTestName()});
     if (!tenantMigrationTest.isFeatureFlagEnabled()) {
         jsTestLog("Skipping test because the tenant migrations feature flag is disabled");
@@ -105,14 +103,6 @@ function testDonorForgetMigrationInterrupt(interruptFunc, verifyCmdResponseFunc,
     sleep(Math.random() * kMaxSleepTimeMS);
     interruptFunc(donorRst, migrationId, migrationOpts.tenantId);
     verifyCmdResponseFunc(forgetMigrationThread);
-
-    // If full restart happened the count could be lost completely.
-    if (!donorRestarted) {
-        tenantMigrationTest.awaitTenantMigrationStatsCounts(donorPrimary,
-                                                            {totalSuccessfulMigrationsDonated: 1});
-    }
-    tenantMigrationTest.awaitTenantMigrationStatsCounts(recipientPrimary,
-                                                        {totalSuccessfulMigrationsReceived: 1});
 
     tenantMigrationTest.stop();
 }
@@ -211,7 +201,7 @@ function assertCmdSucceededOrInterruptedDueToShutDown(cmdThread) {
     testDonorForgetMigrationInterrupt((donorRst) => {
         assert.commandWorked(
             donorRst.getPrimary().adminCommand({replSetStepDown: 1000, force: true}));
-    }, assertCmdSucceededOrInterruptedDueToStepDown, false);
+    }, assertCmdSucceededOrInterruptedDueToStepDown);
 })();
 
 (() => {
@@ -219,7 +209,7 @@ function assertCmdSucceededOrInterruptedDueToShutDown(cmdThread) {
     testDonorForgetMigrationInterrupt((donorRst) => {
         donorRst.stopSet();
         donorRst.startSet({restart: true});
-    }, assertCmdSucceededOrInterruptedDueToShutDown, true);
+    }, assertCmdSucceededOrInterruptedDueToShutDown);
 })();
 
 (() => {
