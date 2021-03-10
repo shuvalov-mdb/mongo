@@ -1009,16 +1009,6 @@ SemiFuture<void> TenantMigrationDonorService::Instance::run(
                   "tenantId"_attr = _stateDoc.getTenantId(),
                   "status"_attr = status,
                   "abortReason"_attr = _abortReason);
-            if (!_stateDoc.getExpireAt()) {
-                // Avoid double counting tenant migration statistics after failover.
-                if (_abortReason) {
-                    TenantMigrationStatistics::get(_serviceContext)
-                        ->incTotalFailedMigrationsDonated();
-                } else {
-                    TenantMigrationStatistics::get(_serviceContext)
-                        ->incTotalSuccessfulMigrationsDonated();
-                }
-            }
         })
         .then([this, self = shared_from_this(), executor, recipientTargeterRS, serviceToken] {
             if (_stateDoc.getExpireAt()) {
@@ -1054,6 +1044,15 @@ SemiFuture<void> TenantMigrationDonorService::Instance::run(
                         serviceToken);
                 })
                 .then([this, self = shared_from_this(), executor, serviceToken] {
+                    // To reduce the probability of double counting, we should increment stats
+                    // right before marking the state doc garbage collectable.
+                    if (_abortReason) {
+                        TenantMigrationStatistics::get(_serviceContext)
+                            ->incTotalFailedMigrationsDonated();
+                    } else {
+                        TenantMigrationStatistics::get(_serviceContext)
+                            ->incTotalSuccessfulMigrationsDonated();
+                    }
                     return _markStateDocAsGarbageCollectable(executor, serviceToken);
                 })
                 .then([this, self = shared_from_this(), executor](repl::OpTime opTime) {
