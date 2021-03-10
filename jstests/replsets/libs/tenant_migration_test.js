@@ -582,15 +582,14 @@ function TenantMigrationTest({
     /**
      * Awaits the condition when every stats counter reaches at least the specified count.
      */
-    this.awaitTenantMigrationStatsCounts =
-        function(node, {
-            currentMigrationsDonating = 0,
-            currentMigrationsReceiving = 0,
-            totalSuccessfulMigrationsDonated = 0,
-            totalSuccessfulMigrationsReceived = 0,
-            totalFailedMigrationsDonated = 0,
-            totalFailedMigrationsReceived = 0
-        }) {
+    this.awaitTenantMigrationStatsCounts = function(node, {
+        currentMigrationsDonating = 0,
+        currentMigrationsReceiving = 0,
+        totalSuccessfulMigrationsDonated = 0,
+        totalSuccessfulMigrationsReceived = 0,
+        totalFailedMigrationsDonated = 0,
+        totalFailedMigrationsReceived = 0
+    }) {
         assert.soon(() => {
             const stats = this.getTenantMigrationStats(node);
             if (currentMigrationsDonating > stats.currentMigrationsDonating ||
@@ -605,12 +604,12 @@ function TenantMigrationTest({
             }
             return true;
         });
-    }
+    };
 
-        /**
-         * Returns the donor ReplSetTest.
-         */
-        this.getDonorRst = function() {
+    /**
+     * Returns the donor ReplSetTest.
+     */
+    this.getDonorRst = function() {
         return donorRst;
     };
 
