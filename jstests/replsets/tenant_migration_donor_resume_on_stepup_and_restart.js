@@ -36,7 +36,7 @@ const migrationX509Options = TenantMigrationUtil.makeX509OptionsForTest();
  * Runs the donorStartMigration command to start a migration, and interrupts the migration on the
  * donor using the 'interruptFunc', and asserts that migration eventually commits.
  */
-function testDonorStartMigrationInterrupt(interruptFunc) {
+function testDonorStartMigrationInterrupt(interruptFunc, donorRestarted) {
     const donorRst =
         new ReplSetTest({nodes: 3, name: "donorRst", nodeOptions: migrationX509Options.donor});
 
@@ -52,6 +52,7 @@ function testDonorStartMigrationInterrupt(interruptFunc) {
         return;
     }
     const donorPrimary = tenantMigrationTest.getDonorPrimary();
+    const recipientPrimary = tenantMigrationTest.getRecipientPrimary();
 
     const migrationId = UUID();
     const migrationOpts = {
@@ -81,6 +82,16 @@ function testDonorStartMigrationInterrupt(interruptFunc) {
                                                       migrationOpts.tenantId,
                                                       TenantMigrationTest.DonorState.kCommitted);
     assert.commandWorked(tenantMigrationTest.forgetMigration(migrationOpts.migrationIdString));
+
+    const donorStats = tenantMigrationTest.getTenantMigrationStats(donorPrimary);
+    jsTestLog(`Stats at the donor primary: ${tojson(donorStats)}`);
+    if (donorRestarted) {
+        // If full restart happened the count could be lost completely.
+        assert.gte(1, donorStats.totalSuccessfulMigrationsDonated);
+    } else {
+        assert.eq(1, donorStats.totalSuccessfulMigrationsDonated);
+    }
+    // Recipient side migration always fails blocked on TODO above.
 
     tenantMigrationTest.stop();
     donorRst.stopSet();
@@ -377,7 +388,7 @@ function testStateDocPersistenceOnFailover(interruptFunc, fpName, isShutdown = f
         assert.commandWorked(
             donorPrimary.adminCommand({replSetStepDown: ReplSetTest.kForeverSecs, force: true}));
         assert.commandWorked(donorPrimary.adminCommand({replSetFreeze: 0}));
-    });
+    }, false /* donor restarted */);
 })();
 
 (() => {
@@ -385,7 +396,7 @@ function testStateDocPersistenceOnFailover(interruptFunc, fpName, isShutdown = f
     testDonorStartMigrationInterrupt((donorRst) => {
         donorRst.stopSet(null /* signal */, true /*forRestart */);
         donorRst.startSet({restart: true});
-    });
+    }, true /* donor restarted */);
 })();
 
 (() => {

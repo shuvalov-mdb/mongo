@@ -2115,13 +2115,7 @@ void TenantMigrationRecipientService::Instance::_setMigrationStatsOnCompletion(
 
     if (completionStatus.code() == ErrorCodes::TenantMigrationForgotten) {
         if (_stateDoc.getExpireAt()) {
-            // Avoid double counting the migration stats if the document was already
-            // made garbage collectable by another node before failover.
-            LOGV2_DEBUG(5426301,
-                        1,
-                        "Avoid double counting tenant migration statistics after failover",
-                        "migrationId"_attr = getMigrationUUID(),
-                        "tenantId"_attr = getTenantId());
+            // Avoid double counting tenant migration statistics after failover.
             return;
         }
         // The migration committed if and only if it received recipientForgetMigration after it has
@@ -2129,6 +2123,12 @@ void TenantMigrationRecipientService::Instance::_setMigrationStatsOnCompletion(
         // rejectReadsBeforeTimestamp.
         if (_stateDoc.getRejectReadsBeforeTimestamp().has_value()) {
             success = true;
+        } else {
+            LOGV2(5426303,
+                  "Tenant migration is considered failed because it never applied all data up to "
+                  "the timestamp received from donor",
+                  "migrationId"_attr = getMigrationUUID(),
+                  "tenantId"_attr = getTenantId());
         }
     } else if (ErrorCodes::isRetriableError(completionStatus)) {
         // The migration was interrupted due to shutdown or stepdown, avoid incrementing the count

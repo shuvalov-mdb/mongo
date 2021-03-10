@@ -1010,6 +1010,7 @@ SemiFuture<void> TenantMigrationDonorService::Instance::run(
                   "status"_attr = status,
                   "abortReason"_attr = _abortReason);
             if (!_stateDoc.getExpireAt()) {
+                // Avoid double counting tenant migration statistics after failover.
                 if (_abortReason) {
                     TenantMigrationStatistics::get(_serviceContext)
                         ->incTotalFailedMigrationsDonated();
@@ -1017,12 +1018,6 @@ SemiFuture<void> TenantMigrationDonorService::Instance::run(
                     TenantMigrationStatistics::get(_serviceContext)
                         ->incTotalSuccessfulMigrationsDonated();
                 }
-            } else {
-                LOGV2_DEBUG(5426302,
-                            1,
-                            "Avoid double counting tenant migration statistics after failover",
-                            "migrationId"_attr = _stateDoc.getId(),
-                            "tenantId"_attr = _stateDoc.getTenantId());
             }
         })
         .then([this, self = shared_from_this(), executor, recipientTargeterRS, serviceToken] {

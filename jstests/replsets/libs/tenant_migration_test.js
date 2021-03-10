@@ -580,6 +580,34 @@ function TenantMigrationTest({
     };
 
     /**
+     * Awaits the condition when every stats counter reaches at least the specified count.
+     */
+    this.awaitTenantMigrationStatsCounts =
+        function(node, {
+            currentMigrationsDonating = 0,
+            currentMigrationsReceiving = 0,
+            totalSuccessfulMigrationsDonated = 0,
+            totalSuccessfulMigrationsReceived = 0,
+            totalFailedMigrationsDonated = 0,
+            totalFailedMigrationsReceived = 0
+        }) {
+        assert.soon(() => {
+            const stats = this.getTenantMigrationStats(node);
+            if (currentMigrationsDonating > stats.currentMigrationsDonating ||
+                currentMigrationsReceiving > stats.currentMigrationsReceiving ||
+                totalSuccessfulMigrationsDonated > stats.totalSuccessfulMigrationsDonated ||
+                totalSuccessfulMigrationsReceived > stats.totalSuccessfulMigrationsReceived ||
+                totalFailedMigrationsDonated > stats.totalFailedMigrationsDonated ||
+                totalFailedMigrationsReceived > stats.totalFailedMigrationsReceived) {
+                jsTestLog(
+                    `Awaiting for tenant migration stats to reach target, got ${tojson(stats)}`);
+                return false;
+            }
+            return true;
+        });
+    }
+
+    /**
      * Returns the donor ReplSetTest.
      */
     this.getDonorRst = function() {
