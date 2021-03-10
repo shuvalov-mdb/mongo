@@ -607,10 +607,10 @@ function TenantMigrationTest({
         });
     }
 
-    /**
-     * Returns the donor ReplSetTest.
-     */
-    this.getDonorRst = function() {
+        /**
+         * Returns the donor ReplSetTest.
+         */
+        this.getDonorRst = function() {
         return donorRst;
     };
 
